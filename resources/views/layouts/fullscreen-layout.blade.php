@@ -108,6 +108,17 @@ window.addEventListener('resize', checkMobile);">
     <x-common.preloader/>
     {{-- preloader end --}}
 
+    @if (session('success') || session('error'))
+        <x-common.toast-stack class="top-4 right-4">
+            @if (session('success'))
+                <x-common.toast type="success" title="Signed in successfully" :message="session('success')" />
+            @endif
+            @if (session('error'))
+                <x-common.toast type="error" title="Sign-in failed" :message="session('error')" />
+            @endif
+        </x-common.toast-stack>
+    @endif
+
     @yield('content')
 
 </body>
