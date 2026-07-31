@@ -111,7 +111,7 @@ class MenuHelper
         return match ($roleKey) {
             'administrator' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/admin/dashboard'],
-                ['icon' => 'user-profile', 'name' => 'User Management', 'path' => '/users'],
+                ['icon' => 'user-profile', 'name' => 'User Management', 'path' => '/admin/users-management'],
                 ['icon' => 'dashboard', 'name' => 'Inventory Overview', 'path' => '/inventory'],
                 ['icon' => 'dashboard', 'name' => 'Transaction Overview', 'path' => '/transactions'],
                 ['icon' => 'dashboard', 'name' => 'Reports', 'path' => '/reports'],

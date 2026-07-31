@@ -29,6 +29,16 @@ return new class extends Migration
             });
         }
 
+        if (!Schema::hasColumn('users', 'email')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->string('email')->nullable();
+            });
+        } else {
+            Schema::table('users', function (Blueprint $table) {
+                $table->string('email')->nullable()->change();
+            });
+        }
+
         if (!Schema::hasColumn('users', 'status')) {
             Schema::table('users', function (Blueprint $table) {
                 $table->enum('status', ['active', 'inactive'])->default('active');
