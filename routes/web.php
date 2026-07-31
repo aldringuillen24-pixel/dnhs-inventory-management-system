@@ -38,8 +38,14 @@ Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.
     Route::post('/users-management/export-slips', [UserController::class, 'exportSlips'])->name('users-management.export-slips');
 
     Route::post('/store-user', [UserController::class, 'store'])->name('users-management.store');
+   
     Route::post('/users-management/generate-users', [UserController::class, 'generateUsers'])->name('users-management.generate-users');
+   
     Route::patch('/users-management/{user}', [UserController::class, 'update'])->name('users-management.update');
+
+    Route::get('/profile', function () {
+        return view('pages.administrator.profile', ['title' => 'Profile']);
+    })->name('profile');
 
     Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 });
