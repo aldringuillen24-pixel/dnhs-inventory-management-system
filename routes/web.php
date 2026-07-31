@@ -13,7 +13,7 @@ use App\Models\User;
 // Authentication Routes
 Route::get('/signin', function () {
     return view('components.auth.signin', ['title' => 'Sign In'])->with('success', session('success'))->with('error', session('error'));
-})->name('signin');
+})->name('login');
 
 Route::post('/signin', [LoginController::class, 'login'])->name('signin.post');
 
@@ -33,11 +33,13 @@ Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.
         return view('pages.administrator.dashboard', ['title' => 'Admin Dashboard']);
     })->name('dashboard');
 
-    Route::get('/users-management', function () {
-        return view('pages.administrator.users-management', ['title' => 'User Management']);
-    })->name('users-management');
+    Route::get('/users-management', [UserController::class, 'index'])->name('users-management');
+
+    Route::post('/users-management/export-slips', [UserController::class, 'exportSlips'])->name('users-management.export-slips');
 
     Route::post('/store-user', [UserController::class, 'store'])->name('users-management.store');
+    Route::post('/users-management/generate-users', [UserController::class, 'generateUsers'])->name('users-management.generate-users');
+    Route::patch('/users-management/{user}', [UserController::class, 'update'])->name('users-management.update');
 
     Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 });
