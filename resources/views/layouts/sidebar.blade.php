@@ -1,7 +1,13 @@
 
 @php
     use App\Helpers\MenuHelper;
-    $menuGroups = MenuHelper::getMenuGroups();
+
+    $roleName = null;
+    if (auth()->check() && auth()->user()->role) {
+        $roleName = auth()->user()->role->role_name;
+    }
+
+    $menuGroups = MenuHelper::getMenuGroups($roleName);
 
     // Get current path
     $currentPath = request()->path();
@@ -58,6 +64,7 @@
     }"
     @mouseenter="if (!$store.sidebar.isExpanded) $store.sidebar.setHovered(true)"
     @mouseleave="$store.sidebar.setHovered(false)">
+
     <!-- Logo Section -->
     <div class="pt-8 pb-7 flex"
         :class="(!$store.sidebar.isExpanded && !$store.sidebar.isHovered && !$store.sidebar.isMobileOpen) ?
@@ -101,6 +108,7 @@
                             @foreach ($menuGroup['items'] as $itemIndex => $item)
                                 <li>
                                     @if (isset($item['subItems']))
+                                    
                                         <!-- Menu Item with Submenu -->
                                         <button @click="toggleSubmenu({{ $groupIndex }}, {{ $itemIndex }})"
                                             class="menu-item group w-full"
@@ -216,11 +224,6 @@
                 @endforeach
             </div>
         </nav>
-
-        <!-- Sidebar Widget -->
-        <div x-data x-show="$store.sidebar.isExpanded || $store.sidebar.isHovered || $store.sidebar.isMobileOpen" x-transition class="mt-auto">
-            @include('layouts.sidebar-widget')
-        </div>
 
     </div>
 </aside>

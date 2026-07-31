@@ -10,9 +10,7 @@ class MenuHelper
             [
                 'icon' => 'dashboard',
                 'name' => 'Dashboard',
-                'subItems' => [
-                    ['name' => 'Ecommerce', 'path' => '/'],
-                ],
+                'path' => 'dashboard',
             ],
             [
                 'icon' => 'calendar',
@@ -83,8 +81,17 @@ class MenuHelper
         ];
     }
 
-    public static function getMenuGroups()
+    public static function getMenuGroups($roleName = null)
     {
+        if (is_string($roleName) && trim($roleName) !== '') {
+            return [
+                [
+                    'title' => 'Menu',
+                    'items' => self::getMenuItemsForRole($roleName),
+                ],
+            ];
+        }
+
         return [
             [
                 'title' => 'Menu',
@@ -95,6 +102,54 @@ class MenuHelper
                 'items' => self::getOthersItems()
             ]
         ];
+    }
+
+    protected static function getMenuItemsForRole($roleName)
+    {
+        $roleKey = strtolower(trim($roleName));
+
+        return match ($roleKey) {
+            'administrator' => [
+                ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/admin/dashboard'],
+                ['icon' => 'user-profile', 'name' => 'User Management', 'path' => '/users'],
+                ['icon' => 'dashboard', 'name' => 'Inventory Overview', 'path' => '/inventory'],
+                ['icon' => 'dashboard', 'name' => 'Transaction Overview', 'path' => '/transactions'],
+                ['icon' => 'dashboard', 'name' => 'Reports', 'path' => '/reports'],
+                ['icon' => 'dashboard', 'name' => 'System Settings', 'path' => '/settings'],
+            ],
+            'school head' => [
+                ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/'],
+                ['icon' => 'dashboard', 'name' => 'Approval Requests', 'path' => '/requests/approvals'],
+                ['icon' => 'dashboard', 'name' => 'Asset Overview', 'path' => '/assets/overview'],
+                ['icon' => 'dashboard', 'name' => 'Inventory Overview', 'path' => '/inventory/overview'],
+                ['icon' => 'dashboard', 'name' => 'Inspection Overview', 'path' => '/inspections/overview'],
+                ['icon' => 'dashboard', 'name' => 'Reports', 'path' => '/reports'],
+                ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/profile'],
+            ],
+            'property custodian' => [
+                ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/'],
+                ['icon' => 'dashboard', 'name' => 'Inventory', 'path' => '/inventory'],
+                ['icon' => 'dashboard', 'name' => 'Transaction', 'path' => '/transactions'],
+                ['icon' => 'dashboard', 'name' => 'Reports', 'path' => '/reports'],
+                ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/profile'],
+            ],
+            'inspector' => [
+                ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/'],
+                ['icon' => 'dashboard', 'name' => 'Items Inspeection', 'path' => '/inspection'],
+                ['icon' => 'dashboard', 'name' => 'Inspection History', 'path' => '/inspection/history'],
+                ['icon' => 'dashboard', 'name' => 'Reports', 'path' => '/reports'],
+                ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/profile'],
+            ],
+            'end user' => [
+                ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/'],
+                ['icon' => 'dashboard', 'name' => 'My Requests', 'path' => '/requests/my'],
+                ['icon' => 'dashboard', 'name' => 'My Assigned Assets', 'path' => '/assets/assigned'],
+                ['icon' => 'dashboard', 'name' => 'Request Asset', 'path' => '/requests/create'],
+                ['icon' => 'dashboard', 'name' => 'Request History', 'path' => '/requests/history'],
+                ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/profile'],
+            ],
+            default => self::getMainNavItems(),
+        };
     }
 
     public static function isActive($path)

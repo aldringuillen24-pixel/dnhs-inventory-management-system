@@ -14,16 +14,11 @@ Route::post('/signin', [LoginController::class, 'login'])->name('signin.post');
 
 Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 
-// Public Routes
-Route::get('/signup', function () {
-    return view('pages.auth.signup', ['title' => 'Sign Up']);
-})->name('signup');
-
 // Protected Routes (require authentication)
 Route::middleware('auth')->group(function () {
     // Dashboard
     Route::get('/', function () {
-        return view('pages.dashboard.ecommerce', ['title' => 'E-commerce Dashboard']);
+        return view('pages.auth.signin', ['title' => 'Sign In'])->with('success', session('success'))->with('error', session('error')   );
     })->name('dashboard');
 
     // Calendar pages
@@ -94,6 +89,6 @@ Route::middleware('auth')->group(function () {
 // Admin Routes (require admin role)
 Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.')->group(function () {
     Route::get('/dashboard', function () {
-        return view('pages.dashboard.ecommerce', ['title' => 'Admin Dashboard']);
+        return view('roles.administrator.dashboard', ['title' => 'Admin Dashboard']);
     })->name('dashboard');
 });
