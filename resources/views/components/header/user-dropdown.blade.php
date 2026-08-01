@@ -7,7 +7,7 @@
             {{ strtoupper(substr(auth()->user()?->name ?? 'U', 0, 1)) }}
         </div>
         <div class="hidden sm:block">
-            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ auth()->user()?->name ?? 'User' }}</p>
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ auth()->user()?->username ?? 'User' }}</p>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ auth()->user()?->email ?? 'user@example.com' }}</p>
         </div>
         <svg class="hidden h-4 w-4 text-gray-500 sm:block dark:text-gray-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">

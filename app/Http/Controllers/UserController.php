@@ -66,14 +66,14 @@ class UserController extends Controller
     public function store(Request $request)
     {
         $validatedData = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
+            'username' => ['required', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'min:6'],
             'role_id' => ['required', 'exists:roles,role_id'],
         ]);
 
         $plainPassword = $validatedData['password'] ?? Str::random(10);
 
-        $baseUsername = Str::slug($validatedData['name']);
+        $baseUsername = Str::slug($validatedData['username']);
         $username = $baseUsername;
         $counter = 1;
 
@@ -83,7 +83,7 @@ class UserController extends Controller
         }
 
         $user = User::create([
-            'first_name' => $validatedData['name'],
+            'first_name' => '',
             'last_name' => '',
             'username' => $username,
             'email' => null,
@@ -141,7 +141,10 @@ class UserController extends Controller
             'password' => ['nullable', 'string', 'min:6'],
         ]);
 
-        $user->first_name = $validatedData['name'];
+        [$firstName, $lastName] = $this->splitFullName($validatedData['name']);
+
+        $user->first_name = $firstName;
+        $user->last_name = $lastName;
         $user->role_id = $validatedData['role_id'];
         $user->status = $validatedData['status'];
 
@@ -153,5 +156,14 @@ class UserController extends Controller
         $user->save();
 
         return redirect()->route('admin.users-management')->with('success', 'User updated successfully.');
+    }
+
+    private function splitFullName(string $fullName): array
+    {
+        $parts = preg_split('/\s+/', trim($fullName));
+        $firstName = array_shift($parts) ?: '';
+        $lastName = $parts ? implode(' ', $parts) : '';
+
+        return [$firstName, $lastName];
     }
 }

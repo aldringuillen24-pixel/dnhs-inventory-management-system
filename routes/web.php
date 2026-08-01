@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\PropertyCustodianController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\UserController;
@@ -13,19 +14,55 @@ use App\Models\User;
 // Authentication Routes
 Route::get('/signin', function () {
     return view('components.auth.signin', ['title' => 'Sign In'])->with('success', session('success'))->with('error', session('error'));
+})->name('signin');
+
+Route::get('/login', function () {
+    return redirect()->route('signin');
 })->name('login');
 
 Route::post('/signin', [LoginController::class, 'login'])->name('signin.post');
 
 Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 
+
 // Protected Routes (require authentication)
 Route::middleware('auth')->group(function () {
     // Dashboard
     Route::get('/', function () {
-        return view('components.auth.signin', ['title' => 'Sign In'])->with('success', session('success'))->with('error', session('error')   );
+        $user = auth()->user();
+
+        if ($user->role && strtolower($user->role->role_name) === 'administrator') {
+            return redirect()->route('admin.dashboard');
+        }
+
+        if ($user->role && strtolower($user->role->role_name) === 'property custodian') {
+            if ($user->temporary_password) {
+                return redirect()->route('propertyCustodian.onboarding');
+            }
+
+            return redirect()->route('propertyCustodian.dashboard');
+        }
+
+        return view('pages.dashboard', ['title' => 'Dashboard']);
     })->name('dashboard');
 });
+
+
+// Property Custodian Routes (require property custodian role)
+Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodian')->name('propertyCustodian.')->group(function () {
+    Route::get('/onboarding', [PropertyCustodianController::class, 'onboarding'])->name('onboarding');
+
+    Route::post('/onboarding', [PropertyCustodianController::class, 'onboardingPost'])->name('onboarding.post');
+
+    Route::get('/dashboard', [PropertyCustodianController::class, 'dashboard'])->name('dashboard');
+
+    Route::get('/inventory', [PropertyCustodianController::class, 'inventory'])->name('inventory');
+
+    Route::get('/transactions', function () {
+        return view('pages.propertyCustodian.transactions', ['title' => 'Transactions']);
+    })->name('transactions');   
+});
+
 
 // Admin Routes (require admin role)
 Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.')->group(function () {
