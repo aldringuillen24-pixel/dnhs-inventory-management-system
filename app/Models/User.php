@@ -61,6 +61,14 @@ class User extends Authenticatable
     }
 
     /**
+     * Get the inventory items associated with the user.
+     */
+    public function inventoryItems()
+    {
+        return $this->hasMany(Inventory::class);
+    }
+
+    /**
      * Get the user's full name.
      */
     public function getFullNameAttribute(): string

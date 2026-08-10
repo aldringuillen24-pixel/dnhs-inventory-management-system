@@ -58,6 +58,8 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::get('/inventory', [PropertyCustodianController::class, 'inventory'])->name('inventory');
 
+    Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
+
     Route::get('/transactions', function () {
         return view('pages.propertyCustodian.transactions', ['title' => 'Transactions']);
     })->name('transactions');   

@@ -66,7 +66,7 @@
     @mouseleave="$store.sidebar.setHovered(false)">
 
     <!-- Logo Section -->
-    <div class="pt-8 pb-7 flex"
+    <!-- <div class="pt-8 pb-7 flex"
         :class="(!$store.sidebar.isExpanded && !$store.sidebar.isHovered && !$store.sidebar.isMobileOpen) ?
         'xl:justify-center' :
         'justify-start'">
@@ -80,7 +80,7 @@
                 src="/images/logo/logo-icon.svg" alt="Logo" width="32" height="32" />
 
         </a>
-    </div>
+    </div> -->
 
     <!-- Navigation Menu -->
     <div class="flex flex-col overflow-y-auto duration-300 ease-linear no-scrollbar">

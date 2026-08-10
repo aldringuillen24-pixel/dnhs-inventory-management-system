@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
 @section('content')
-    <x-common.page-breadcrumb pageTitle="Inventory" />
+    <x-common.page-breadcrumb pageTitle="Transactions" />
 
     <div class="grid gap-6 xl:grid-cols-12">
         <div class="col-span-12 md:col-span-6 xl:col-span-3">
@@ -51,7 +51,7 @@
 
     <div class="grid gap-6 xl:grid-cols-12 mt-6">
         <div class="col-span-12 xl:col-span-12">
-            <x-cards.base-card title="Manage Inventory" subtitle="Search and manage assigned assets">
+            <x-cards.base-card title="Manage Transactions" subtitle="Search and manage assigned assets">
                 <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div class="flex-1">
                         <input type="search" placeholder="Search assets" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
@@ -59,31 +59,90 @@
                     <div class="flex flex-wrap gap-2">
                         <button type="button" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Category</button>
                         <button type="button" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Status</button>
-                        <button type="button" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Location</button>
+                        <!-- Assign Inventory Item Modal -->
+                        <x-modals.base-modal title="Assign Inventory Item" subtitle="Record a new item assignment.">
+                            <x-slot:trigger>
+                                <button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
+                                    <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M10 5a1 1 0 0 1 1 1v3h3a1 1 0 1 1 0 2h-3v3a1 1 0 1 1-2 0v-3H6a1 1 0 1 1 0-2h3V6a1 1 0 0 1 1-1Z" clip-rule="evenodd" />
+                                    </svg>
+                                    Assign
+                                </button>
+                            </x-slot:trigger>
+
+                            <form class="space-y-4" @submit.prevent>
+                                <div>
+                                    <label for="inventory-item" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Inventory Item</label>
+                                    <select id="inventory-item" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                        <option value="">Select an item</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="assigned-to" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Assign To</label>
+                                    <input id="assigned-to" type="text" placeholder="Enter recipient name" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                </div>
+                                <div>
+                                    <label for="date-assigned" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Assigned</label>
+                                    <input id="date-assigned" type="date" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                </div>
+                                <div class="flex justify-end gap-3 pt-2">
+                                    <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
+                                    <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Assign Item</button>
+                                </div>
+                            </form>
+                        </x-modals.base-modal>
                     </div>
                 </div>
 
                 <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
                     <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
                         <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                            <tr>
+                            <tr class="text-center">
                                 <th class="px-4 py-3">Qty</th>
                                 <th class="px-4 py-3">Unit</th>
-                                <th class="px-4 py-3">Description</th>
-                                <th class="px-4 py-3">Location</th>
-                                <th class="px-4 py-3">Status</th>
-                                <th class="px-4 py-3">Serial No.</th>
-                                <th class="px-4 py-3">QR Code</th>
+                                <th class="px-4 py-3">Inventory Item No.</th>
+                                <th class="px-4 py-3">Serial Number</th>
+                                <th class="px-4 py-3">Assign to</th>
+                                <th class="px-4 py-3">Date Assigned</th>
+                                <th class="px-4 py-3">Date Returned</th>
                                 <th class="px-4 py-3">Item Life</th>
+                                <th class="px-4 py-3">Status</th>
+                                <th class="px-4 py-3">Actions</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
-                            <tr>
-                                <td class="px-4 py-4 font-medium text-gray-900 dark:text-white">Laptop - Model X</td>
+                            <tr class="text-center">
+                                <td class="px-4 py-4 font-medium text-gray-900 dark:text-white">1</td>
                                 <td class="px-4 py-4">Electronics</td>
-                                <td class="px-4 py-4">Main Office</td>
-                                <td class="px-4 py-4 text-emerald-600">Active</td>
+                                <td class="px-4 py-4">123</td>
+                                <td class="px-4 py-4">456</td>
+                                <td class="px-4 py-4">John Doe</td>
                                 <td class="px-4 py-4">Jun 12, 2026</td>
+                                <td class="px-4 py-4">Jul 15, 2026</td>
+                                <td class="px-4 py-4">5 years</td>
+                                <td class="px-4 py-4 text-emerald-600">Active</td>
+                                <td class="px-4 py-4">
+                                    @php($isConsumable = false)
+                                    <div x-data="{ open: false, menuStyle: '', toggleMenu(event) { if (!this.open) { const rect = event.currentTarget.getBoundingClientRect(); this.menuStyle = `top: ${rect.bottom + 4}px; left: ${rect.right - 144}px;`; } this.open = !this.open; } }">
+                                        <button type="button" @click="toggleMenu($event)" class="rounded-full p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Transaction actions" :aria-expanded="open.toString()">
+                                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                <path d="M10 6a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+                                            </svg>
+                                        </button>
+
+                                        <div x-show="open" x-cloak x-transition @click.outside="open = false" @keydown.escape.window="open = false" :style="menuStyle" class="fixed z-[1200] w-36 rounded-md border border-gray-200 bg-white py-1 text-left shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                                            <button type="button" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
+                                                Details
+                                            </button>
+                                            <button type="button" @disabled($isConsumable) class="block w-full px-3 py-2 text-left text-sm transition {{ $isConsumable ? 'cursor-not-allowed text-gray-400 dark:text-gray-500' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700' }}" title="{{ $isConsumable ? 'Consumable items cannot be transferred.' : 'Transfer this item.' }}">
+                                                Transfer
+                                            </button>
+                                            <button type="button" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
+                                                Return
+                                            </button>
+                                        </div>
+                                    </div>
+                                </td>
                             </tr>
                         </tbody>
                     </table>

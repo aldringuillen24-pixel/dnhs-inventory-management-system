@@ -59,7 +59,92 @@
                     <div class="flex flex-wrap gap-2">
                         <button type="button" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Category</button>
                         <button type="button" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Status</button>
-                        <button type="button" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Location</button>
+                        <x-modals.base-modal title="Stock In Item" subtitle="Add an item to the inventory." maxWidth="max-w-2xl" :open="$errors->any()">
+                            <x-slot:trigger>
+                                <button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
+                                    <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M10 5a1 1 0 0 1 1 1v3h3a1 1 0 1 1 0 2h-3v3a1 1 0 1 1-2 0v-3H6a1 1 0 1 1 0-2h3V6a1 1 0 0 1 1-1Z" clip-rule="evenodd" />
+                                    </svg>
+                                    Stock In
+                                </button>
+                            </x-slot:trigger>
+
+                            @php($selectedCategory = $categories->firstWhere('category_id', (int) old('category_id')))
+                            <form x-data="{ quantity: {{ old('quantity', 1) }}, requiresSerialNumber: {{ $selectedCategory?->requires_serial_number ? 'true' : 'false' }}, serialNumbers: @js(old('serial_numbers', [])), setQuantity(value) { const count = Math.max(1, Math.min(100, Number(value) || 1)); this.quantity = count; this.serialNumbers = Array.from({ length: count }, (_, index) => this.serialNumbers[index] ?? ''); }, setCategory(event) { this.requiresSerialNumber = event.target.selectedOptions[0]?.dataset.requiresSerialNumber === 'true'; if (this.requiresSerialNumber) { this.setQuantity(this.quantity); } else { this.serialNumbers = []; } } }" method="POST" action="{{ route('propertyCustodian.inventory.stock-in') }}" class="space-y-4">
+                                @csrf
+
+                                @if ($errors->any())
+                                    <div class="rounded-md border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">
+                                        Please correct the highlighted fields and try again.
+                                    </div>
+                                @endif
+
+                                <div class="grid gap-6 md:grid-cols-[minmax(0,1fr)_14rem]">
+                                    <div class="space-y-4">
+                                        <div>
+                                            <label for="item-name" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Name</label>
+                                            <input id="item-name" name="item_name" value="{{ old('item_name') }}" type="text" placeholder="Enter item name" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                        </div>
+                                        <div>
+                                            <label for="category" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Category</label>
+                                            <select id="category" name="category_id" @change="setCategory($event)" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                                <option value="">Select a category</option>
+                                                @foreach ($categories as $category)
+                                                    <option value="{{ $category->category_id }}" data-requires-serial-number="{{ $category->requires_serial_number ? 'true' : 'false' }}" @selected(old('category_id') == $category->category_id)>{{ $category->category_name }}</option>
+                                                @endforeach
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label for="item-description" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Description</label>
+                                            <input id="item-description" name="description" value="{{ old('description') }}" type="text" placeholder="Enter item description" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                        </div>
+                                        <div class="grid gap-4 sm:grid-cols-2">
+                                            <div>
+                                                <label for="ics-number" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">ICS No.</label>
+                                                <input id="ics-number" name="ics_no" value="{{ old('ics_no') }}" type="text" placeholder="Enter ICS number" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                            </div>
+                                            <div>
+                                                <label for="unit" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit</label>
+                                                <input id="unit" name="unit" value="{{ old('unit') }}" type="text" placeholder="e.g. piece" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                            </div>
+                                        </div>
+                                        <div class="grid gap-4 sm:grid-cols-2">
+                                            <div>
+                                                <label for="unit-cost" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit Cost</label>
+                                                <input id="unit-cost" name="unit_cost" value="{{ old('unit_cost') }}" type="number" min="0" step="0.01" placeholder="0.00" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                            </div>
+                                            <div>
+                                                <label for="date-acquired" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Acquired</label>
+                                                <input id="date-acquired" name="date_acquired" value="{{ old('date_acquired') }}" type="date" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <aside :class="requiresSerialNumber && quantity >= 4 ? 'max-h-[24rem] overflow-y-auto' : ''" class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+                                        <label for="quantity" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label>
+                                        <input id="quantity" name="quantity" x-model.number="quantity" @input="setQuantity($event.target.value)" type="number" min="1" max="100" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+
+                                        <template x-if="requiresSerialNumber">
+                                            <div class="mt-4 space-y-3">
+                                                <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Serial Numbers</p>
+                                                <template x-for="index in quantity" :key="index">
+                                                    <div>
+                                                        <label :for="`serial-number-${index}`" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400" x-text="`Serial Number ${index}`"></label>
+                                                        <input :id="`serial-number-${index}`" :name="`serial_numbers[${index - 1}]`" x-model="serialNumbers[index - 1]" type="text" placeholder="Enter serial number" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+
+                                        <p x-show="!requiresSerialNumber" class="mt-4 text-xs text-gray-500 dark:text-gray-400">Serial numbers are not required for the selected category.</p>
+                                    </aside>
+                                </div>
+                                <div class="flex justify-end gap-3 pt-2">
+                                    <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
+                                    <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Save Item</button>
+                                </div>
+                            </form>
+                        </x-modals.base-modal>
                     </div>
                 </div>
 
@@ -69,21 +154,89 @@
                             <tr>
                                 <th class="px-4 py-3">Qty</th>
                                 <th class="px-4 py-3">Unit</th>
+                                <th class="px-4 py-3">Category</th>
                                 <th class="px-4 py-3">Description</th>
                                 <th class="px-4 py-3">ICS No.</th>
-                                <th class="px-4 py-3">Inventory Item No.</th>
                                 <th class="px-4 py-3">Unit Cost</th>
                                 <th class="px-4 py-3">Total Cost</th>
+                                <th class="px-4 py-3">Date Acquired</th>
+                                <th class="px-4 py-3">Action</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
-                            <tr>
-                                <td class="px-4 py-4 font-medium text-gray-900 dark:text-white">Laptop - Model X</td>
-                                <td class="px-4 py-4">Electronics</td>
-                                <td class="px-4 py-4">Main Office</td>
-                                <td class="px-4 py-4 text-emerald-600">Active</td>
-                                <td class="px-4 py-4">Jun 12, 2026</td>
-                            </tr>
+                            @forelse ($inventoryItems as $inventoryItem)
+                                <tr>
+                                    <td class="px-4 py-3">{{ $inventoryItem->quantity }}</td>
+                                    <td class="px-4 py-3">{{ $inventoryItem->unit }}</td>
+                                    <td class="px-4 py-3">{{ $inventoryItem->category?->category_name ?? '—' }}</td>
+                                    <td class="px-4 py-3">{{ $inventoryItem->item_name }}</td>
+                                    <td class="px-4 py-3">{{ $inventoryItem->ics_no ?: '—' }}</td>
+                                    <td class="px-4 py-3">₱{{ number_format((float) $inventoryItem->unit_cost, 2) }}</td>
+                                    <td class="px-4 py-3">₱{{ number_format((float) $inventoryItem->total_cost, 2) }}</td>
+                                    <td class="px-4 py-3">{{ \Illuminate\Support\Carbon::parse($inventoryItem->date_acquired)->format('M d, Y') }}</td>
+                                    <td class="px-4 py-3">
+                                        <div x-data="{ actionOpen: false, modalOpen: false, menuStyle: '', toggleMenu(event) { if (!this.actionOpen) { const rect = event.currentTarget.getBoundingClientRect(); this.menuStyle = `top: ${rect.bottom + 4}px; left: ${rect.right - 144}px;`; } this.actionOpen = !this.actionOpen; } }">
+                                            <button type="button" @click="toggleMenu($event)" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Actions for {{ $inventoryItem->item_name }}" :aria-expanded="actionOpen.toString()">
+                                                <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                    <path d="M5 10a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm6.5 0a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm6.5 0a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z" />
+                                                </svg>
+                                            </button>
+
+                                            <div x-show="actionOpen" x-cloak x-transition @click.outside="actionOpen = false" @keydown.escape.window="actionOpen = false" :style="menuStyle" class="fixed z-[1200] w-36 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                                                <button type="button" @click="actionOpen = false; modalOpen = true" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
+                                                    Show Items
+                                                </button>
+                                            </div>
+
+                                            <div x-show="modalOpen" x-cloak x-transition @keydown.escape.window="modalOpen = false" class="fixed inset-0 z-[1300] flex items-center justify-center bg-black/5 px-4" role="dialog" aria-modal="true">
+                                                <div class="w-full max-w-3xl rounded-md border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700">
+                                                    <div class="mb-4 flex items-start justify-between gap-3">
+                                                        <div>
+                                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $inventoryItem->item_name }} Items</h3>
+                                                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Individual records included in this inventory group.</p>
+                                                        </div>
+                                                        <button type="button" @click="modalOpen = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Close item list">
+                                                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 0 1 1.414 0L10 8.586l4.293-4.293a1 1 0 1 1 1.414 1.414L11.414 10l4.293 4.293a1 1 0 0 1-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 0 1-1.414-1.414L8.586 10 4.293 5.707a1 1 0 0 1 0-1.414z" clip-rule="evenodd" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                    <div class="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-700">
+                                                        <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
+                                                            <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                                                <tr>
+                                                                    <th class="px-4 py-3">Qty</th>
+                                                                    <th class="px-4 py-3">Unit Cost</th>
+                                                                    <th class="px-4 py-3">Total Cost</th>
+                                                                    <th class="px-4 py-3">ICS No.</th>
+                                                                    <th class="px-4 py-3">Serial No.</th>
+                                                                    <th class="px-4 py-3">Date Acquired</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                                                                @foreach ($inventoryItem->sourceItems as $sourceItem)
+                                                                    <tr>
+                                                                        <td class="px-4 py-3">{{ $sourceItem->quantity }}</td>
+                                                                        <td class="px-4 py-3">₱{{ number_format((float) $sourceItem->unit_cost, 2) }}</td>
+                                                                        <td class="px-4 py-3">₱{{ number_format($sourceItem->quantity * (float) $sourceItem->unit_cost, 2) }}</td>
+                                                                        <td class="px-4 py-3">{{ $sourceItem->ics_no ?: '—' }}</td>
+                                                                        <td class="px-4 py-3">{{ $sourceItem->serial_number ?: '—' }}</td>
+                                                                        <td class="px-4 py-3">{{ $sourceItem->date_acquired->format('M d, Y') }}</td>
+                                                                    </tr>
+                                                                @endforeach
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="9" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No inventory items have been stocked in yet.</td>
+                                </tr>
+                            @endforelse
                         </tbody>
                     </table>
                 </div>
