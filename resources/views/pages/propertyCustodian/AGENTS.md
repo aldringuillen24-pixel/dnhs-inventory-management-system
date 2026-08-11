@@ -1,38 +1,30 @@
-# Property Custodian Views
+# Property Custodian — Views & Backend
 
 ## Scope
 
-These rules apply only to `resources/views/pages/propertyCustodian` and its subdirectories.
+Applies to `resources/views/pages/propertyCustodian` and related backend (controllers, routes, models).
 
-## Views
+## Compact Structure
 
-- `dashboard.blade.php`: Property Custodian overview.
-- `inventory.blade.php`: Inventory list and item-status interface.
-- `transactions.blade.php`: Inventory transaction history interface.
-- `onboarding.blade.php`: Required first-login account setup.
+- Views: `dashboard.blade.php`, `inventory.blade.php`, `transactions.blade.php`, `onboarding.blade.php`.
+- Controllers: `PropertyCustodianController` (or dedicated controllers under `app/Http/Controllers`).
+- Models: `Inventory`, `Category`, `Transaction`, `User`, `Role` (in `app/Models`).
+- Components & layouts: reuse `resources/views/components` and `resources/views/layouts`.
+- Routes: HTTP URL prefix `property-custodian` and named-route prefix `propertyCustodian.` (protect with `auth` + `role:Property Custodian`).
 
-## Conventions
+## Backend Login & Onboarding (summary)
 
-- Extend and use the existing Blade layouts and components; do not duplicate shared navigation or page shells.
-- Reusable Blade components are located in `resources/views/components`; check this directory before creating new view markup.
-- Shared application layouts are located in `resources/views/layouts`.
-- Use existing Tailwind CSS and Alpine.js patterns before introducing new styling or JavaScript.
-- Keep views presentational: validation, authorization, queries, and inventory updates belong in routes, controllers, Form Requests, models, or services.
-- Use named routes with the `propertyCustodian.` prefix.
-- Display session success/error messages and validation errors consistently with adjacent views.
-- Keep all labels, empty states, and status indicators clear for school property custodians.
+- Authentication: uses standard Laravel auth (`/login`) with role-based gating via `role:Property Custodian` middleware.
+- Onboarding: accounts seeded with `temporary_password` must complete `onboarding.blade.php`; controllers should detect `temporary_password` and redirect to onboarding until cleared.
+- Authorization: protect all property-custodian routes with `auth` and the role middleware; use Form Requests or controller validation for modal forms.
 
-## Before Editing
+## Editing Guidelines (short)
 
-1. Review the target view, its layout/components, the related route, and `PropertyCustodianController`.
-2. Identify the required data and ensure it is passed by the controller.
-3. Preserve the Property Custodian role boundary and onboarding flow.
-4. Add or update a focused feature test when a UI change affects behavior, routes, validation, or authorization.
+- Keep views presentational; place validation, queries, and persistence in controllers, Form Requests, or models.
+- Reuse existing Blade components and Tailwind/Alpine patterns; prefer named routes over hard-coded URLs.
+- Add focused Pest feature tests for any route/validation/authorization changes.
 
-## Future Inventory Database Work
+## Notes
 
-- Create new item and inventory-transaction migrations in `database/migrations` when persistence is introduced.
-- Add Property Custodian inventory routes in `routes/web.php` within the existing `propertyCustodian.` route group.
-- Add controller actions to `app/Http/Controllers/PropertyCustodianController.php` or a dedicated inventory controller when the feature grows.
-- Add Eloquent models and relationships in `app/Models` when items, assignments, or stock movements require persistence.
-- Connect modal forms only after the corresponding route, validation, authorization, controller action, and database schema exist.
+- Only wire modal forms to routes/controllers after corresponding backend actions and migrations exist.
+- Use database migrations for schema changes and transactions for multi-record inventory updates.

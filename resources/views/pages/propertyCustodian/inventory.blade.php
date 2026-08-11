@@ -52,13 +52,31 @@
     <div class="grid gap-6 xl:grid-cols-12 mt-6">
         <div class="col-span-12 xl:col-span-12">
             <x-cards.base-card title="Manage Inventory" subtitle="Search and manage assigned assets">
+                <div x-data="{
+                    search: '',
+                    category: '',
+                    items: @js($inventoryItems->map(fn ($item) => [
+                        'categoryId' => (string) $item->category_id,
+                        'searchable' => \Illuminate\Support\Str::lower(implode(' ', [$item->item_name, $item->unit, $item->category?->category_name ?? '', $item->ics_no ?? ''])),
+                    ])->values()),
+                    matches(item) {
+                        return item.searchable.includes(this.search.toLowerCase()) && (!this.category || item.categoryId === this.category);
+                    },
+                    hasMatches() {
+                        return this.items.some((item) => this.matches(item));
+                    },
+                }">
                 <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div class="flex-1">
-                        <input type="search" placeholder="Search assets" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                        <input x-model="search" type="search" placeholder="Search assets" aria-label="Search assets" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
                     </div>
                     <div class="flex flex-wrap gap-2">
-                        <button type="button" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Category</button>
-                        <button type="button" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Status</button>
+                        <select x-model="category" aria-label="Filter by category" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                            <option value="">All categories</option>
+                            @foreach ($categories as $category)
+                                <option value="{{ $category->category_id }}">{{ $category->category_name }}</option>
+                            @endforeach
+                        </select>
                         <x-modals.base-modal title="Stock In Item" subtitle="Add an item to the inventory." maxWidth="max-w-2xl" :open="$errors->any()">
                             <x-slot:trigger>
                                 <button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
@@ -165,7 +183,8 @@
                         </thead>
                         <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
                             @forelse ($inventoryItems as $inventoryItem)
-                                <tr>
+                                @php($firstSourceItem = $inventoryItem->sourceItems->first())
+                                <tr data-category-id="{{ $inventoryItem->category_id }}" data-search="{{ \Illuminate\Support\Str::lower(implode(' ', [$inventoryItem->item_name, $inventoryItem->unit, $inventoryItem->category?->category_name ?? '', $inventoryItem->ics_no ?? ''])) }}" x-show="matches({ categoryId: $el.dataset.categoryId, searchable: $el.dataset.search })">
                                     <td class="px-4 py-3">{{ $inventoryItem->quantity }}</td>
                                     <td class="px-4 py-3">{{ $inventoryItem->unit }}</td>
                                     <td class="px-4 py-3">{{ $inventoryItem->category?->category_name ?? '—' }}</td>
@@ -189,7 +208,7 @@
                                             </div>
 
                                             <div x-show="modalOpen" x-cloak x-transition @keydown.escape.window="modalOpen = false" class="fixed inset-0 z-[1300] flex items-center justify-center bg-black/5 px-4" role="dialog" aria-modal="true">
-                                                <div class="w-full max-w-3xl rounded-md border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700">
+                                                <div class="ml-4 w-full max-w-4xl rounded-md border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700">
                                                     <div class="mb-4 flex items-start justify-between gap-3">
                                                         <div>
                                                             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $inventoryItem->item_name }} Items</h3>
@@ -204,29 +223,71 @@
                                                     <div class="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-700">
                                                         <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
                                                             <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                                                                <tr>
+                                                                <tr class="text-center">
                                                                     <th class="px-4 py-3">Qty</th>
                                                                     <th class="px-4 py-3">Unit Cost</th>
-                                                                    <th class="px-4 py-3">Total Cost</th>
                                                                     <th class="px-4 py-3">ICS No.</th>
                                                                     <th class="px-4 py-3">Serial No.</th>
+                                                                    <th class="px-4 py-3">Inventory Item No.</th>
                                                                     <th class="px-4 py-3">Date Acquired</th>
+                                                                    <th class="px-4 py-3">Assigned To</th>
+                                                                    <th class="px-4 py-3">Status</th>
+                                                                    <th class="px-4 py-3">QR Code</th>
                                                                 </tr>
                                                             </thead>
+
+
+
+
+
                                                             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                                                                 @foreach ($inventoryItem->sourceItems as $sourceItem)
-                                                                    <tr>
+                                                                    <tr class="text-center">
                                                                         <td class="px-4 py-3">{{ $sourceItem->quantity }}</td>
                                                                         <td class="px-4 py-3">₱{{ number_format((float) $sourceItem->unit_cost, 2) }}</td>
-                                                                        <td class="px-4 py-3">₱{{ number_format($sourceItem->quantity * (float) $sourceItem->unit_cost, 2) }}</td>
                                                                         <td class="px-4 py-3">{{ $sourceItem->ics_no ?: '—' }}</td>
                                                                         <td class="px-4 py-3">{{ $sourceItem->serial_number ?: '—' }}</td>
+                                                                        <td class="px-4 py-3">{{ $firstSourceItem?->inventory_item_no ?? 'N/A' }}</td>
                                                                         <td class="px-4 py-3">{{ $sourceItem->date_acquired->format('M d, Y') }}</td>
-                                                                    </tr>
-                                                                @endforeach
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
+                                                                        <td class="px-4 py-3">{{ $firstSourceItem?->assignedTo?->name ?? 'Unassigned' }}</td>
+                                                                        <td class="px-4 py-3">
+                                                                            @if ($sourceItem->status === 'available')
+                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800 dark:bg-green-800/30 dark:text-green-200">
+                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
+                                                                                    Available
+                                                                                </span>
+                                                                            @elseif ($sourceItem->status === 'assigned')
+                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800 dark:bg-yellow-800/30 dark:text-yellow-200">
+                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
+                                                                                    Assigned
+                                                                                </span>
+                                                                            @elseif ($sourceItem->status === 'under_inspection')
+                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800 dark:bg-blue-800/30 dark:text-blue-200">
+                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
+                                                                                    Under Inspection
+                                                                                </span>
+                                                                            @elseif ($sourceItem->status === 'under_maintenance')
+                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-1 text-xs font-medium text-purple-800 dark:bg-purple-800/30 dark:text-purple-200">
+                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
+                                                                                    Under Maintenance
+                                                                                </span>
+                                                                            @elseif ($sourceItem->status === 'disposed')
+                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-800 dark:bg-red-800/30 dark:text-red-200">
+                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
+                                                                                    Disposed
+                                                                                </span>
+                                                                            @else
+                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-800 dark:bg-gray-800/30 dark:text-gray-200">
+                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
+                                                                                    Unknown
+                                                                                </span>
+                                                                            @endif
+                                                                            </td>
+                                                                            <td class="px-4 py-3"></td>                                                                        </tr>
+                                                                    @endforeach
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -237,8 +298,12 @@
                                     <td colspan="9" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No inventory items have been stocked in yet.</td>
                                 </tr>
                             @endforelse
+                            <tr x-show="items.length && !hasMatches()" x-cloak>
+                                <td colspan="9" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No items found.</td>
+                            </tr>
                         </tbody>
                     </table>
+                </div>
                 </div>
             </x-cards.base-card>
         </div>

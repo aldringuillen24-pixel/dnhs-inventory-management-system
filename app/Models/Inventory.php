@@ -17,12 +17,16 @@ class Inventory extends Model
         'category_id',
         'unit',
         'user_id',
+        'assigned_to_user_id',
         'item_name',
         'description',
         'quantity',
         'unit_cost',
         'ics_no',
         'serial_number',
+        'inventory_item_no',
+        'status',
+        'qr_code',
         'date_acquired',
     ];
 
@@ -42,5 +46,10 @@ class Inventory extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function assignedTo()
+    {
+        return $this->belongsTo(User::class, 'assigned_to_user_id');
     }
 }

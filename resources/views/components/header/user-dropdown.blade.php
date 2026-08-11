@@ -16,9 +16,6 @@
     </button>
 
     <div x-show="open" x-transition class="absolute right-0 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900" role="menu">
-        <a href="{{ route('admin.profile') }}" class="flex items-center rounded-md px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-100 hover:text-brand-500 dark:text-gray-200 dark:hover:bg-gray-800">
-            Profile
-        </a>
         <form method="POST" action="{{ route('logout') }}" class="w-full">
             @csrf
             <button type="submit" class="flex w-full items-center rounded-md px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 hover:text-brand-500 dark:text-gray-200 dark:hover:bg-gray-800">

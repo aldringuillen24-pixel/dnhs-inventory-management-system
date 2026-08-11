@@ -23,8 +23,8 @@
                     </ul>
                 </div>
             @endif
-
-            <x-onboarding-form action="{{ route('propertyCustodian.onboarding.post') }}" />
+            <x-onboarding-form action="{{ route('endUser.onboarding.post') }}" />
         </div>
     </div>
+
 @endsection

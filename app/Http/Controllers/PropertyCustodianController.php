@@ -2,10 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AssignmentRequest;
 use App\Models\Category;
+use App\Models\User;
+use App\Models\Transaction;
 use App\Models\Inventory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 
 class PropertyCustodianController extends Controller
 {
@@ -67,6 +71,7 @@ class PropertyCustodianController extends Controller
             ->get();
 
         $sourceItemsByGroup = Inventory::query()
+            ->with('assignedTo')
             ->orderBy('item_name')
             ->orderBy('item_id')
             ->get()
@@ -81,6 +86,124 @@ class PropertyCustodianController extends Controller
 
         return view('pages.propertyCustodian.inventory', compact('categories', 'inventoryItems'));
     }
+
+    // Transactions method to display the transactions page with available inventory items and end users
+    public function transactions()
+    {
+        $inventoryItems = Inventory::query()
+            ->with(['category:category_id,category_name'])
+            ->where('status', '!=', 'disposed')
+            ->orderBy('item_name')
+            ->get();
+
+        $groupedInventory = $inventoryItems->groupBy(function (Inventory $item) {
+            return $item->item_name . '|' . ($item->status === 'available' ? 'available' : 'other');
+        })->map(function ($group) {
+            $first = $group->first();
+            return [
+                'item_id' => $first->item_id,
+                'item_name' => $first->item_name,
+                'status' => $first->status,
+                'category_name' => $first->category?->category_name,
+                'quantity' => $group->sum('quantity'),
+                'inventory_item_no' => $first->inventory_item_no,
+            ];
+        })->sortBy('item_name')->values();
+
+        $endUsers = \App\Models\User::query()
+            ->with('role:role_id,role_name')
+            ->whereHas('role', fn ($q) => $q->where('role_name', 'End User'))
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get()
+            ->map(fn ($user) => [
+                'id' => $user->id,
+                'name' => $user->full_name,
+            ]);
+
+        $transactions = Transaction::query()
+            ->with([
+                'user:id,first_name,last_name',
+                'item:item_id,inventory_item_no,item_name,category_id',
+            ])
+            ->orderBy('transaction_date', 'desc')
+            ->get();
+
+        // Include pending assignment requests in the transactions table view
+        $assignmentRequests = AssignmentRequest::query()
+            ->with(['item:item_id,inventory_item_no,item_name,category_id', 'targetUser:id,first_name,last_name'])
+            ->where('status', 'waiting for approval')
+            ->orderBy('requested_at', 'desc')
+            ->get()
+            ->map(function (AssignmentRequest $req) {
+                // create a transient Transaction model so views/components that expect Eloquent methods work
+                $t = new Transaction();
+                $t->id = null; // not persisted
+                $t->quantity = $req->quantity;
+                $t->transaction_date = $req->requested_at;
+                $t->return_date = null;
+                $t->status = ucfirst($req->status);
+                // set relations so view optional() calls work
+                $t->setRelation('item', $req->item);
+                $t->setRelation('user', $req->targetUser);
+                // mark as request and attach request id
+                $t->is_request = true;
+                $t->request_id = $req->id;
+                return $t;
+            });
+
+        // Merge and sort both collections by date desc
+        $transactions = $transactions->merge($assignmentRequests)
+            ->sortByDesc(function ($t) {
+                if (isset($t->transaction_date) && $t->transaction_date instanceof \DateTimeInterface) {
+                    return $t->transaction_date->getTimestamp();
+                }
+
+                return strtotime((string) ($t->transaction_date ?? now()));
+            })->values();
+
+        return view('pages.propertyCustodian.transactions', [
+            'title' => 'Transactions',
+            'availableInventoryItems' => $groupedInventory,
+            'endUsers' => $endUsers,
+            'transactions' => $transactions,
+        ]);
+    }
+
+    public function assignItem(Request $request)
+    {
+        $validated = $request->validate([
+            'item_id' => ['required', 'exists:inventory,item_id'],
+            'user_id' => ['required', 'exists:users,id'],
+            'quantity' => ['required', 'integer', 'min:1'],
+            'transaction_date' => ['nullable', 'date'],
+        ]);
+
+        $inventoryItem = Inventory::findOrFail($validated['item_id']);
+        $endUser = User::findOrFail($validated['user_id']);
+
+        if ($inventoryItem->status !== 'available') {
+            return redirect()->back()->withErrors(['item_id' => 'The selected item is not available for assignment.']);
+        }
+
+        if ($validated['quantity'] > $inventoryItem->quantity) {
+            return redirect()->back()->withErrors(['quantity' => 'The requested quantity exceeds the available stock.']);
+        }
+
+        DB::transaction(function () use ($inventoryItem, $endUser, $validated): void {
+            AssignmentRequest::create([
+                'item_id' => $inventoryItem->item_id,
+                'user_id' => auth()->id(),
+                'target_user_id' => $endUser->id,
+                'quantity' => $validated['quantity'],
+                'status' => 'waiting for approval',
+                'requested_at' => $validated['transaction_date'] ? Carbon::parse($validated['transaction_date']) : now(),
+            ]);
+        });
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Assignment request submitted for approval.');
+    }
+
 
     public function stockIn(Request $request)
     {
@@ -121,7 +244,7 @@ class PropertyCustodianController extends Controller
 
             if ($category->requires_serial_number) {
                 foreach ($serialNumbers as $serialNumber) {
-                    Inventory::create([
+                    $this->createInventoryItem([
                         ...$itemAttributes,
                         'quantity' => 1,
                         'serial_number' => $serialNumber,
@@ -131,7 +254,7 @@ class PropertyCustodianController extends Controller
                 return;
             }
 
-            Inventory::create([
+            $this->createInventoryItem([
                 ...$itemAttributes,
                 'quantity' => $validated['quantity'],
                 'serial_number' => null,
@@ -139,5 +262,15 @@ class PropertyCustodianController extends Controller
         });
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Item stocked in successfully.');
+    }
+
+    private function createInventoryItem(array $attributes): void
+    {
+        $inventoryItem = Inventory::create($attributes);
+
+        $inventoryItem->update([
+            'inventory_item_no' => sprintf('INV-%06d', $inventoryItem->item_id),
+            'qr_code' => 'inventory-item:' . $inventoryItem->item_id,
+        ]);
     }
 }

@@ -37,8 +37,28 @@ class LoginController extends Controller
             $request->session()->flash('success', 'Signed in successfully.');
 
             // Redirect based on role
-            if ($user->role && strtolower($user->role->role_name) === 'administrator') {
-                return redirect()->intended(route('admin.dashboard'));
+            if ($user->role) {
+                $role = strtolower($user->role->role_name);
+
+                if ($role === 'administrator') {
+                    return redirect()->intended(route('admin.dashboard'));
+                }
+
+                if ($role === 'property custodian') {
+                    if ($user->temporary_password) {
+                        return redirect()->intended(route('propertyCustodian.onboarding'));
+                    }
+
+                    return redirect()->intended(route('propertyCustodian.dashboard'));
+                }
+
+                if ($role === 'end user') {
+                    if ($user->temporary_password) {
+                        return redirect()->intended(route('endUser.onboarding'));
+                    }
+
+                    return redirect()->intended(route('endUser.dashboard'));
+                }
             }
 
             return redirect()->intended(route('dashboard'));

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PropertyCustodianController;
+use App\Http\Controllers\EndUserController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\UserController;
@@ -60,9 +61,40 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
 
-    Route::get('/transactions', function () {
-        return view('pages.propertyCustodian.transactions', ['title' => 'Transactions']);
-    })->name('transactions');   
+    Route::get('/transactions', [PropertyCustodianController::class, 'transactions'])->name('transactions');
+
+    Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assignItem'); 
+
+    Route::get('/reports', [PropertyCustodianController::class, 'reports'])->name('reports');
+
+    Route::get('/profile', function () {
+        return view('pages.propertyCustodian.profile', ['title' => 'Profile']);
+    })->name('profile');
+});
+
+// End User Routes (require end user role)
+Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.')->group(function () {
+    Route::get('/onboarding', [EndUserController::class, 'onboarding'])->name('onboarding');
+    Route::post('/onboarding', [EndUserController::class, 'onboardingPost'])->name('onboarding.post');
+
+    Route::get('/dashboard', function () {
+        return view('pages.endUser.dashboard', ['title' => 'End User Dashboard']);
+    })->name('dashboard');
+
+    Route::get('/requests/my-requests', [EndUserController::class, 'myRequests'])->name('my-requests');
+    Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
+    
+    Route::get('/requests', [EndUserController::class, 'requests'])->name('requests');
+
+    Route::get('/requests/history', [EndUserController::class, 'requestHistory'])->name('requests.history');
+
+    Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
+
+    Route::get('/profile', function () {
+        return view('pages.endUser.profile', ['title' => 'Profile']);
+    })->name('profile');
+
+    Route::patch('/profile', [EndUserController::class, 'updateProfile'])->name('profile.update');
 });
 
 
