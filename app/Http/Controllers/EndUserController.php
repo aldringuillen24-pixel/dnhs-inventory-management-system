@@ -195,7 +195,7 @@ class EndUserController extends Controller
                     'status' => $request->status,
                     'request' => $request,
                 ];
-            });
+            })->toBase();
 
         $requestedItems = AssignmentRequest::query()
             ->with(['item:item_id,item_name,inventory_item_no', 'targetUser'])
@@ -210,7 +210,7 @@ class EndUserController extends Controller
                     'status' => $request->status,
                     'request' => $request,
                 ];
-            });
+            })->toBase();
 
         $endUsers = User::whereHas('role', function ($query) {
             $query->where('role_name', 'End User');
@@ -268,33 +268,51 @@ class EndUserController extends Controller
     public function transferAssignedItem(Request $request)
     {
         $validated = $request->validate([
+            'request_id' => ['required', 'exists:requests,id'],
             'transfer_user_id' => ['required', 'exists:users,id'],
             'item_id' => ['required', 'exists:inventory,item_id'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $requestId = $request->input('request_id');
-        $assignment = $requestId ? AssignmentRequest::find($requestId) : null;
+        $assignment = AssignmentRequest::where('id', $validated['request_id'])
+            ->where('target_user_id', auth()->id())
+            ->whereIn('status', ['approved', 'accepted'])
+            ->firstOrFail();
 
-        $transferRequest = AssignmentRequest::create([
-            'item_id' => $validated['item_id'],
-            'user_id' => auth()->id(),
-            'target_user_id' => $validated['transfer_user_id'],
-            'quantity' => $assignment ? $assignment->quantity : 1,
-            'status' => 'waiting for approval',
-            'requested_at' => now(),
-            'notes' => $validated['notes'] ?? null,
-        ]);
+        DB::transaction(function () use ($assignment, $validated) {
+            $itemId = $validated['item_id'];
+            $recipientId = $validated['transfer_user_id'];
+            $transferQty = $assignment->quantity;
 
-        if ($assignment && $assignment->target_user_id !== auth()->id()) {
-            abort(403);
-        }
+            if ($assignment->transaction_id) {
+                $originTx = Transaction::find($assignment->transaction_id);
 
-        if (!$transferRequest) {
-            return redirect()->back()->withErrors(['item_id' => 'Failed to create transfer request. Please try again.']);
-        }
+                if ($originTx) {
+                    if ($originTx->quantity === $transferQty) {
+                        $originTx->quantity = 0;
+                        $originTx->status = 'transferred';
+                        $originTx->save();
+                    } else {
+                        $originTx->decrement('quantity', $transferQty);
+                    }
+                }
+            }
 
-            return redirect()->route('endUser.my-assigned-items')->with('success', 'Transfer request submitted.');
+            Transaction::create([
+                'item_id' => $itemId,
+                'user_id' => $recipientId,
+                'quantity' => $transferQty,
+                'transaction_date' => now(),
+                'status' => 'assigned',
+            ]);
+
+            $assignment->status = 'waiting for transfer approval';
+            $assignment->responded_at = now();
+            $assignment->notes = $validated['notes'] ?? $assignment->notes;
+            $assignment->save();
+        });
+
+        return redirect()->route('endUser.my-assigned-items')->with('success', 'Item partially transferred successfully.');
     }
 
     public function respondRequest(Request $request, $id)

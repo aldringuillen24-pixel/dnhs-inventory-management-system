@@ -31,7 +31,7 @@
                                         </span>
                                     </td>
                                     <td class="px-4 py-4">
-                                        @if($req->status === 'waiting for acceptance')
+                                        @if($req->status === 'waiting for approval')
                                             <form method="POST" action="{{ route('endUser.requests.respond', $req->id) }}" class="inline">
                                                 @csrf
                                                 <input type="hidden" name="action" value="accept" />
