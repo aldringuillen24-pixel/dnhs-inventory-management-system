@@ -230,6 +230,73 @@ class EndUserController extends Controller
         ]);
     }
 
+    public function requestTransfer(Request $request)
+    {
+        $validated = $request->validate([
+            'item_id' => ['required', 'exists:inventory,item_id'],
+            'quantity' => ['required', 'integer', 'min:1'],
+            'target_user_id' => ['required', 'exists:users,id'],
+        ]);
+
+        $inventoryItem = Inventory::findOrFail($validated['item_id']);
+
+        $availableQuantity = Inventory::query()
+            ->where('item_name', $inventoryItem->item_name)
+            ->where('status', '!=', 'disposed')
+            ->sum('quantity');
+
+        if ($validated['quantity'] > $availableQuantity) {
+            return redirect()->back()->with(['error' => 'Requested quantity exceeds available stock.']);
+        }
+
+        $assignmentRequest = AssignmentRequest::create([
+            'item_id' => $inventoryItem->item_id,
+            'user_id' => auth()->id(),
+            'target_user_id' => $validated['target_user_id'],
+            'quantity' => $validated['quantity'],
+            'status' => 'waiting for approval',
+            'requested_at' => now(),
+        ]);
+
+        if (!$assignmentRequest) {
+            return redirect()->back()->withErrors(['item_id' => 'Failed to create request. Please try again.']);
+        } else {
+            return redirect()->route('endUser.my-requests')->with('success', 'Transfer request submitted to the selected end user.');
+        }
+    }
+
+    public function transferAssignedItem(Request $request)
+    {
+        $validated = $request->validate([
+            'transfer_user_id' => ['required', 'exists:users,id'],
+            'item_id' => ['required', 'exists:inventory,item_id'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $requestId = $request->input('request_id');
+        $assignment = $requestId ? AssignmentRequest::find($requestId) : null;
+
+        $transferRequest = AssignmentRequest::create([
+            'item_id' => $validated['item_id'],
+            'user_id' => auth()->id(),
+            'target_user_id' => $validated['transfer_user_id'],
+            'quantity' => $assignment ? $assignment->quantity : 1,
+            'status' => 'waiting for approval',
+            'requested_at' => now(),
+            'notes' => $validated['notes'] ?? null,
+        ]);
+
+        if ($assignment && $assignment->target_user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        if (!$transferRequest) {
+            return redirect()->back()->withErrors(['item_id' => 'Failed to create transfer request. Please try again.']);
+        }
+
+            return redirect()->route('endUser.my-assigned-items')->with('success', 'Transfer request submitted.');
+    }
+
     public function respondRequest(Request $request, $id)
     {
         $validated = $request->validate([

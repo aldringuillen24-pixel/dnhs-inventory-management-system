@@ -93,6 +93,7 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
     Route::get('/requests', [EndUserController::class, 'requests'])->name('requests');
 
     Route::get('/assigned-items', [EndUserController::class, 'myAssignedItems'])->name('my-assigned-items');
+    Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('assigned-items.transfer');
 
     Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
 
