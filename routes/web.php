@@ -44,8 +44,14 @@ Route::middleware('auth')->group(function () {
             return redirect()->route('propertyCustodian.dashboard');
         }
 
-        return view('pages.dashboard', ['title' => 'Dashboard']);
-    })->name('dashboard');
+        if ($user->role && strtolower($user->role->role_name) === 'end user') {
+            if ($user->temporary_password) {
+                return redirect()->route('endUser.onboarding');
+            }
+
+            return redirect()->route('endUser.dashboard');
+        }
+    });
 });
 
 
@@ -86,7 +92,7 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
     
     Route::get('/requests', [EndUserController::class, 'requests'])->name('requests');
 
-    Route::get('/requests/history', [EndUserController::class, 'requestHistory'])->name('requests.history');
+    Route::get('/assigned-items', [EndUserController::class, 'myAssignedItems'])->name('my-assigned-items');
 
     Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
 
@@ -120,3 +126,4 @@ Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.
 
     Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 });
+

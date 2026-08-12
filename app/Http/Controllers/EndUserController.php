@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\AssignmentRequest;
 use App\Models\Transaction;
 use App\Models\Inventory;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
@@ -144,20 +145,89 @@ class EndUserController extends Controller
 
         $inventoryItem = Inventory::findOrFail($validated['item_id']);
 
-        if ($validated['quantity'] > $inventoryItem->quantity) {
-            return redirect()->back()->withErrors(['quantity' => 'Requested quantity exceeds available stock.']);
+        $availableQuantity = Inventory::query()
+            ->where('item_name', $inventoryItem->item_name)
+            ->where('status', '!=', 'disposed')
+            ->sum('quantity');
+
+        if ($validated['quantity'] > $availableQuantity) {
+            return redirect()->back()->with(['error' => 'Requested quantity exceeds available stock.']);
         }
 
-        AssignmentRequest::create([
+        $custodian = User::whereHas('role', function ($query) {
+            $query->where('role_name', 'Property Custodian');
+        })->first();
+
+        if (!$custodian) {
+            return redirect()->back()->with(['error' => 'No property custodian is available to receive this request.']);
+        }
+
+        $assignmentRequest = AssignmentRequest::create([
             'item_id' => $inventoryItem->item_id,
             'user_id' => auth()->id(),
-            'target_user_id' => auth()->id(),
+            'target_user_id' => $custodian->id,
             'quantity' => $validated['quantity'],
             'status' => 'waiting for approval',
             'requested_at' => now(),
         ]);
 
-        return redirect()->route('endUser.my-requests')->with('success', 'Request submitted.');
+        if (!$assignmentRequest) {
+            return redirect()->back()->withErrors(['item_id' => 'Failed to create request. Please try again.']);
+        }else{
+            return redirect()->route('endUser.my-requests')->with('success', 'Request submitted to property custodian.');
+        }
+    }
+
+    public function myAssignedItems()
+    {
+        $user = auth()->user();
+
+        $assignedItems = AssignmentRequest::query()
+            ->with(['item:item_id,item_name,inventory_item_no', 'transaction'])
+            ->where('target_user_id', $user->id)
+            ->get()
+            ->map(function ($request) {
+                return [
+                    'type' => 'Assigned',
+                    'item_name' => optional($request->item)->item_name ?? 'Unknown item',
+                    'quantity' => $request->quantity,
+                    'date' => $request->responded_at ?? $request->requested_at ?? now(),
+                    'status' => $request->status,
+                    'request' => $request,
+                ];
+            });
+
+        $requestedItems = AssignmentRequest::query()
+            ->with(['item:item_id,item_name,inventory_item_no', 'targetUser'])
+            ->where('user_id', $user->id)
+            ->get()
+            ->map(function ($request) {
+                return [
+                    'type' => 'Requested',
+                    'item_name' => optional($request->item)->item_name ?? 'Unknown item',
+                    'quantity' => $request->quantity,
+                    'date' => $request->requested_at ?? now(),
+                    'status' => $request->status,
+                    'request' => $request,
+                ];
+            });
+
+        $endUsers = User::whereHas('role', function ($query) {
+            $query->where('role_name', 'End User');
+        })
+        ->whereKeyNot(auth()->id())
+        ->get();
+
+        $activityRows = $assignedItems
+            ->merge($requestedItems)
+            ->sortByDesc(fn ($row) => $row['date'])
+            ->values();
+
+        return view('pages.endUser.myAssignedItems', [
+            'title' => 'My Assigned Items',
+            'activityRows' => $activityRows,
+            'endUsers' => $endUsers,
+        ]);
     }
 
     public function respondRequest(Request $request, $id)

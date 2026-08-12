@@ -9,7 +9,10 @@ class AssignmentRequest extends Model
 {
     use HasFactory;
 
-    protected $table = 'assignment_requests';
+    // Use the generic `requests` table name to represent both custodian-initiated
+    // and end-user-initiated requests. Keep the model name `AssignmentRequest`
+    // to avoid collision with the HTTP `Request` class.
+    protected $table = 'requests';
 
     protected $fillable = [
         'item_id',

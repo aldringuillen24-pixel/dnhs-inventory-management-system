@@ -142,9 +142,9 @@ class MenuHelper
             ],
             'end user' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/end-user/dashboard'],
-                ['icon' => 'dashboard', 'name' => 'Requests', 'path' => '/end-user/requests'],
+                ['icon' => 'dashboard', 'name' => 'Custodian Requests', 'path' => '/end-user/requests'],
                 ['icon' => 'dashboard', 'name'=> 'My Requests', 'path' => '/end-user/requests/my-requests'],
-                ['icon' => 'dashboard', 'name' => 'Request History', 'path' => '/end-user/requests/history'],
+                ['icon' => 'dashboard', 'name' => 'My Assigned Items', 'path' => '/end-user/assigned-items'],
                 ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/end-user/profile'],
             ],
             default => self::getMainNavItems(),

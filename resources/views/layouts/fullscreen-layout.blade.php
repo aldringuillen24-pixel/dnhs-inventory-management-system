@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
 
-    <title>{{ $title ?? 'Dashboard' }} | TailAdmin - Laravel Tailwind CSS Admin Dashboard Template</title>
+    <title>{{ $title ?? 'Dashboard' }} | Dian-ay NHS Inventory</title>
 
     <!-- Scripts -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
@@ -111,10 +111,10 @@ window.addEventListener('resize', checkMobile);">
     @if (session('success') || session('error'))
         <x-common.toast-stack class="top-4 right-4">
             @if (session('success'))
-                <x-common.toast type="success" title="Signed in successfully" :message="session('success')" />
+                <x-common.toast type="success" title="Success" :message="session('success')" />
             @endif
             @if (session('error'))
-                <x-common.toast type="error" title="Sign-in failed" :message="session('error')" />
+                <x-common.toast type="error" title="Error" :message="session('error')" />
             @endif
         </x-common.toast-stack>
     @endif

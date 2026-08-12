@@ -235,11 +235,6 @@
                                                                     <th class="px-4 py-3">QR Code</th>
                                                                 </tr>
                                                             </thead>
-
-
-
-
-
                                                             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                                                                 @foreach ($inventoryItem->sourceItems as $sourceItem)
                                                                     <tr class="text-center">
@@ -283,7 +278,8 @@
                                                                                 </span>
                                                                             @endif
                                                                             </td>
-                                                                            <td class="px-4 py-3"></td>                                                                        </tr>
+                                                                            <td class="px-4 py-3"></td>                                                                        
+                                                                        </tr>
                                                                     @endforeach
                                                                 </tbody>
                                                             </table>

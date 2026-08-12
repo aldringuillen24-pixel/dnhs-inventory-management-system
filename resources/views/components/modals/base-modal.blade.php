@@ -6,7 +6,7 @@
     @endisset
 
     <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 z-[1100] flex items-center justify-center px-4 shadow-lg" role="dialog" aria-modal="true">
-        <div class="w-full {{ $maxWidth }} rounded-md border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700 mt-6">
+        <div class="w-full {{ $maxWidth }} rounded-md border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700 mt-8">
             <div class="mb-4 flex items-start justify-between gap-3">
                 <div>
                     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $title }}</h3>

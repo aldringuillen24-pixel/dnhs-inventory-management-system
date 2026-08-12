@@ -7,6 +7,8 @@
 		<div class="col-span-12 xl:col-span-12">
 			<x-cards.base-card title="My Requests" subtitle="Requests you created">
 				<div class="mb-4 flex justify-end gap-3">
+
+				<!-- Transfer Request Modal -->
 					<x-modals.base-modal title="Request Transfer" subtitle="Request a transfer">
 						<x-slot:trigger>
 							<button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 transition hover:bg-brand-50">
@@ -21,6 +23,8 @@
 							</div>
 						</div>
 					</x-modals.base-modal>
+
+					<!-- New Request Modal -->
 					<x-modals.base-modal title="New Request" subtitle="Request an item">
 						<x-slot:trigger>
 							<button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
@@ -65,7 +69,7 @@
 									<td class="px-4 py-4">{{ $req->quantity }}</td>
 									<td class="px-4 py-4">{{ optional($req->item)->item_name ?? 'Unknown item' }}</td>									<td class="px-4 py-4">{{ $req->requested_at->format('Y-m-d') }}</td>
 									<td class="px-4 py-4">
-										<span class="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900 dark:text-blue-300">
+										<span class="inline-flex items-center rounded-md bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900 dark:text-blue-300">
 											{{ ucfirst($req->status) }}
 										</span>
 									</td>

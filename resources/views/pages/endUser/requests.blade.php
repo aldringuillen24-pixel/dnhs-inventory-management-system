@@ -26,12 +26,12 @@
                                     <td class="px-4 py-4">{{ optional($req->user)->full_name ?? 'Custodian' }}</td>
                                     <td class="px-4 py-4">{{ $req->requested_at->format('Y-m-d') }}</td>
                                     <td class="px-4 py-4">
-                                        <span class="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900 dark:text-blue-300">
+                                        <span class="inline-flex items-center rounded-md bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900 dark:text-blue-300">
                                             {{ ucfirst($req->status) }}
                                         </span>
                                     </td>
                                     <td class="px-4 py-4">
-                                        @if($req->status === 'waiting for approval')
+                                        @if($req->status === 'waiting for acceptance')
                                             <form method="POST" action="{{ route('endUser.requests.respond', $req->id) }}" class="inline">
                                                 @csrf
                                                 <input type="hidden" name="action" value="accept" />
@@ -43,7 +43,7 @@
                                                 <button type="submit" class="rounded-md bg-red-500 px-3 py-1 text-sm font-medium text-white hover:bg-red-600">Decline</button>
                                             </form>
                                         @else
-                                            <span class="text-sm text-gray-500">{{ ucfirst($req->status) }}</span>
+                                            <span class="text-sm text-gray-500">--</span>
                                         @endif
                                     </td>
                                 </tr>
