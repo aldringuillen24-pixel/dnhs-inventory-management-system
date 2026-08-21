@@ -263,7 +263,7 @@
                             @empty($transaction)
                                 <tfoot class="bg-gray-50 text-sm text-gray-500 dark:bg-gray-800 dark:text-gray-400 ">
                                     <tr>
-                                        <td colspan="5" class="px-4 py-6 text-center">No transactions found.</td>
+                                        <td colspan="7" class="px-4 py-6 text-center">No transactions found.</td>
                                     </tr>
                                 </tfoot>
                             @endempty

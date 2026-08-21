@@ -76,6 +76,8 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::get('/profile', function () {
         return view('pages.propertyCustodian.profile', ['title' => 'Profile']);
     })->name('profile');
+
+    Route::patch('/profile', [PropertyCustodianController::class, 'updateProfile'])->name('profile.update');
 });
 
 // End User Routes (require end user role)
@@ -127,4 +129,3 @@ Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.
 
     Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 });
-

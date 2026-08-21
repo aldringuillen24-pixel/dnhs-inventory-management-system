@@ -204,7 +204,30 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Assignment request submitted for approval.');
     }
 
+    public function updateProfile(Request $request)
+    {
+        $user = auth()->user();
 
+        $validated = $request->validate([
+            'first_name' => ['required', 'string', 'max:255'],
+            'last_name' => ['nullable', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', 'unique:users,email,' . $user->id],
+            'password' => ['nullable', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user->first_name = $validated['first_name'];
+        $user->last_name = $validated['last_name'] ?? '';
+        $user->email = $validated['email'];
+
+        if (!empty($validated['password'])) {
+            $user->password = $validated['password'];
+        }
+
+        $user->save();
+
+        return redirect()->route('propertyCustodian.dashboard')->with('success', 'Profile updated successfully.');
+    }
+    
     public function stockIn(Request $request)
     {
         $validated = $request->validate([
