@@ -314,7 +314,7 @@
 }
 
 .sidebar:hover {
-  width: 290px;
+  width: 240px;
 }
 .sidebar:hover .logo {
   display: block;
@@ -879,4 +879,8 @@ pre[class*='language-'] {
   .flatpickr-calendar.static {
     margin-right: -60px !important;
   }
+}
+
+[x-cloak] {
+  display: none !important;
 }

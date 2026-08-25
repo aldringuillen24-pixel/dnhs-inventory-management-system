@@ -8,6 +8,12 @@
 
     <title>{{ $title ?? 'Dashboard' }} | Dian-ay NHS Inventory</title>
 
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+    </style>
+
     <!-- Scripts -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 
@@ -103,10 +109,6 @@ const checkMobile = () => {
     }
 };
 window.addEventListener('resize', checkMobile);">
-
-    {{-- preloader --}}
-    <x-common.preloader/>
-    {{-- preloader end --}}
 
     @if (session('success') || session('error'))
         <x-common.toast-stack class="top-4 right-4">

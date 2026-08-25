@@ -8,6 +8,12 @@
 
     <title>{{ $title ?? 'Dashboard' }} | Dian-ay Inventory</title>
 
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+    </style>
+
     <!-- Scripts -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 
@@ -45,13 +51,13 @@
             });
 
             Alpine.store('sidebar', {
-                // Initialize based on screen size
-                isExpanded: window.innerWidth >= 1280, // true for desktop, false for mobile
+                isExpanded: window.innerWidth >= 1280 && localStorage.getItem('sidebar-expanded') !== 'false',
                 isMobileOpen: false,
                 isHovered: false,
 
                 toggleExpanded() {
                     this.isExpanded = !this.isExpanded;
+                    localStorage.setItem('sidebar-expanded', this.isExpanded ? 'true' : 'false');
                     // When toggling desktop sidebar, ensure mobile menu is closed
                     this.isMobileOpen = false;
                 },
@@ -95,21 +101,16 @@
 
 <body
     x-data="{ 'loaded': true}"
-    x-init="$store.sidebar.isExpanded = window.innerWidth >= 1280;
-    const checkMobile = () => {
+    x-init="const checkMobile = () => {
         if (window.innerWidth < 1280) {
             $store.sidebar.setMobileOpen(false);
             $store.sidebar.isExpanded = false;
         } else {
             $store.sidebar.isMobileOpen = false;
-            $store.sidebar.isExpanded = true;
+            $store.sidebar.isExpanded = localStorage.getItem('sidebar-expanded') !== 'false';
         }
     };
     window.addEventListener('resize', checkMobile);">
-
-    {{-- preloader --}}
-    <x-common.preloader/>
-    {{-- preloader end --}}
 
     @if (session('success') || session('error'))
         <x-common.toast-stack class="top-4 right-4">
@@ -126,9 +127,9 @@
         @include('layouts.backdrop')
         @include('layouts.sidebar')
 
-        <div class="flex-1 transition-all duration-300 ease-in-out"
+        <div x-cloak class="flex-1 transition-all duration-300 ease-in-out"
             :class="{
-                'xl:ml-[290px]': $store.sidebar.isExpanded || $store.sidebar.isHovered,
+                'xl:ml-[240px]': $store.sidebar.isExpanded || $store.sidebar.isHovered,
                 'xl:ml-[90px]': !$store.sidebar.isExpanded && !$store.sidebar.isHovered,
                 'ml-0': $store.sidebar.isMobileOpen
             }">

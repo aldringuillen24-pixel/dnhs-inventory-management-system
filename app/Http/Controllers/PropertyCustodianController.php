@@ -15,7 +15,7 @@ class PropertyCustodianController extends Controller
 {
     public function onboarding()
     {
-        $user = auth()->user();
+        $user = request()->user();
 
         if (!$user->temporary_password) {
             return redirect()->route('dashboard');
@@ -26,7 +26,7 @@ class PropertyCustodianController extends Controller
 
     public function onboardingPost(Request $request)
     {
-        $user = auth()->user();
+        $user = $request->user();
 
         if (!$user->temporary_password) {
             return redirect()->route('dashboard');
@@ -408,6 +408,7 @@ class PropertyCustodianController extends Controller
 
         $inventoryItem = Inventory::findOrFail($validated['item_id']);
         $endUser = User::findOrFail($validated['user_id']);
+        $userId = $request->user()?->getAuthIdentifier();
 
         if ($inventoryItem->status !== 'available') {
             return redirect()->back()->withErrors(['item_id' => 'The selected item is not available for assignment.']);
@@ -417,10 +418,10 @@ class PropertyCustodianController extends Controller
             return redirect()->back()->withErrors(['quantity' => 'The requested quantity exceeds the available stock.']);
         }
 
-        DB::transaction(function () use ($inventoryItem, $endUser, $validated): void {
+        DB::transaction(function () use ($inventoryItem, $endUser, $validated, $userId): void {
             AssignmentRequest::create([
                 'item_id' => $inventoryItem->item_id,
-                'user_id' => auth()->id(),
+            'user_id' => $userId,
                 'target_user_id' => $endUser->id,
                 'quantity' => $validated['quantity'],
                 'status' => 'waiting for approval',
@@ -433,7 +434,7 @@ class PropertyCustodianController extends Controller
 
     public function updateProfile(Request $request)
     {
-        $user = auth()->user();
+        $user = $request->user();
 
         $validated = $request->validate([
             'first_name' => ['required', 'string', 'max:255'],
@@ -470,6 +471,7 @@ class PropertyCustodianController extends Controller
 
         $category = Category::findOrFail($validated['category_id']);
         $serialNumbers = [];
+        $userId = $request->user()?->getAuthIdentifier();
 
         if ($category->requires_serial_number) {
             $serialData = $request->validate([
@@ -480,11 +482,11 @@ class PropertyCustodianController extends Controller
             $serialNumbers = $serialData['serial_numbers'];
         }
 
-        DB::transaction(function () use ($validated, $serialNumbers, $category): void {
+        DB::transaction(function () use ($validated, $serialNumbers, $category, $userId): void {
             $itemAttributes = [
                 'category_id' => $validated['category_id'],
                 'unit' => $validated['unit'],
-                'user_id' => auth()->id(),
+                'user_id' => $userId,
                 'item_name' => $validated['item_name'],
                 'description' => $validated['description'] ?? null,
                 'ics_no' => $validated['ics_no'] ?? null,

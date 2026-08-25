@@ -1,6 +1,7 @@
 import './bootstrap';
 import Alpine from 'alpinejs';
 import ApexCharts from 'apexcharts';
+import { createIcons, icons } from 'lucide';
 
 // flatpickr
 import flatpickr from 'flatpickr';
@@ -14,11 +15,14 @@ window.Alpine = Alpine;
 window.ApexCharts = ApexCharts;
 window.flatpickr = flatpickr;
 window.FullCalendar = Calendar;
+window.lucide = { createIcons, icons };
 
 Alpine.start();
 
 // Initialize components on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize any client-side Lucide icon tags (<i data-lucide="..."></i>)
+    createIcons({ icons });
     // Map imports
     if (document.querySelector('#mapOne')) {
         import('./components/map').then(module => module.initMap());

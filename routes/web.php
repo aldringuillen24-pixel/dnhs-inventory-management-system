@@ -10,6 +10,7 @@ use App\Http\Controllers\EndUserController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\AiAssistantController;
 use App\Models\User;
 
 // Authentication Routes
@@ -29,8 +30,8 @@ Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 // Protected Routes (require authentication)
 Route::middleware('auth')->group(function () {
     // Dashboard
-    Route::get('/', function () {
-        $user = auth()->user();
+    Route::get('/', function (Request $request) {
+        $user = $request->user();
 
         if ($user->role && strtolower($user->role->role_name) === 'administrator') {
             return redirect()->route('admin.dashboard');
@@ -135,3 +136,6 @@ Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.
 
     Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 });
+
+// Authenticated AI Assistant endpoint (accessible by all roles with role-scoped responses)
+Route::middleware('auth')->post('/api/ai/chat', [AiAssistantController::class, 'chat'])->name('ai.chat');

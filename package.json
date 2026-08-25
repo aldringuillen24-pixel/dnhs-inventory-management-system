@@ -26,6 +26,7 @@
         "apexcharts": "^5.3.5",
         "flatpickr": "^4.6.13",
         "jsvectormap": "^1.7.0",
+        "lucide": "^1.34.0",
         "prismjs": "^1.30.0",
         "swiper": "^12.0.3"
     }
