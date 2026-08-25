@@ -142,8 +142,7 @@ class MenuHelper
             ],
             'end user' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/end-user/dashboard'],
-                ['icon' => 'dashboard', 'name' => 'Custodian Requests', 'path' => '/end-user/requests'],
-                ['icon' => 'dashboard', 'name'=> 'My Requests', 'path' => '/end-user/requests/my-requests'],
+                ['icon' => 'task', 'name' => 'Requests', 'path' => '/end-user/requests'],
                 ['icon' => 'dashboard', 'name' => 'My Assigned Items', 'path' => '/end-user/assigned-items'],
                 ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/end-user/profile'],
             ],

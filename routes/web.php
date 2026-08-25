@@ -71,6 +71,14 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assignItem'); 
 
+    Route::post('/requests/{id}/approve', [PropertyCustodianController::class, 'approveRequest'])->name('requests.approve');
+
+    Route::post('/requests/{id}/decline', [PropertyCustodianController::class, 'declineRequest'])->name('requests.decline');
+
+    Route::post('/transfers/{id}/approve', [PropertyCustodianController::class, 'approveTransfer'])->name('transfers.approve');
+
+    Route::post('/transfers/{id}/decline', [PropertyCustodianController::class, 'declineTransfer'])->name('transfers.decline');
+
     Route::get('/reports', [PropertyCustodianController::class, 'reports'])->name('reports');
 
     Route::get('/profile', function () {
@@ -89,15 +97,13 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
         return view('pages.endUser.dashboard', ['title' => 'End User Dashboard']);
     })->name('dashboard');
 
-    Route::get('/requests/my-requests', [EndUserController::class, 'myRequests'])->name('my-requests');
-    Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
-    
     Route::get('/requests', [EndUserController::class, 'requests'])->name('requests');
+    Route::get('/requests/my-requests', fn () => redirect()->route('endUser.requests'))->name('my-requests');
+    Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
+    Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
 
     Route::get('/assigned-items', [EndUserController::class, 'myAssignedItems'])->name('my-assigned-items');
     Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('assigned-items.transfer');
-
-    Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
 
     Route::get('/profile', function () {
         return view('pages.endUser.profile', ['title' => 'Profile']);

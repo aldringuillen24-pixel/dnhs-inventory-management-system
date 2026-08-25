@@ -75,15 +75,47 @@ class EndUserController extends Controller
     {
         $user = auth()->user();
 
-        $requests = AssignmentRequest::query()
-            ->with(['item:item_id,item_name,inventory_item_no', 'user:id,first_name,last_name'])
+        // 1. My Requests (requests created by this end user to custodian/others)
+        $myRequests = AssignmentRequest::query()
+            ->with(['item:item_id,item_name,inventory_item_no', 'targetUser:id,first_name,last_name', 'transaction'])
+            ->where('user_id', $user->id)
+            ->orderBy('requested_at', 'desc')
+            ->get();
+
+        // 2. Incoming Requests — custodian assignments AND transfer requests directed to this user
+        $incomingRequests = AssignmentRequest::query()
+            ->with(['item:item_id,item_name,inventory_item_no', 'user:id,first_name,last_name,email'])
             ->where('target_user_id', $user->id)
             ->orderBy('requested_at', 'desc')
             ->get();
 
+        // Available items for creating a request (grouped by item_name)
+        $inventoryItems = Inventory::query()
+            ->where('status', '!=', 'disposed')
+            ->orderBy('item_name')
+            ->get()
+            ->groupBy(fn (Inventory $item) => $item->item_name)
+            ->map(function ($group) {
+                $first = $group->first();
+                return [
+                    'item_id'   => $first->item_id,
+                    'item_name' => $first->item_name,
+                    'quantity'  => $group->sum('quantity'),
+                ];
+            })->values();
+
+        $pendingIncomingCount = $incomingRequests
+            ->whereIn('status', ['waiting for approval', 'waiting for transfer approval'])
+            ->count();
+        $myPendingCount = $myRequests->where('status', 'waiting for approval')->count();
+
         return view('pages.endUser.requests', [
-            'title' => 'My Requests',
-            'requests' => $requests,
+            'title'                => 'Requests',
+            'myRequests'           => $myRequests,
+            'incomingRequests'     => $incomingRequests,
+            'availableItems'       => $inventoryItems,
+            'pendingIncomingCount' => $pendingIncomingCount,
+            'myPendingCount'       => $myPendingCount,
         ]);
     }
 
@@ -106,34 +138,7 @@ class EndUserController extends Controller
 
     public function myRequests()
     {
-        $user = auth()->user();
-
-        $requests = AssignmentRequest::query()
-            ->with(['item:item_id,item_name,inventory_item_no', 'targetUser:id,first_name,last_name', 'transaction'])
-            ->where('user_id', $user->id)
-            ->orderBy('requested_at', 'desc')
-            ->get();
-
-        // available items for creating a request (grouped by item_name)
-        $inventoryItems = Inventory::query()
-            ->where('status', '!=', 'disposed')
-            ->orderBy('item_name')
-            ->get()
-            ->groupBy(fn (Inventory $item) => $item->item_name)
-            ->map(function ($group) {
-                $first = $group->first();
-                return [
-                    'item_id' => $first->item_id,
-                    'item_name' => $first->item_name,
-                    'quantity' => $group->sum('quantity'),
-                ];
-            })->values();
-
-        return view('pages.endUser.myRequest', [
-            'title' => 'My Requests',
-            'requests' => $requests,
-            'availableItems' => $inventoryItems,
-        ]);
+        return redirect()->route('endUser.requests');
     }
 
     public function storeRequest(Request $request)
@@ -173,8 +178,8 @@ class EndUserController extends Controller
 
         if (!$assignmentRequest) {
             return redirect()->back()->withErrors(['item_id' => 'Failed to create request. Please try again.']);
-        }else{
-            return redirect()->route('endUser.my-requests')->with('success', 'Request submitted to property custodian.');
+        } else {
+            return redirect()->route('endUser.requests')->with('success', 'Request submitted to property custodian.');
         }
     }
 
@@ -185,30 +190,36 @@ class EndUserController extends Controller
         $assignedItems = AssignmentRequest::query()
             ->with(['item:item_id,item_name,inventory_item_no', 'transaction'])
             ->where('target_user_id', $user->id)
+            // Hide transferred items — user no longer possesses them
+            ->where('status', '!=', 'transferred')
             ->get()
             ->map(function ($request) {
                 return [
-                    'type' => 'Assigned',
+                    'type'      => 'Assigned',
                     'item_name' => optional($request->item)->item_name ?? 'Unknown item',
-                    'quantity' => $request->quantity,
-                    'date' => $request->responded_at ?? $request->requested_at ?? now(),
-                    'status' => $request->status,
-                    'request' => $request,
+                    'quantity'  => $request->quantity,
+                    'date'      => $request->responded_at ?? $request->requested_at ?? now(),
+                    'status'    => $request->status,
+                    'request'   => $request,
                 ];
             })->toBase();
 
         $requestedItems = AssignmentRequest::query()
-            ->with(['item:item_id,item_name,inventory_item_no', 'targetUser'])
+            ->with(['item:item_id,item_name,inventory_item_no', 'targetUser.role'])
             ->where('user_id', $user->id)
+            // Only items requisitioned from the Property Custodian (not outgoing transfers sent to colleagues)
+            ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'))
+            // Exclude transferred items (no longer in possession)
+            ->where('status', '!=', 'transferred')
             ->get()
             ->map(function ($request) {
                 return [
-                    'type' => 'Requested',
+                    'type'      => 'Requested',
                     'item_name' => optional($request->item)->item_name ?? 'Unknown item',
-                    'quantity' => $request->quantity,
-                    'date' => $request->requested_at ?? now(),
-                    'status' => $request->status,
-                    'request' => $request,
+                    'quantity'  => $request->quantity,
+                    'date'      => $request->requested_at ?? now(),
+                    'status'    => $request->status,
+                    'request'   => $request,
                 ];
             })->toBase();
 
@@ -268,51 +279,39 @@ class EndUserController extends Controller
     public function transferAssignedItem(Request $request)
     {
         $validated = $request->validate([
-            'request_id' => ['required', 'exists:requests,id'],
+            'request_id'       => ['required', 'exists:requests,id'],
             'transfer_user_id' => ['required', 'exists:users,id'],
-            'item_id' => ['required', 'exists:inventory,item_id'],
-            'notes' => ['nullable', 'string', 'max:1000'],
+            'item_id'          => ['required', 'exists:inventory,item_id'],
+            'notes'            => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $assignment = AssignmentRequest::where('id', $validated['request_id'])
-            ->where('target_user_id', auth()->id())
+        // Find the original assignment belonging to the sender (approved/accepted)
+        $original = AssignmentRequest::where('id', $validated['request_id'])
+            ->where(function ($q) {
+                $q->where('target_user_id', auth()->id())
+                  ->orWhere('user_id', auth()->id());
+            })
             ->whereIn('status', ['approved', 'accepted'])
             ->firstOrFail();
 
-        DB::transaction(function () use ($assignment, $validated) {
-            $itemId = $validated['item_id'];
-            $recipientId = $validated['transfer_user_id'];
-            $transferQty = $assignment->quantity;
+        DB::transaction(function () use ($original, $validated) {
+            // Lock the original assignment while transfer is pending
+            $original->status = 'transfer pending';
+            $original->save();
 
-            if ($assignment->transaction_id) {
-                $originTx = Transaction::find($assignment->transaction_id);
-
-                if ($originTx) {
-                    if ($originTx->quantity === $transferQty) {
-                        $originTx->quantity = 0;
-                        $originTx->status = 'transferred';
-                        $originTx->save();
-                    } else {
-                        $originTx->decrement('quantity', $transferQty);
-                    }
-                }
-            }
-
-            Transaction::create([
-                'item_id' => $itemId,
-                'user_id' => $recipientId,
-                'quantity' => $transferQty,
-                'transaction_date' => now(),
-                'status' => 'assigned',
+            // Create a new pending transfer request (Step 1 of 3)
+            AssignmentRequest::create([
+                'item_id'        => $validated['item_id'],
+                'user_id'        => auth()->id(),               // sender
+                'target_user_id' => $validated['transfer_user_id'], // recipient
+                'quantity'       => $original->quantity,
+                'status'         => 'waiting for transfer approval',
+                'notes'          => $validated['notes'] ?? null,
+                'requested_at'   => now(),
             ]);
-
-            $assignment->status = 'waiting for transfer approval';
-            $assignment->responded_at = now();
-            $assignment->notes = $validated['notes'] ?? $assignment->notes;
-            $assignment->save();
         });
 
-        return redirect()->route('endUser.my-assigned-items')->with('success', 'Item partially transferred successfully.');
+        return redirect()->route('endUser.my-assigned-items')->with('success', 'Transfer request sent. Waiting for the recipient to accept.');
     }
 
     public function respondRequest(Request $request, $id)
@@ -323,11 +322,39 @@ class EndUserController extends Controller
 
         $assignment = AssignmentRequest::findOrFail($id);
 
-        // only target user may respond
+        // Only target user may respond
         if ($assignment->target_user_id !== auth()->id()) {
             abort(403);
         }
 
+        // ── TRANSFER REQUEST (step 2 of 3: recipient accepts/declines) ──────────
+        if ($assignment->status === 'waiting for transfer approval') {
+
+            if ($validated['action'] === 'decline') {
+                DB::transaction(function () use ($assignment) {
+                    // Restore the sender's original assignment back to 'approved'
+                    AssignmentRequest::where('user_id', $assignment->user_id)
+                        ->where('item_id', $assignment->item_id)
+                        ->where('status', 'transfer pending')
+                        ->update(['status' => 'approved']);
+
+                    $assignment->status = 'declined';
+                    $assignment->responded_at = now();
+                    $assignment->save();
+                });
+
+                return redirect()->route('endUser.requests')->with('success', 'Transfer request declined.');
+            }
+
+            // Accept: advance to custodian approval (step 3 of 3)
+            $assignment->status = 'waiting for custodian approval';
+            $assignment->responded_at = now();
+            $assignment->save();
+
+            return redirect()->route('endUser.requests')->with('success', 'Transfer accepted. Waiting for Property Custodian approval.');
+        }
+
+        // ── NORMAL ASSIGNMENT REQUEST (from custodian) ───────────────────────────
         if ($validated['action'] === 'decline') {
             $assignment->status = 'declined';
             $assignment->responded_at = now();
@@ -336,7 +363,7 @@ class EndUserController extends Controller
             return redirect()->route('endUser.requests')->with('success', 'Request declined.');
         }
 
-        // accept: create transaction, decrement inventory, mark request approved
+        // Accept: create transaction, decrement inventory, mark request approved
         DB::transaction(function () use ($assignment) {
             $inventory = Inventory::findOrFail($assignment->item_id);
 
@@ -345,12 +372,11 @@ class EndUserController extends Controller
             }
 
             $transaction = Transaction::create([
-                'item_id' => $assignment->item_id,
-                'user_id' => $assignment->target_user_id,
-                'quantity' => $assignment->quantity,
-                'transaction_type' => 'assignment',
+                'item_id'          => $assignment->item_id,
+                'user_id'          => $assignment->target_user_id,
+                'quantity'         => $assignment->quantity,
                 'transaction_date' => $assignment->requested_at ?? now(),
-                'status' => 'assigned',
+                'status'           => 'assigned',
             ]);
 
             $assignment->transaction_id = $transaction->id;
@@ -358,7 +384,7 @@ class EndUserController extends Controller
             $assignment->responded_at = now();
             $assignment->save();
 
-            // update inventory
+            // Update inventory
             $inventory->decrement('quantity', $assignment->quantity);
             if ($inventory->quantity === 0) {
                 $inventory->status = 'assigned';

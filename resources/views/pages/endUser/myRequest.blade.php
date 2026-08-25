@@ -6,23 +6,7 @@
 	<div class="grid gap-6 xl:grid-cols-12 mt-6">
 		<div class="col-span-12 xl:col-span-12">
 			<x-cards.base-card title="My Requests" subtitle="Requests you created">
-				<div class="mb-4 flex justify-end gap-3">
-
-				<!-- Transfer Request Modal -->
-					<x-modals.base-modal title="Request Transfer" subtitle="Request a transfer">
-						<x-slot:trigger>
-							<button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 transition hover:bg-brand-50">
-								Request Transfer
-							</button>
-						</x-slot:trigger>
-						<div class="space-y-4">
-							<p class="text-sm text-gray-600 dark:text-gray-400">Submit a transfer request for an assigned item. A property custodian will review this request.</p>
-							<div class="flex justify-end gap-3 pt-2">
-								<button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Close</button>
-								<button type="button" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Request Transfer</button>
-							</div>
-						</div>
-					</x-modals.base-modal>
+				<div class="mb-4 flex justify-start gap-3">
 
 					<!-- New Request Modal -->
 					<x-modals.base-modal title="New Request" subtitle="Request an item">

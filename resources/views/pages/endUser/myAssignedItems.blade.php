@@ -37,7 +37,7 @@
                                     </td>
                                     <td class="px-4 py-4">
                                         @php($requestRecord = $row['request'])
-                                        @php($canTransfer = $row['type'] === 'Assigned' && in_array(strtolower((string) $row['status']), ['approved', 'accepted']))
+                                        @php($canTransfer = in_array(strtolower((string) $row['status']), ['approved', 'accepted']))
 
                                         <div x-data="{ actionOpen: false, detailsModalOpen: false, transferModalOpen: false, menuStyle: '', toggleMenu(event) { if (!this.actionOpen) { const rect = event.currentTarget.getBoundingClientRect(); this.menuStyle = `top: ${rect.bottom + 4}px; left: ${rect.right - 144}px;`; } this.actionOpen = !this.actionOpen; } }" class="relative inline-block">
                                             <button type="button" @click="toggleMenu($event)" class="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Actions for {{ $row['item_name'] }}">

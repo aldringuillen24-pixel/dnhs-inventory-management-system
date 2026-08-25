@@ -87,7 +87,7 @@ class PropertyCustodianController extends Controller
         return view('pages.propertyCustodian.inventory', compact('categories', 'inventoryItems'));
     }
 
-    // Transactions method to display the transactions page with available inventory items and end users
+    // Transactions method to display the transactions page with available inventory items, incoming requests, and transactions
     public function transactions()
     {
         $inventoryItems = Inventory::query()
@@ -121,53 +121,280 @@ class PropertyCustodianController extends Controller
                 'name' => $user->full_name,
             ]);
 
+        // Incoming requests from End Users requiring Custodian action
+        $incomingRequests = AssignmentRequest::query()
+            ->with([
+                'user:id,first_name,last_name,username',
+                'item:item_id,inventory_item_no,item_name,quantity,category_id,status',
+                'item.category:category_id,category_name',
+            ])
+            ->where('status', 'waiting for approval')
+            ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
+            ->orderBy('requested_at', 'desc')
+            ->get();
+
+        // Transfer requests awaiting custodian approval (peer-to-peer, step 3 of 3)
+        $pendingTransfers = AssignmentRequest::query()
+            ->with([
+                'user:id,first_name,last_name,username',
+                'targetUser:id,first_name,last_name,username',
+                'item:item_id,inventory_item_no,item_name,quantity,category_id,status',
+                'item.category:category_id,category_name',
+            ])
+            ->where('status', 'waiting for custodian approval')
+            ->orderBy('requested_at', 'desc')
+            ->get();
+
+        // Calculate total available stock across the warehouse for each requested item name
+        $itemNames = $incomingRequests->pluck('item.item_name')->filter()->unique();
+
+        $availableStockByItemName = Inventory::query()
+            ->whereIn('item_name', $itemNames)
+            ->where('status', 'available')
+            ->groupBy('item_name')
+            ->selectRaw('item_name, SUM(quantity) as total_available_stock')
+            ->pluck('total_available_stock', 'item_name');
+
+        $incomingRequests->each(function ($req) use ($availableStockByItemName) {
+            $itemName = optional($req->item)->item_name;
+            $req->total_available_stock = (int) ($availableStockByItemName->get($itemName, 0));
+        });
+
+        // Completed / official transactions
         $transactions = Transaction::query()
             ->with([
-                'user:id,first_name,last_name',
+                'user:id,first_name,last_name,username',
                 'item:item_id,inventory_item_no,item_name,category_id',
+                'item.category:category_id,category_name',
             ])
             ->orderBy('transaction_date', 'desc')
             ->get();
 
-        // Include pending assignment requests in the transactions table view
-        $assignmentRequests = AssignmentRequest::query()
-            ->with(['item:item_id,inventory_item_no,item_name,category_id', 'targetUser:id,first_name,last_name'])
-            ->where('status', 'waiting for approval')
-            ->orderBy('requested_at', 'desc')
-            ->get()
-            ->map(function (AssignmentRequest $req) {
-                // create a transient Transaction model so views/components that expect Eloquent methods work
-                $t = new Transaction();
-                $t->id = null; // not persisted
-                $t->quantity = $req->quantity;
-                $t->transaction_date = $req->requested_at;
-                $t->return_date = null;
-                $t->status = ucfirst($req->status);
-                // set relations so view optional() calls work
-                $t->setRelation('item', $req->item);
-                $t->setRelation('user', $req->targetUser);
-                // mark as request and attach request id
-                $t->is_request = true;
-                $t->request_id = $req->id;
-                return $t;
-            });
-
-        // Merge and sort both collections by date desc
-        $transactions = $transactions->merge($assignmentRequests)
-            ->sortByDesc(function ($t) {
-                if (isset($t->transaction_date) && $t->transaction_date instanceof \DateTimeInterface) {
-                    return $t->transaction_date->getTimestamp();
-                }
-
-                return strtotime((string) ($t->transaction_date ?? now()));
-            })->values();
+        // Metrics calculation
+        $totalAssignedCount   = Transaction::where('status', 'assigned')->sum('quantity');
+        $pendingRequestsCount = $incomingRequests->count() + $pendingTransfers->count();
+        $totalTransactionsCount = $transactions->count();
+        $overdueReturnsCount  = Transaction::whereNotNull('return_date')
+            ->where('return_date', '<', now())
+            ->where('status', '!=', 'returned')
+            ->count();
 
         return view('pages.propertyCustodian.transactions', [
-            'title' => 'Transactions',
+            'title'                  => 'Transactions',
             'availableInventoryItems' => $groupedInventory,
-            'endUsers' => $endUsers,
-            'transactions' => $transactions,
+            'endUsers'               => $endUsers,
+            'incomingRequests'       => $incomingRequests,
+            'pendingTransfers'       => $pendingTransfers,
+            'transactions'           => $transactions,
+            'totalAssignedCount'     => $totalAssignedCount,
+            'pendingRequestsCount'   => $pendingRequestsCount,
+            'totalTransactionsCount' => $totalTransactionsCount,
+            'overdueReturnsCount'    => $overdueReturnsCount,
         ]);
+    }
+
+    public function approveRequest(Request $request, $id)
+    {
+        $assignmentRequest = AssignmentRequest::with(['item', 'user'])->findOrFail($id);
+
+        if ($assignmentRequest->status !== 'waiting for approval') {
+            return redirect()->back()->with('error', 'This request has already been processed.');
+        }
+
+        $inventoryItem = Inventory::findOrFail($assignmentRequest->item_id);
+
+        // Check total available stock across the warehouse for this item
+        $totalAvailableStock = Inventory::where('item_name', $inventoryItem->item_name)
+            ->where('status', 'available')
+            ->sum('quantity');
+
+        if ($assignmentRequest->quantity > $totalAvailableStock) {
+            return redirect()->back()->with('error', 'Insufficient stock to approve this request. Available in warehouse: ' . $totalAvailableStock);
+        }
+
+        DB::transaction(function () use ($assignmentRequest, $inventoryItem): void {
+            $neededQty = $assignmentRequest->quantity;
+
+            // 1. Allocate from the referenced item if it has available quantity
+            if ($inventoryItem->status === 'available' && $inventoryItem->quantity > 0) {
+                $deduct = min($neededQty, $inventoryItem->quantity);
+                $inventoryItem->decrement('quantity', $deduct);
+                if ($inventoryItem->quantity <= 0) {
+                    $inventoryItem->status = 'assigned';
+                    $inventoryItem->assigned_to_user_id = $assignmentRequest->user_id;
+                    $inventoryItem->save();
+                }
+                $neededQty -= $deduct;
+            }
+
+            // 2. If more units are needed (e.g. multiple serialized rows), allocate from other matching available items
+            if ($neededQty > 0) {
+                $otherItems = Inventory::where('item_name', $inventoryItem->item_name)
+                    ->where('status', 'available')
+                    ->where('item_id', '!=', $inventoryItem->item_id)
+                    ->where('quantity', '>', 0)
+                    ->orderBy('item_id')
+                    ->get();
+
+                foreach ($otherItems as $otherItem) {
+                    if ($neededQty <= 0) {
+                        break;
+                    }
+                    $deduct = min($neededQty, $otherItem->quantity);
+                    $otherItem->decrement('quantity', $deduct);
+                    if ($otherItem->quantity <= 0) {
+                        $otherItem->status = 'assigned';
+                        $otherItem->assigned_to_user_id = $assignmentRequest->user_id;
+                        $otherItem->save();
+                    }
+                    $neededQty -= $deduct;
+                }
+            }
+
+            $transaction = Transaction::create([
+                'item_id' => $assignmentRequest->item_id,
+                'user_id' => $assignmentRequest->user_id,
+                'quantity' => $assignmentRequest->quantity,
+                'transaction_date' => now(),
+                'status' => 'assigned',
+            ]);
+
+            $assignmentRequest->update([
+                'transaction_id' => $transaction->id,
+                'status' => 'approved',
+                'responded_at' => now(),
+            ]);
+        });
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Request approved successfully. Item has been assigned.');
+    }
+
+    public function declineRequest(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $assignmentRequest = AssignmentRequest::findOrFail($id);
+
+        if ($assignmentRequest->status !== 'waiting for approval') {
+            return redirect()->back()->with('error', 'This request has already been processed.');
+        }
+
+        $assignmentRequest->update([
+            'status'       => 'declined',
+            'notes'        => $validated['notes'] ?? null,
+            'responded_at' => now(),
+        ]);
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Request has been declined.');
+    }
+
+    /**
+     * Step 3 of 3: Custodian approves a peer-to-peer transfer request.
+     * Executes the actual transaction manipulation and marks the original assignment as transferred.
+     */
+    public function approveTransfer(Request $request, $id)
+    {
+        // $id = the transfer AssignmentRequest (status: 'waiting for custodian approval')
+        $transferRequest = AssignmentRequest::with(['item'])->findOrFail($id);
+
+        if ($transferRequest->status !== 'waiting for custodian approval') {
+            return redirect()->back()->with('error', 'This transfer request has already been processed.');
+        }
+
+        DB::transaction(function () use ($transferRequest) {
+            $senderId      = $transferRequest->user_id;
+            $recipientId   = $transferRequest->target_user_id;
+            $itemId        = $transferRequest->item_id;
+            $transferQty   = $transferRequest->quantity;
+
+            // 1. Find and update the sender's original assignment
+            $originalAssignment = AssignmentRequest::where('item_id', $itemId)
+                ->where(function ($q) use ($senderId) {
+                    $q->where('user_id', $senderId)
+                      ->orWhere('target_user_id', $senderId);
+                })
+                ->where('status', 'transfer pending')
+                ->first();
+
+            if ($originalAssignment) {
+                // Update the original transaction record if it exists
+                if ($originalAssignment->transaction_id) {
+                    $originTx = Transaction::find($originalAssignment->transaction_id);
+                    if ($originTx) {
+                        if ($originTx->quantity <= $transferQty) {
+                            $originTx->quantity = 0;
+                            $originTx->status   = 'transferred';
+                            $originTx->save();
+                        } else {
+                            $originTx->decrement('quantity', $transferQty);
+                        }
+                    }
+                }
+
+                // Mark the original assignment as transferred
+                $originalAssignment->status       = 'transferred';
+                $originalAssignment->responded_at = now();
+                $originalAssignment->save();
+            }
+
+            // 2. Create a new transaction for the recipient
+            $newTransaction = Transaction::create([
+                'item_id'          => $itemId,
+                'user_id'          => $recipientId,
+                'quantity'         => $transferQty,
+                'transaction_date' => now(),
+                'status'           => 'assigned',
+            ]);
+
+            // 3. Mark transfer request as approved and link it to the new transaction
+            $transferRequest->status         = 'approved';
+            $transferRequest->transaction_id = $newTransaction->id;
+            $transferRequest->responded_at   = now();
+            $transferRequest->save();
+        });
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Transfer approved. Item has been transferred to the recipient.');
+    }
+
+    /**
+     * Step 3 of 3: Custodian declines a peer-to-peer transfer request.
+     * Restores the sender's original assignment back to 'approved'.
+     */
+    public function declineTransfer(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $transferRequest = AssignmentRequest::findOrFail($id);
+
+        if ($transferRequest->status !== 'waiting for custodian approval') {
+            return redirect()->back()->with('error', 'This transfer request has already been processed.');
+        }
+
+        DB::transaction(function () use ($transferRequest, $validated) {
+            $senderId = $transferRequest->user_id;
+            $itemId   = $transferRequest->item_id;
+
+            // Restore the sender's original assignment back to 'approved'
+            AssignmentRequest::where('item_id', $itemId)
+                ->where(function ($q) use ($senderId) {
+                    $q->where('user_id', $senderId)
+                      ->orWhere('target_user_id', $senderId);
+                })
+                ->where('status', 'transfer pending')
+                ->update(['status' => 'approved']);
+
+            // Decline the transfer request
+            $transferRequest->status       = 'declined';
+            $transferRequest->notes        = $validated['notes'] ?? $transferRequest->notes;
+            $transferRequest->responded_at = now();
+            $transferRequest->save();
+        });
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Transfer request declined. Sender\'s item restored.');
     }
 
     public function assignItem(Request $request)
