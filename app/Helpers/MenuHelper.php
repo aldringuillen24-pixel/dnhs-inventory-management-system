@@ -118,13 +118,10 @@ class MenuHelper
                 ['icon' => 'settings', 'name' => 'System Settings', 'path' => '/settings'],
             ],
             'school head' => [
-                ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/'],
-                ['icon' => 'requests', 'name' => 'Approval Requests', 'path' => '/requests/approvals'],
-                ['icon' => 'inventory', 'name' => 'Asset Overview', 'path' => '/assets/overview'],
-                ['icon' => 'inventory', 'name' => 'Inventory Overview', 'path' => '/inventory/overview'],
-                ['icon' => 'inspection', 'name' => 'Inspection Overview', 'path' => '/inspections/overview'],
-                ['icon' => 'reports', 'name' => 'Reports', 'path' => '/reports'],
-                ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/profile'],
+                ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/school-head/dashboard'],
+                ['icon' => 'inventory', 'name' => 'Inventory Overview', 'path' => '/school-head/inventory/overview'],
+                ['icon' => 'reports', 'name' => 'Reports', 'path' => '/school-head/reports'],
+                ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/school-head/profile'],
             ],
             'property custodian' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/property-custodian/dashboard'],

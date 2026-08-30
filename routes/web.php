@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\SchoolHeadController;
 use App\Http\Controllers\PropertyCustodianController;
 use App\Http\Controllers\EndUserController;
 use App\Http\Controllers\Auth\LoginController;
@@ -52,6 +54,14 @@ Route::middleware('auth')->group(function () {
 
             return redirect()->route('endUser.dashboard');
         }
+
+        if ($user->role && strtolower($user->role->role_name) === 'school head') {
+            if ($user->temporary_password) {
+                return redirect()->route('schoolHead.onboarding');
+            }
+
+            return redirect()->route('schoolHead.dashboard');
+        }
     });
 });
 
@@ -68,6 +78,10 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
 
+    Route::get('/inventory/{inventory}/edit', [PropertyCustodianController::class, 'editInventory'])->name('inventory.edit');
+    Route::patch('/inventory/{inventory}', [PropertyCustodianController::class, 'updateInventory'])->name('inventory.update');
+    Route::delete('/inventory/{inventory}', [PropertyCustodianController::class, 'destroyInventory'])->name('inventory.destroy');
+
     Route::get('/transactions', [PropertyCustodianController::class, 'transactions'])->name('transactions');
 
     Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assignItem'); 
@@ -79,6 +93,12 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::post('/transfers/{id}/approve', [PropertyCustodianController::class, 'approveTransfer'])->name('transfers.approve');
 
     Route::post('/transfers/{id}/decline', [PropertyCustodianController::class, 'declineTransfer'])->name('transfers.decline');
+
+    Route::post('/returns/{id}/approve', [PropertyCustodianController::class, 'approveReturn'])->name('returns.approve');
+
+    Route::post('/returns/{id}/decline', [PropertyCustodianController::class, 'declineReturn'])->name('returns.decline');
+
+    Route::post('/inventory/{itemId}/mark-returned', [PropertyCustodianController::class, 'markReturned'])->name('inventory.mark-returned');
 
     Route::get('/reports', [PropertyCustodianController::class, 'reports'])->name('reports');
 
@@ -94,17 +114,17 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
     Route::get('/onboarding', [EndUserController::class, 'onboarding'])->name('onboarding');
     Route::post('/onboarding', [EndUserController::class, 'onboardingPost'])->name('onboarding.post');
 
-    Route::get('/dashboard', function () {
-        return view('pages.endUser.dashboard', ['title' => 'End User Dashboard']);
-    })->name('dashboard');
+    Route::get('/dashboard', [EndUserController::class, 'dashboard'])->name('dashboard');
 
     Route::get('/requests', [EndUserController::class, 'requests'])->name('requests');
-    Route::get('/requests/my-requests', fn () => redirect()->route('endUser.requests'))->name('my-requests');
+    Route::get('/requests/my-requests', [EndUserController::class, 'myRequests'])->name('my-requests');
     Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
     Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
 
     Route::get('/assigned-items', [EndUserController::class, 'myAssignedItems'])->name('my-assigned-items');
     Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('assigned-items.transfer');
+    Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');
+    Route::post('/inventory/{itemId}/cancel-return', [EndUserController::class, 'cancelReturnRequest'])->name('inventory.cancel-return');
 
     Route::get('/profile', function () {
         return view('pages.endUser.profile', ['title' => 'Profile']);
@@ -113,12 +133,21 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
     Route::patch('/profile', [EndUserController::class, 'updateProfile'])->name('profile.update');
 });
 
+// School Head Routes (require school head role)
+Route::middleware(['auth', 'role:School Head'])->prefix('school-head')->name('schoolHead.')->group(function () {
+    Route::get('/onboarding', [SchoolHeadController::class, 'onboarding'])->name('onboarding');
+    Route::post('/onboarding', [SchoolHeadController::class, 'onboardingPost'])->name('onboarding.post');
+    Route::get('/dashboard', [SchoolHeadController::class, 'index'])->name('dashboard');
+    Route::get('/inventory/overview', [SchoolHeadController::class, 'inventoryOverview'])->name('inventory.overview');
+    Route::get('/reports', [SchoolHeadController::class, 'reports'])->name('reports');
+    Route::get('/profile', [SchoolHeadController::class, 'profile'])->name('profile');
+    Route::patch('/profile', [SchoolHeadController::class, 'updateProfile'])->name('profile.update');
+});
+
 
 // Admin Routes (require admin role)
 Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.')->group(function () {
-    Route::get('/dashboard', function () {
-        return view('pages.administrator.dashboard', ['title' => 'Admin Dashboard']);
-    })->name('dashboard');
+    Route::get('/dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
 
     Route::get('/users-management', [UserController::class, 'index'])->name('users-management');
 

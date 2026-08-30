@@ -88,6 +88,39 @@
                                     {{ $totalTransactionsCount }}
                                 </span>
                             </button>
+
+                            <button type="button"
+                                @click="activeTab = 'returns'"
+                                :class="activeTab === 'returns' 
+                                    ? 'border-brand-500 text-brand-500 font-semibold border-b-2' 
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
+                                class="flex items-center gap-2 px-5 py-3 text-sm font-medium transition focus:outline-none">
+                                <span>Pending Returns</span>
+                                @php
+                                    $returnCount = count($pendingReturns ?? []);
+                                @endphp
+                                @if ($returnCount > 0)
+                                    <span class="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
+                                        {{ $returnCount }}
+                                    </span>
+                                @else
+                                    <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                        0
+                                    </span>
+                                @endif
+                            </button>
+
+                            <button type="button"
+                                @click="activeTab = 'audit'"
+                                :class="activeTab === 'audit' 
+                                    ? 'border-brand-500 text-brand-500 font-semibold border-b-2' 
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
+                                class="flex items-center gap-2 px-5 py-3 text-sm font-medium transition focus:outline-none">
+                                <span>Audit Ledger</span>
+                                <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                    {{ $auditLedger->count() }}
+                                </span>
+                            </button>
                         </div>
 
                         {{-- TAB 1: INCOMING REQUESTS (END USER REQUISITIONS) --}}
@@ -344,6 +377,168 @@
                         </div>
                         @endif
 
+                        {{-- TAB 3: PENDING RETURNS --}}
+                        <div x-show="activeTab === 'returns'" x-cloak>
+                            <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                                <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
+                                    <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                        <tr class="text-center">
+                                            <th class="px-4 py-3 text-left">End User</th>
+                                            <th class="px-4 py-3 text-left">Item</th>
+                                            <th class="px-4 py-3">Qty</th>
+                                            <th class="px-4 py-3">Requested</th>
+                                            <th class="px-4 py-3">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
+                                        @forelse ($pendingReturns ?? [] as $returnRequest)
+                                            @php
+                                                $endUser = $returnRequest->user;
+                                                $inventoryItem = $returnRequest->item;
+                                            @endphp
+                                            <tr class="text-center hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                                <td class="px-4 py-4 text-left font-medium text-gray-900 dark:text-gray-100">
+                                                    <div>{{ $endUser->full_name ?? 'Unknown User' }}</div>
+                                                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ $endUser->username ?? '' }}</span>
+                                                </td>
+                                                <td class="px-4 py-4 text-left">
+                                                    <div class="font-medium text-gray-800 dark:text-gray-200">{{ $inventoryItem->item_name ?? 'Unknown item' }}</div>
+                                                    @if($inventoryItem?->inventory_item_no)
+                                                        <span class="text-xs text-gray-400">{{ $inventoryItem->inventory_item_no }}</span>
+                                                    @endif
+                                                </td>
+                                                <td class="px-4 py-4 font-semibold text-gray-800 dark:text-gray-200">{{ $returnRequest->quantity }}</td>
+                                                <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">
+                                                    {{ $returnRequest->requested_at ? $returnRequest->requested_at->format('M d, Y h:i A') : 'N/A' }}
+                                                </td>
+                                                <td class="px-4 py-4">
+                                                    <div class="flex items-center justify-center gap-2">
+                                                        {{-- Approve Return Modal --}}
+                                                        <x-modals.base-modal title="Approve Return" subtitle="Accept item return from end user." maxWidth="max-w-md">
+                                                            <x-slot:trigger>
+                                                                <button type="button" @click="open = true"
+                                                                    class="inline-flex items-center gap-1 rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-green-700">
+                                                                    <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                                                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                                                    </svg>
+                                                                    Approve
+                                                                </button>
+                                                            </x-slot:trigger>
+                                                            <form method="POST" action="{{ route('propertyCustodian.returns.approve', $returnRequest->id) }}" class="space-y-4 text-left">
+                                                                @csrf
+                                                                <p class="text-sm text-gray-600 dark:text-gray-300">
+                                                                    Are you sure you want to approve this return? The item will be marked as available and removed from the end user's assignment.
+                                                                </p>
+                                                                <div class="space-y-1.5 rounded-md bg-gray-50 p-3 text-sm dark:bg-gray-800">
+                                                                    <div class="flex justify-between">
+                                                                        <span class="text-gray-500 dark:text-gray-400">End User:</span>
+                                                                        <span class="font-medium text-gray-800 dark:text-gray-200">{{ $endUser->full_name ?? 'Unknown' }}</span>
+                                                                    </div>
+                                                                    <div class="flex justify-between">
+                                                                        <span class="text-gray-500 dark:text-gray-400">Item:</span>
+                                                                        <span class="font-medium text-gray-800 dark:text-gray-200">{{ $inventoryItem->item_name ?? 'Unknown' }}</span>
+                                                                    </div>
+                                                                    <div class="flex justify-between border-t border-gray-200 pt-1.5 dark:border-gray-700">
+                                                                        <span class="font-medium text-gray-700 dark:text-gray-300">Quantity:</span>
+                                                                        <span class="font-semibold text-green-600 dark:text-green-400">{{ $returnRequest->quantity }}</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="flex justify-end gap-3 pt-2">
+                                                                    <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
+                                                                    <button type="submit" class="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700">Confirm Approval</button>
+                                                                </div>
+                                                            </form>
+                                                        </x-modals.base-modal>
+
+                                                        {{-- Decline Return Modal --}}
+                                                        <x-modals.base-modal title="Decline Return" subtitle="Reject end user's return request." maxWidth="max-w-md">
+                                                            <x-slot:trigger>
+                                                                <button type="button" @click="open = true"
+                                                                    class="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-red-700">
+                                                                    <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                                                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                                                                    </svg>
+                                                                    Decline
+                                                                </button>
+                                                            </x-slot:trigger>
+                                                            <form method="POST" action="{{ route('propertyCustodian.returns.decline', $returnRequest->id) }}" class="space-y-4 text-left">
+                                                                @csrf
+                                                                <div>
+                                                                    <label for="decline-return-notes-{{ $returnRequest->id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Reason / Notes (Optional)</label>
+                                                                    <textarea id="decline-return-notes-{{ $returnRequest->id }}" name="notes" rows="3" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Specify why this return cannot be accepted..."></textarea>
+                                                                </div>
+                                                                <div class="flex justify-end gap-3 pt-2">
+                                                                    <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
+                                                                    <button type="submit" class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700">Confirm Decline</button>
+                                                                </div>
+                                                            </form>
+                                                        </x-modals.base-modal>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        @empty
+                                            <tr class="text-center">
+                                                <td colspan="5" class="px-4 py-6 text-center text-gray-500 dark:text-gray-400">No pending return requests.</td>
+                                            </tr>
+                                        @endforelse
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {{-- TAB 4: AUDIT LEDGER --}}
+                        <div x-show="activeTab === 'audit'" x-cloak>
+                            <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                                <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
+                                    <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left">Date</th>
+                                            <th class="px-4 py-3 text-left">Item</th>
+                                            <th class="px-4 py-3 text-left">Movement</th>
+                                            <th class="px-4 py-3 text-left">Qty</th>
+                                            <th class="px-4 py-3 text-left">Before</th>
+                                            <th class="px-4 py-3 text-left">After</th>
+                                            <th class="px-4 py-3 text-left">Recorded By</th>
+                                            <th class="px-4 py-3 text-left">Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
+                                        @forelse ($auditLedger as $entry)
+                                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                                <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
+                                                    {{ $entry->created_at ? $entry->created_at->format('M d, Y h:i A') : 'N/A' }}
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="font-medium text-gray-800 dark:text-gray-200">{{ optional($entry->inventory)->item_name ?? 'Unknown item' }}</div>
+                                                    @if(optional($entry->inventory)->inventory_item_no)
+                                                        <span class="text-xs text-gray-400">{{ $entry->inventory->inventory_item_no }}</span>
+                                                    @endif
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <span class="inline-flex rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                                                        {{ str_replace('_', ' ', $entry->movement_type) }}
+                                                    </span>
+                                                </td>
+                                                <td class="px-4 py-3 font-semibold text-gray-800 dark:text-gray-200">{{ $entry->quantity }}</td>
+                                                <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ $entry->quantity_before }}</td>
+                                                <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ $entry->quantity_after }}</td>
+                                                <td class="px-4 py-3 text-gray-600 dark:text-gray-300">
+                                                    {{ $entry->user?->full_name ?: ($entry->user?->username ?? 'System') }}
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-600 dark:text-gray-300">{{ $entry->notes ?? '—' }}</td>
+                                            </tr>
+                                        @empty
+                                            <tr>
+                                                <td colspan="8" class="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                                                    No stock movement entries recorded yet.
+                                                </td>
+                                            </tr>
+                                        @endforelse
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
                         {{-- TAB 2: TRANSACTION HISTORY --}}
                         <div x-show="activeTab === 'history'" x-cloak>
                             <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -450,14 +645,26 @@
                                                 </td>
                                                 <td class="px-4 py-4">
                                                     @php($isConsumable = false)
-                                                    <div x-data="{ open: false, menuStyle: '', toggleMenu(event) { if (!this.open) { const rect = event.currentTarget.getBoundingClientRect(); this.menuStyle = `top: ${rect.bottom + 4}px; left: ${rect.right - 144}px;`; } this.open = !this.open; } }">
+                                                    <div x-data="{ 
+                                                        open: false,
+                                                        menuX: 0,
+                                                        menuY: 0,
+                                                        toggleMenu(event) {
+                                                            if (!this.open) {
+                                                                const rect = event.currentTarget.getBoundingClientRect();
+                                                                this.menuX = rect.right - 144;
+                                                                this.menuY = rect.bottom + 8;
+                                                            }
+                                                            this.open = !this.open;
+                                                        }
+                                                    }" @click.outside="open = false" class="relative">
                                                         <button type="button" @click="toggleMenu($event)" class="rounded-full p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Transaction actions" :aria-expanded="open.toString()">
                                                             <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                                                 <path d="M10 6a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
                                                             </svg>
                                                         </button>
 
-                                                        <div x-show="open" x-cloak x-transition @click.outside="open = false" @keydown.escape.window="open = false" :style="menuStyle" class="fixed z-[1200] w-36 rounded-md border border-gray-200 bg-white py-1 text-left shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                                                        <div x-show="open" x-cloak x-transition:enter="ease-out duration-100" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100" x-transition:leave="ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" @click.outside="open = false" @keydown.escape.window="open = false" :style="`position: fixed; left: ${menuX}px; top: ${menuY}px;`" class="z-[9999] w-48 rounded-lg border border-gray-200 bg-white py-2 shadow-xl dark:border-gray-700 dark:bg-gray-800">
                                                             
                                                             <!-- Transaction Details Modal -->
                                                             <x-modals.base-modal title="Transaction Details" subtitle="View assignment details for this transaction." maxWidth="max-w-xl">

@@ -47,6 +47,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.querySelector('#chartThirteen')) {
         import('./components/chart/chart-13').then(module => module.initChartThirteen());
     }
+    if (document.querySelector('#adminInventoryChart')) {
+        import('./components/chart/admin-dashboard').then(module => module.initAdminDashboard());
+    }
+    if (document.querySelector('#custodianCategoryChart')) {
+        import('./components/chart/custodian-dashboard').then(module => module.initCustodianDashboard());
+    }
+    if (document.querySelector('#schoolHeadCategoryChart')) {
+        import('./components/chart/school-head-reports').then(module => module.initSchoolHeadReports());
+    }
+    if (document.querySelector('#schoolHeadDashboardCategoryChart, #schoolHeadInventoryCategoryChart')) {
+        import('./components/chart/school-head-reports').then(module => module.initSchoolHeadOverviewCharts());
+    }
 
     // Calendar init
     if (document.querySelector('#calendar')) {

@@ -52,4 +52,9 @@ class Inventory extends Model
     {
         return $this->belongsTo(User::class, 'assigned_to_user_id');
     }
+
+    public function stockMovements()
+    {
+        return $this->hasMany(StockMovement::class, 'inventory_id', 'item_id');
+    }
 }

@@ -20,9 +20,9 @@ class AiAssistantController extends Controller
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:1000'],
-            'history' => ['nullable', 'array'],
+            'history' => ['nullable', 'array', 'max:12'],
             'history.*.sender' => ['required_with:history', 'string', 'in:user,ai'],
-            'history.*.text'   => ['required_with:history', 'string'],
+            'history.*.text'   => ['required_with:history', 'string', 'max:1000'],
         ]);
 
         $user = $request->user();
@@ -35,10 +35,17 @@ class AiAssistantController extends Controller
         }
 
         try {
+            // Assistant messages supplied by the browser are not trusted conversation state.
+            $history = array_values(array_filter(
+                $validated['history'] ?? [],
+                fn (array $message): bool => $message['sender'] === 'user'
+            ));
+            $history = array_slice($history, -6);
+
             $reply = $this->aiService->ask(
                 $user,
                 $validated['message'],
-                $validated['history'] ?? []
+                $history
             );
 
             return response()->json([

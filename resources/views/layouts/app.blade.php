@@ -100,8 +100,11 @@
 </head>
 
 <body
-    x-data="{ 'loaded': true}"
-    x-init="const checkMobile = () => {
+    x-data="{ loaded: false }"
+    x-init="const finishLoading = () => loaded = true;
+    window.addEventListener('load', finishLoading, { once: true });
+    if (document.readyState === 'complete') finishLoading();
+    const checkMobile = () => {
         if (window.innerWidth < 1280) {
             $store.sidebar.setMobileOpen(false);
             $store.sidebar.isExpanded = false;
@@ -136,12 +139,32 @@
             <!-- app header start -->
             @include('layouts.app-header')
             <!-- app header end -->
-            <div class="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
+            <div x-show="!loaded" x-cloak class="mx-auto max-w-(--breakpoint-2xl) p-4 md:p-6" aria-hidden="true">
+                <div class="mb-6 flex items-center justify-between">
+                    <div class="space-y-3">
+                        <div class="h-7 w-48 animate-pulse rounded-lg bg-gray-200 dark:bg-gray-800"></div>
+                        <div class="h-4 w-64 max-w-full animate-pulse rounded bg-gray-100 dark:bg-gray-900"></div>
+                    </div>
+                    <div class="hidden h-10 w-28 animate-pulse rounded-lg bg-gray-200 sm:block dark:bg-gray-800"></div>
+                </div>
+                <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    @for ($index = 0; $index < 4; $index++)
+                        <div class="h-28 animate-pulse rounded-xl border border-gray-200 bg-gray-100 dark:border-gray-800 dark:bg-gray-900"></div>
+                    @endfor
+                </div>
+                <div class="mt-6 grid gap-6 xl:grid-cols-2">
+                    <div class="h-80 animate-pulse rounded-xl border border-gray-200 bg-gray-100 dark:border-gray-800 dark:bg-gray-900"></div>
+                    <div class="h-80 animate-pulse rounded-xl border border-gray-200 bg-gray-100 dark:border-gray-800 dark:bg-gray-900"></div>
+                </div>
+            </div>
+            <div x-show="loaded" x-cloak class="mx-auto max-w-(--breakpoint-2xl) p-4 pb-24 md:p-6 md:pb-24 xl:pb-6">
                 @yield('content')
             </div>
         </div>
 
     </div>
+
+    @include('layouts.mobile-nav')
 
 </body>
 

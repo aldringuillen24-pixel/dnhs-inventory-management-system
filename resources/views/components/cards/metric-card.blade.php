@@ -6,7 +6,7 @@
             @if ($title)
                 <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ $title }}</p>
             @endif
-            @if ($value)
+            @if ($value !== null && $value !== '')
                 <p class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{{ $value }}</p>
             @endif
             @if ($subtitle)

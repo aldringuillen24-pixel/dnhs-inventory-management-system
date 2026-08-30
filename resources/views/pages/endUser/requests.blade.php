@@ -123,6 +123,7 @@
                                                 @if($req->transaction_id)
                                                     <span class="inline-flex items-center rounded-md bg-gray-100 px-2.5 py-1 text-xs font-mono text-gray-700 dark:bg-gray-800 dark:text-gray-300">
                                                         #TX-{{ str_pad($req->transaction_id, 5, '0', STR_PAD_LEFT) }}
+                                                    </span>
                                                 @else
                                                     <span class="text-xs text-gray-400">--</span>
                                                 @endif

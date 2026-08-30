@@ -3,6 +3,7 @@
 use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Role;
+use App\Models\StockMovement;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -22,6 +23,36 @@ beforeEach(function () {
         'password' => 'password',
         'status' => 'active',
     ]);
+});
+
+test('stock-in records an audit ledger entry with before and after quantities', function () {
+    $category = Category::create([
+        'category_name' => 'Learning Resources',
+        'requires_serial_number' => false,
+    ]);
+
+    $this->actingAs($this->propertyCustodian)->post(route('propertyCustodian.inventory.stock-in'), [
+        'item_name' => 'Workbook',
+        'category_id' => $category->category_id,
+        'description' => 'Mathematics workbook',
+        'ics_no' => 'ICS-002',
+        'unit' => 'copy',
+        'unit_cost' => 120,
+        'date_acquired' => '2026-08-10',
+        'quantity' => 25,
+    ]);
+
+    $inventory = Inventory::where('item_name', 'Workbook')->firstOrFail();
+    $movement = StockMovement::query()
+        ->where('inventory_id', $inventory->item_id)
+        ->where('movement_type', 'stock_in')
+        ->first();
+
+    expect($movement)->not->toBeNull()
+        ->and($movement->quantity)->toBe(25)
+        ->and($movement->quantity_before)->toBe(0)
+        ->and($movement->quantity_after)->toBe(25)
+        ->and($movement->user_id)->toBe($this->propertyCustodian->id);
 });
 
 test('a serialized stock-in creates one inventory record per serial number', function () {
@@ -132,4 +163,26 @@ test('the inventory table groups matching item names and sums their quantity and
         ->assertSee('Workbook', false)
         ->assertDontSee('₱1,000.00')
         ->assertDontSee('₱1,800.00');
+});
+
+test('the inventory listing excludes disposed items', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Disposed Laptop',
+        'quantity' => 1,
+        'status' => 'disposed',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.inventory'))
+        ->assertOk()
+        ->assertDontSee('Disposed Laptop', false);
 });

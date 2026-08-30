@@ -59,9 +59,20 @@ class LoginController extends Controller
 
                     return redirect()->intended(route('endUser.dashboard'));
                 }
+
+                if ($role === 'school head') {
+                    if ($user->temporary_password) {
+                        return redirect()->intended(route('schoolHead.onboarding'));
+                    }
+
+                    return redirect()->intended(route('schoolHead.dashboard'));
+                }
             }
 
-            return redirect()->intended(route('dashboard'));
+            Auth::logout();
+            throw ValidationException::withMessages([
+                'username' => 'Your account does not have a valid role. Please contact an administrator.',
+            ]);
         }
 
         $request->session()->flash('error', 'The provided credentials do not match our records.');

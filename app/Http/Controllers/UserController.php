@@ -58,9 +58,8 @@ class UserController extends Controller
         }
 
         $users = $query->paginate(5)->withQueryString();
-        $allUsers = User::with('role')->orderBy('created_at', 'desc')->get();
 
-        return view('pages.administrator.users-management', compact('users', 'roles', 'allUsers'));
+        return view('pages.administrator.users-management', compact('users', 'roles'));
     }
 
     public function store(Request $request)
@@ -70,6 +69,13 @@ class UserController extends Controller
             'password' => ['nullable', 'string', 'min:6'],
             'role_id' => ['required', 'exists:roles,role_id'],
         ]);
+
+        $role = Role::findOrFail($validatedData['role_id']);
+
+        // Policy: Prevent creating Administrator accounts via this endpoint
+        if (strtolower($role->role_name) === 'administrator') {
+            return redirect()->back()->with('error', 'Creating Administrator accounts is not allowed through this interface. Administrators must be created directly in the database.');
+        }
 
         $plainPassword = $validatedData['password'] ?? Str::random(10);
 
@@ -104,6 +110,12 @@ class UserController extends Controller
         ]);
 
         $role = Role::findOrFail($validated['role_id']);
+
+        // Policy: Prevent creating Administrator accounts via this endpoint
+        if (strtolower($role->role_name) === 'administrator') {
+            return redirect()->back()->with('error', 'Bulk-generating Administrator accounts is not allowed. Administrators must be created directly in the database.');
+        }
+
         $created = 0;
 
         for ($i = 0; $i < $validated['count']; $i++) {
@@ -140,6 +152,31 @@ class UserController extends Controller
             'status' => ['required', Rule::in(['active', 'inactive'])],
             'password' => ['nullable', 'string', 'min:6'],
         ]);
+
+        $currentUser = auth()->user();
+        $adminRole = Role::where('role_name', 'Administrator')->first();
+
+        // Prevent self-demotion: an Administrator cannot change their own role
+        if ($currentUser->id === $user->id && $currentUser->role_id !== $validatedData['role_id']) {
+            return redirect()->back()->with('error', 'You cannot demote yourself.');
+        }
+
+        // Prevent deactivating the last active Administrator (this check takes precedence over self-deactivation)
+        if ($validatedData['status'] === 'inactive' && $user->role_id === $adminRole?->role_id) {
+            $activeAdminCount = User::where('role_id', $adminRole->role_id)
+                ->where('status', 'active')
+                ->where('id', '!=', $user->id)
+                ->count();
+
+            if ($activeAdminCount === 0) {
+                return redirect()->back()->with('error', 'Cannot deactivate the last active Administrator. At least one Administrator must remain active.');
+            }
+        }
+
+        // Prevent self-deactivation: an Administrator cannot deactivate themselves
+        if ($currentUser->id === $user->id && $validatedData['status'] === 'inactive') {
+            return redirect()->back()->with('error', 'You cannot deactivate yourself.');
+        }
 
         [$firstName, $lastName] = $this->splitFullName($validatedData['name']);
 

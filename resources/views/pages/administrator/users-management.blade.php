@@ -4,18 +4,6 @@
 
     <x-common.page-breadcrumb pageTitle="User Management" />
 
-    @if (session('success'))
-        <div class="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-700 dark:bg-green-900/20 dark:text-green-300">
-            {{ session('success') }}
-        </div>
-    @endif
-
-    @if (session('error'))
-        <div class="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300">
-            {{ session('error') }}
-        </div>
-    @endif
-
     <div x-data="{
         showSlipModal: false,
         showEditModal: false,
@@ -23,7 +11,7 @@
         showFilterPanel: false,
         openMenuId: null,
         selectedUsers: [],
-        allUserIds: @js($allUsers->pluck('id')->all()),
+        allUserIds: @js($users->pluck('id')->all()),
         editUserId: null,
         editName: '',
         editRoleId: '',
@@ -209,11 +197,7 @@
 
         <div x-show="showSlipModal" x-transition class="fixed inset-0 z-[1100] flex items-center justify-center" style="display: none;" @click.self="showSlipModal = false">
             <div class="w-full max-w-lg rounded-md border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
-                <div class="mb-4 flex items-start justify-between gap-3">
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Generate Slip</h3>
-                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Preview the slip before printing.</p>
-                    </div>
+                <div class="mb-2 flex items-start justify-end gap-3">
                     <button type="button" @click="showSlipModal = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white">
                         <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
@@ -226,11 +210,10 @@
                         <input type="hidden" name="selected_user_ids[]" :value="userId">
                     </template>
 
-                    <div class="flex items-center justify-between gap-3">
+                    <div class="mb-4 flex items-center justify-between gap-3">
                         <div>
-                            <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Select accounts for slip export</p>
-                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Showing {{ $allUsers->count() }} accounts in the system.</p>
-                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400" x-text="'Selected ' + selectedUsers.length + ' account' + (selectedUsers.length === 1 ? '' : 's')"></p>
+                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Generate Slip</h3>
+                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Preview the slip before printing.</p>
                         </div>
                         <button type="button" @click="toggleSelectAll()" class="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200">
                             <span x-text="isAllSelected() ? 'Clear All' : 'Select All'"></span>
@@ -238,7 +221,7 @@
                     </div>
 
                     <div class="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-                        @forelse($allUsers as $user)
+                        @forelse($users as $user)
                             <label class="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2 transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
                                 <div class="flex items-center gap-3">
                                     <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500" :checked="selectedUsers.includes({{ $user->id }})" @change="toggleUser({{ $user->id }})" />
@@ -247,7 +230,7 @@
                                         <p class="text-xs text-gray-500 dark:text-gray-400">{{ $user->role?->role_name ?? 'No role assigned' }}</p>
                                     </div>
                                 </div>
-                                <span class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ ucfirst($user->status ?? 'inactive') }}</span>
+                                <span class="text-xs tracking-wide text-green-700 dark:text-gray-400">{{ ucfirst($user->status ?? 'inactive') }}</span>
                             </label>
                         @empty
                             <p class="text-sm text-gray-500 dark:text-gray-400">No accounts available.</p>

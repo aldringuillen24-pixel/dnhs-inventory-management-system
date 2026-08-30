@@ -35,14 +35,14 @@ return new class extends Migration
         }, 100, 'item_id');
 
         Schema::table('inventory', function (Blueprint $table) {
-            $existingInventoryNo = DB::select("SHOW INDEX FROM inventory WHERE Key_name = ?", ['inventory_item_no']);
-            $existingQrCode = DB::select("SHOW INDEX FROM inventory WHERE Key_name = ?", ['qr_code']);
+            $hasInventoryNoIndex = Schema::hasIndex('inventory', ['inventory_item_no']);
+            $hasQrCodeIndex = Schema::hasIndex('inventory', ['qr_code']);
 
-            if (empty($existingInventoryNo)) {
+            if (! $hasInventoryNoIndex) {
                 $table->unique('inventory_item_no');
             }
 
-            if (empty($existingQrCode)) {
+            if (! $hasQrCodeIndex) {
                 $table->unique('qr_code');
             }
         });

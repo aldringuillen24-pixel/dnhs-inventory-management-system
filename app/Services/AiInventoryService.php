@@ -46,10 +46,19 @@ class AiInventoryService
 
         // Append recent chat history (limit to last 6 messages)
         $trimmedHistory = array_slice($history, -6);
+        $lastHistoryMessage = end($trimmedHistory);
+        if (
+            is_array($lastHistoryMessage)
+            && ($lastHistoryMessage['sender'] ?? null) === 'user'
+            && ($lastHistoryMessage['text'] ?? null) === $question
+        ) {
+            array_pop($trimmedHistory);
+        }
+
         foreach ($trimmedHistory as $msg) {
-            if (!empty($msg['sender']) && !empty($msg['text'])) {
+            if (($msg['sender'] ?? null) === 'user' && !empty($msg['text'])) {
                 $messages[] = [
-                    'role' => $msg['sender'] === 'user' ? 'user' : 'assistant',
+                    'role' => 'user',
                     'content' => (string) $msg['text'],
                 ];
             }
@@ -58,8 +67,12 @@ class AiInventoryService
         // Append current question
         $messages[] = ['role' => 'user', 'content' => $question];
 
-        // Attempt primary model, then fallback models on failure
-        $modelsToTry = array_unique(array_merge([config('services.openrouter.model')], $this->fallbackModels));
+        // Keep upstream failures from blocking the chat request for several minutes.
+        $modelsToTry = array_slice(
+            array_unique(array_merge([config('services.openrouter.model')], $this->fallbackModels)),
+            0,
+            max(1, (int) config('services.openrouter.max_attempts', 2))
+        );
 
         foreach ($modelsToTry as $model) {
             try {
@@ -69,7 +82,8 @@ class AiInventoryService
                     'X-Title' => config('services.openrouter.site_name', 'DNHS IMS'),
                     'Content-Type' => 'application/json',
                 ])
-                ->timeout(30)
+                ->connectTimeout((int) config('services.openrouter.connect_timeout', 5))
+                ->timeout((int) config('services.openrouter.timeout', 12))
                 ->post('https://openrouter.ai/api/v1/chat/completions', [
                     'model' => $model,
                     'messages' => $messages,
@@ -325,7 +339,7 @@ PROMPT;
 
         $notice = "";
         if ($wasApiError) {
-            $notice = "> ⚠️ *Note: Live OpenRouter AI connection timed out. Showing instant database report:*\n\n";
+            $notice = "> ⚠️ *Note: Live OpenRouter AI is temporarily unavailable. Showing instant database report:*\n\n";
         }
 
         // 1. Procurement prioritization question

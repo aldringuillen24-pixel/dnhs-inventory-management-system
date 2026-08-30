@@ -21,7 +21,7 @@
                                 Sign In
                             </h1>
                             <p class="text-sm text-gray-500 dark:text-gray-400">
-                                Enter your code and password to sign in!
+                                Enter your username and password to sign in!
                             </p>
                         </div>
                         <div>
