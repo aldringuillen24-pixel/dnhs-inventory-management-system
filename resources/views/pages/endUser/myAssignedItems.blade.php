@@ -49,12 +49,12 @@
                                             </button>
 
                                             <div x-show="actionOpen" x-cloak x-transition @click.outside="actionOpen = false" @keydown.escape.window="actionOpen = false" :style="menuStyle" class="fixed z-[1200] w-40 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
-                                                <button type="button" @click="actionOpen = false; detailsOpen = true" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
+                                                <button type="button" @click="actionOpen = false; $dispatch('open-modal', 'assigned-details-{{ $requestItemId ?? $loop->index }}')" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
                                                     Details
                                                 </button>
 
                                                 @if($canTransfer)
-                                                    <button type="button" @click="actionOpen = false; transferOpen = true" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
+                                                    <button type="button" @click="actionOpen = false; $dispatch('open-modal', 'assigned-transfer-{{ $requestItemId ?? $loop->index }}')" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
                                                         Transfer
                                                     </button>
                                                 @endif
@@ -62,29 +62,25 @@
                                                 @if($isAssigned && !$isPendingReturn && !empty($requestItemId))
                                                     <form method="POST" action="{{ route('endUser.inventory.request-return', $requestItemId) }}" class="block">
                                                         @csrf
-                                                        <button type="submit" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
-                                                            Request Return
-                                                        </button>
+                                                        <x-common.button-spinner text="Request Return" loadingText="Requesting..." class="w-full justify-start bg-transparent px-3 py-2 text-left text-sm !text-gray-600 hover:bg-gray-100 dark:bg-transparent dark:text-gray-200 dark:hover:bg-gray-700" />
                                                     </form>
                                                 @elseif($isPendingReturn && !empty($requestItemId))
                                                     <form method="POST" action="{{ route('endUser.inventory.cancel-return', $requestItemId) }}" class="block">
                                                         @csrf
-                                                        <button type="submit" class="block w-full px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/20">
-                                                            Cancel Return Request
-                                                        </button>
+                                                        <x-common.button-spinner text="Cancel Return Request" loadingText="Cancelling..." class="w-full justify-start bg-transparent px-3 py-2 text-left text-sm text-red-900 hover:bg-red-50 dark:bg-transparent dark:text-red-300 dark:hover:bg-red-900/20" />
                                                     </form>
                                                 @endif
                                             </div>
 
                                             <!-- Details Modal -->
-                                            <div x-show="detailsOpen" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 z-[1100] flex items-center justify-center bg-gray-900/60 px-4 shadow-lg backdrop-blur-sm dark:bg-gray-950/70" role="dialog" aria-modal="true" @click.outside="detailsOpen = false" @keydown.escape.window="detailsOpen = false">
-                                                <div class="mt-8 w-full max-w-xl rounded-md border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700 dark:bg-gray-900">
+                                            <x-modals.base-modal modalId="assigned-details-{{ $requestItemId ?? $loop->index }}" :bare="true">
+                                                <div @click.outside="open = false" class="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
                                                     <div class="mb-4 flex items-start justify-between gap-3">
                                                         <div>
                                                             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $row['item_name'] }}</h3>
                                                             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Item details for this record.</p>
                                                         </div>
-                                                        <button type="button" @click="detailsOpen = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white">
+                                                        <button type="button" @click="open = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white">
                                                             <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                                                 <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
                                                             </svg>
@@ -136,18 +132,18 @@
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            </x-modals.base-modal>
 
                                             <!-- Transfer Modal -->
                                             @if($canTransfer)
-                                                <div x-show="transferOpen" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 z-[1100] flex items-center justify-center bg-gray-900/60 px-4 shadow-lg backdrop-blur-sm dark:bg-gray-950/70" role="dialog" aria-modal="true" @click.outside="transferOpen = false" @keydown.escape.window="transferOpen = false">
-                                                    <div class="mt-8 w-full max-w-lg rounded-md border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700 dark:bg-gray-900">
+                                                <x-modals.base-modal modalId="assigned-transfer-{{ $requestItemId ?? $loop->index }}" :bare="true">
+                                                    <div @click.outside="open = false" class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
                                                         <div class="mb-4 flex items-start justify-between gap-3">
                                                             <div>
                                                                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white text-start mb-2">Transfer Item</h3>
                                                                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Transfer {{ $row['item_name'] }} to another end user.</p>
                                                             </div>
-                                                            <button type="button" @click="transferOpen = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white">
+                                                            <button type="button" @click="open = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white">
                                                                 <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                                                     <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
                                                                 </svg>
@@ -214,16 +210,14 @@
                                                             </div>
 
                                                             <div class="mt-6 flex justify-end gap-2">
-                                                                <button type="button" @click="transferOpen = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
+                                                                <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
                                                                     Cancel
                                                                 </button>
-                                                                <button type="submit" :class="{'opacity-50 cursor-not-allowed': !selectedRecipient, 'hover:bg-blue-700': selectedRecipient}" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition disabled:hover:bg-blue-600">
-                                                                    Request Transfer
-                                                                </button>
+                                                                <x-common.button-spinner text="Request Transfer" loadingText="Requesting..." class="bg-blue-600 hover:bg-blue-700" x-bind:class="{ 'opacity-50 cursor-not-allowed': !selectedRecipient }" />
                                                             </div>
                                                         </form>
                                                     </div>
-                                                </div>
+                                                </x-modals.base-modal>
                                             @endif
                                     </td>
                                 </tr>

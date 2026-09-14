@@ -517,6 +517,7 @@ class EndUserController extends Controller
 
             $transaction = Transaction::create([
                 'item_id'          => $assignment->item_id,
+                'from_user_id'     => $assignment->user_id,
                 'user_id'          => $assignment->target_user_id,
                 'quantity'         => $assignment->quantity,
                 'transaction_date' => $assignment->requested_at ?? now(),

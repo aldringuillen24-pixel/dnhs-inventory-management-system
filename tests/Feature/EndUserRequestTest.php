@@ -4,6 +4,7 @@ use App\Models\AssignmentRequest;
 use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Role;
+use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -68,6 +69,50 @@ test('end user request stores with property custodian target', function () {
         'target_user_id' => $this->propertyCustodian->id,
         'quantity' => 2,
         'status' => 'waiting for approval',
+    ]);
+});
+
+test('custodian-created assignment records the target end user as assignee', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Laptop',
+        'quantity' => 1,
+        'date_acquired' => '2026-08-10',
+        'status' => 'available',
+    ]);
+
+    $request = AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id))
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    $this->assertDatabaseHas('inventory', [
+        'item_id' => $inventory->item_id,
+        'status' => 'assigned',
+        'assigned_to_user_id' => $this->endUser->id,
+    ]);
+
+    $this->assertDatabaseHas('transactions', [
+        'item_id' => $inventory->item_id,
+        'from_user_id' => $this->propertyCustodian->id,
+        'user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'assigned',
     ]);
 });
 
@@ -486,6 +531,14 @@ test('custodian approval transfers inventory ownership to the recipient', functi
     $this->assertDatabaseHas('inventory', [
         'item_id' => $inventory->item_id,
         'assigned_to_user_id' => $recipient->id,
+        'status' => 'assigned',
+    ]);
+
+    $this->assertDatabaseHas('transactions', [
+        'item_id' => $inventory->item_id,
+        'from_user_id' => $this->endUser->id,
+        'user_id' => $recipient->id,
+        'quantity' => 1,
         'status' => 'assigned',
     ]);
 });

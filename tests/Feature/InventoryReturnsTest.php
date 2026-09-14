@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\User;
 use App\Models\StockMovement;
 use App\Models\Role;
+use App\Models\Transaction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -202,6 +203,53 @@ class InventoryReturnsTest extends TestCase
         ]);
     }
 
+    public function test_approving_a_partial_return_reduces_the_related_transaction_quantity()
+    {
+        $transaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 5,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+
+        $assignment = AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->custodian->id,
+            'target_user_id' => $this->endUser->id,
+            'transaction_id' => $transaction->id,
+            'quantity' => 5,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
+        ]);
+
+        $returnRequest = AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'target_user_id' => $this->custodian->id,
+            'quantity' => 2,
+            'status' => 'waiting for custodian approval',
+            'requested_at' => now(),
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.returns.approve', $returnRequest->id))
+            ->assertRedirect(route('propertyCustodian.transactions'));
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'quantity' => 3,
+            'status' => 'assigned',
+            'return_date' => null,
+        ]);
+        $this->assertDatabaseHas('requests', [
+            'id' => $assignment->id,
+            'quantity' => 3,
+            'status' => 'approved',
+        ]);
+    }
+
     /**
      * Test: End user cannot request return on items not assigned to them
      */
@@ -285,6 +333,47 @@ class InventoryReturnsTest extends TestCase
         ]);
     }
 
+    public function test_approving_a_full_return_closes_the_related_transaction()
+    {
+        $transaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => $this->assignedItem->quantity,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+
+        AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->custodian->id,
+            'target_user_id' => $this->endUser->id,
+            'transaction_id' => $transaction->id,
+            'quantity' => $this->assignedItem->quantity,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
+        ]);
+
+        $returnRequest = AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'target_user_id' => $this->custodian->id,
+            'quantity' => $this->assignedItem->quantity,
+            'status' => 'waiting for custodian approval',
+            'requested_at' => now(),
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.returns.approve', $returnRequest->id))
+            ->assertRedirect(route('propertyCustodian.transactions'));
+
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'status' => 'returned',
+        ]);
+        $this->assertNotNull(Transaction::find($transaction->id)->return_date);
+    }
+
     /**
      * Test: Item becomes available after return approval
      */
@@ -342,6 +431,14 @@ class InventoryReturnsTest extends TestCase
      */
     public function test_custodian_can_mark_assigned_item_as_returned_directly()
     {
+        $transaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => $this->assignedItem->quantity,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+
         $this->actingAs($this->custodian);
 
         $response = $this->post(route('propertyCustodian.inventory.mark-returned', $this->assignedItem->item_id), [
@@ -357,6 +454,11 @@ class InventoryReturnsTest extends TestCase
             'status' => 'available',
             'assigned_to_user_id' => null,
         ]);
+        $this->assertDatabaseHas('transactions', [
+            'id' => $transaction->id,
+            'status' => 'returned',
+        ]);
+        $this->assertNotNull(Transaction::find($transaction->id)->return_date);
     }
 
     /**
@@ -384,6 +486,55 @@ class InventoryReturnsTest extends TestCase
 
         $response->assertRedirect();
         $response->assertSessionHas('error');
+    }
+
+    public function test_custodian_can_send_an_available_item_to_maintenance_and_audit_it()
+    {
+        $this->assignedItem->update([
+            'status' => 'available',
+            'assigned_to_user_id' => null,
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.send-to-maintenance', $this->assignedItem->item_id), [
+                'notes' => 'Needs repair',
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'));
+
+        $this->assertDatabaseHas('inventory', [
+            'item_id' => $this->assignedItem->item_id,
+            'status' => 'under_maintenance',
+        ]);
+        $this->assertDatabaseHas('stock_movements', [
+            'inventory_id' => $this->assignedItem->item_id,
+            'movement_type' => 'maintenance',
+            'notes' => 'Needs repair',
+        ]);
+    }
+
+    public function test_custodian_can_dispose_an_available_item_and_audit_it()
+    {
+        $this->assignedItem->update([
+            'status' => 'available',
+            'assigned_to_user_id' => null,
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.dispose', $this->assignedItem->item_id), [
+                'notes' => 'Beyond repair',
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'));
+
+        $this->assertDatabaseHas('inventory', [
+            'item_id' => $this->assignedItem->item_id,
+            'status' => 'disposed',
+        ]);
+        $this->assertDatabaseHas('stock_movements', [
+            'inventory_id' => $this->assignedItem->item_id,
+            'movement_type' => 'disposed',
+            'quantity_after' => 0,
+            'notes' => 'Beyond repair',
+        ]);
     }
 
     /**

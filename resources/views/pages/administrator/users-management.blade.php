@@ -82,9 +82,7 @@
                             @endforeach
                         </select>
                     </div>
-                    <button type="submit" class="w-full rounded-md bg-brand-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-600">
-                        Create User
-                    </button>
+                    <x-common.button-spinner text="Create User" loadingText="Creating..." class="w-full" />
                     <button type="button" @click="openGenerate()" class="mt-3 w-full rounded-md border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-900">
                         Generate Multiple Users
                     </button>
@@ -241,9 +239,7 @@
                         <button type="button" @click="showSlipModal = false" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200">
                             Close
                         </button>
-                        <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
-                            Print PDF
-                        </button>
+                        <x-common.button-spinner text="Print PDF" loadingText="Preparing PDF..." />
                     </div>
                 </form>
             </div>
@@ -280,9 +276,7 @@
                         <button type="button" @click="closeGenerate()" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200">
                             Cancel
                         </button>
-                        <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
-                            Generate Users
-                        </button>
+                        <x-common.button-spinner text="Generate Users" loadingText="Generating..." />
                     </div>
                 </form>
             </div>
@@ -336,9 +330,7 @@
                         <button type="button" @click="closeEdit()" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200">
                             Cancel
                         </button>
-                        <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
-                            Save Changes
-                        </button>
+                        <x-common.button-spinner text="Save Changes" loadingText="Saving..." />
                     </div>
                 </form>
             </div>

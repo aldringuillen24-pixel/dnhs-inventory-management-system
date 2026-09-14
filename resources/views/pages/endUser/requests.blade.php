@@ -72,7 +72,7 @@
                                     </div>
                                     <div class="flex justify-end gap-3 pt-2">
                                         <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                        <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Submit Request</button>
+                                        <x-common.button-spinner text="Submit Request" loadingText="Submitting..." />
                                     </div>
                                 </form>
                             </x-modals.base-modal>
@@ -197,12 +197,12 @@
                                                         <form method="POST" action="{{ route('endUser.requests.respond', $req->id) }}">
                                                             @csrf
                                                             <input type="hidden" name="action" value="accept" />
-                                                            <button type="submit" class="rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-green-700">Accept</button>
+                                                            <x-common.button-spinner text="Accept" loadingText="Accepting..." class="bg-green-600 px-3 py-1.5 text-xs hover:bg-green-700" />
                                                         </form>
                                                         <form method="POST" action="{{ route('endUser.requests.respond', $req->id) }}">
                                                             @csrf
                                                             <input type="hidden" name="action" value="decline" />
-                                                            <button type="submit" class="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-700">Decline</button>
+                                                            <x-common.button-spinner text="Decline" loadingText="Declining..." class="bg-red-600 px-3 py-1.5 text-xs hover:bg-red-700" />
                                                         </form>
                                                     </div>
                                                 @elseif($req->status === 'waiting for custodian approval')

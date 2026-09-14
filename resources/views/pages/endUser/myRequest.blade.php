@@ -31,7 +31,7 @@
 							<input id="quantity" name="quantity" type="number" min="1" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Enter quantity"/>
 							<div class="flex justify-end gap-3 pt-2">
 								<button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-								<button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Submit Request</button>
+								<x-common.button-spinner text="Submit Request" loadingText="Submitting..." />
 							</div>
 						</form>
 					</x-modals.base-modal>

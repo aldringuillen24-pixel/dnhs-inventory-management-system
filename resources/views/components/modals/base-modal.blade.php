@@ -1,12 +1,15 @@
-@props(['title' => 'Modal', 'subtitle' => null, 'open' => false, 'closeButton' => true, 'maxWidth' => 'max-w-lg'])
+@props(['title' => 'Modal', 'subtitle' => null, 'open' => false, 'closeButton' => true, 'maxWidth' => 'max-w-lg', 'modalId' => null, 'bare' => false])
 
-<div x-data="{ open: {{ $open ? 'true' : 'false' }} }" class="relative">
+<div x-data="{ open: {{ $open ? 'true' : 'false' }} }" @open-modal.window="if (@js($modalId) === $event.detail) open = true" class="relative">
     @isset($trigger)
         {{ $trigger }}
     @endisset
 
-    <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 z-[1100] flex items-center justify-center bg-gray-900/60 px-4 shadow-lg backdrop-blur-sm dark:bg-gray-950/70" role="dialog" aria-modal="true">
-        <div class="mt-8 w-full {{ $maxWidth }} rounded-md border border-gray-200 bg-white p-6 shadow-md dark:border-gray-700 dark:bg-gray-900 " @click.outside="open = false" @keydown.escape.window="open = false">
+    <div x-show="open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 px-4" role="dialog" aria-modal="true">
+        @if ($bare)
+            {{ $slot }}
+        @else
+        <div class="max-h-[90vh] w-full {{ $maxWidth }} overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900" @click.outside="open = false" @keydown.escape.window="open = false">
             <div class="mb-4 flex items-start justify-between gap-3">
                 <div>
                     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $title }}</h3>
@@ -24,5 +27,6 @@
             </div>
             <div>{{ $slot }}</div>
         </div>
+        @endif
     </div>
 </div>

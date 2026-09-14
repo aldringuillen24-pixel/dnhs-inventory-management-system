@@ -72,7 +72,7 @@
 					</div>
 
 					<div class="flex justify-end gap-3 pt-2">
-						<button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Save Changes</button>
+						<x-common.button-spinner text="Save Changes" loadingText="Saving..." />
 					</div>
 				</form>
 			</x-cards.base-card>

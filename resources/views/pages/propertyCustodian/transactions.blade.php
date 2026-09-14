@@ -55,7 +55,7 @@
             <div class="col-span-12 xl:col-span-12">
                 <x-cards.base-card title="Manage Transactions & Requisitions" subtitle="Process incoming end-user requests and view historical transaction records">
                     
-                    <div x-data="{ activeTab: '{{ $pendingRequestsCount > 0 ? 'requests' : 'history' }}', searchRequests: '', searchHistory: '' }">
+                    <div x-data="{ activeTab: '{{ $pendingRequestsCount > 0 ? 'requests' : 'history' }}', searchRequests: '', searchHistory: '', normalizeSearch(value) { return value.toLowerCase().trim() }, matchesTransaction(row) { const query = this.normalizeSearch(this.searchHistory); return !query || row.dataset.search.includes(query) }, hasTransactionMatches() { const query = this.normalizeSearch(this.searchHistory); return query !== '' && [...this.$refs.transactionRows.querySelectorAll('tr[data-search]')].some(row => this.matchesTransaction(row)) } }">
                         
                         {{-- Tab Navigation Bar --}}
                         <div class="mb-5 flex border-b border-gray-200 dark:border-gray-700">
@@ -65,10 +65,10 @@
                                     ? 'border-brand-500 text-brand-500 font-semibold border-b-2' 
                                     : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
                                 class="flex items-center gap-2 px-5 py-3 text-sm transition focus:outline-none">
-                                <span>Incoming Requests</span>
-                                @if ($pendingRequestsCount > 0)
+                                <span>Incoming Item Requests</span>
+                                @if ($incomingRequests->count() > 0)
                                     <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-600 dark:bg-red-900/30 dark:text-red-400">
-                                        {{ $pendingRequestsCount }}
+                                        {{ $incomingRequests->count() }}
                                     </span>
                                 @else
                                     <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
@@ -86,6 +86,30 @@
                                 <span>Transaction History</span>
                                 <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                                     {{ $totalTransactionsCount }}
+                                </span>
+                            </button>
+
+                            <button type="button"
+                                @click="activeTab = 'assignments'"
+                                :class="activeTab === 'assignments' 
+                                    ? 'border-brand-500 text-brand-500 font-semibold border-b-2' 
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
+                                class="flex items-center gap-2 px-5 py-3 text-sm font-medium transition focus:outline-none">
+                                <span>Assignment Requests</span>
+                                <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                    {{ $assignmentRequests->count() }}
+                                </span>
+                            </button>
+
+                            <button type="button"
+                                @click="activeTab = 'transfers'"
+                                :class="activeTab === 'transfers' 
+                                    ? 'border-brand-500 text-brand-500 font-semibold border-b-2' 
+                                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
+                                class="flex items-center gap-2 px-5 py-3 text-sm font-medium transition focus:outline-none">
+                                <span>Transfer Requests</span>
+                                <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                    {{ $pendingTransfers->count() }}
                                 </span>
                             </button>
 
@@ -212,7 +236,7 @@
                                                                 </div>
                                                                 <div class="flex justify-end gap-3 pt-2">
                                                                     <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                    <button type="submit" class="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700">Confirm Approval</button>
+                                                                    <x-common.button-spinner text="Confirm Approval" loadingText="Approving..." class="bg-green-600 hover:bg-green-700" />
                                                                 </div>
                                                             </form>
                                                         </x-modals.base-modal>
@@ -237,7 +261,7 @@
                                                                 </div>
                                                                 <div class="flex justify-end gap-3 pt-2">
                                                                     <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                    <button type="submit" class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700">Confirm Decline</button>
+                                                                    <x-common.button-spinner text="Confirm Decline" loadingText="Declining..." class="bg-red-600 hover:bg-red-700" />
                                                                 </div>
                                                             </form>
                                                         </x-modals.base-modal>
@@ -260,18 +284,57 @@
                             </div>
                         </div>
 
+                        {{-- TAB 2: ASSIGNMENT REQUESTS CREATED BY THE CUSTODIAN --}}
+                        <div x-show="activeTab === 'assignments'" x-cloak>
+                            <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                                <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
+                                    <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                        <tr class="text-center">
+                                            <th class="px-4 py-3 text-left">Assign To</th>
+                                            <th class="px-4 py-3 text-left">Item</th>
+                                            <th class="px-4 py-3">Category</th>
+                                            <th class="px-4 py-3">Qty</th>
+                                            <th class="px-4 py-3">Date Requested</th>
+                                            <th class="px-4 py-3">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
+                                        @forelse ($assignmentRequests as $assignment)
+                                            <tr class="text-center hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                                <td class="px-4 py-4 text-left font-medium text-gray-900 dark:text-gray-100">
+                                                    {{ $assignment->targetUser?->full_name ?: ($assignment->targetUser?->username ?? 'Unknown User') }}
+                                                </td>
+                                                <td class="px-4 py-4 text-left">
+                                                    <div class="font-medium text-gray-800 dark:text-gray-200">{{ optional($assignment->item)->item_name ?? 'Unknown item' }}</div>
+                                                    @if(optional($assignment->item)->inventory_item_no)
+                                                        <span class="text-xs text-gray-400">{{ $assignment->item->inventory_item_no }}</span>
+                                                    @endif
+                                                </td>
+                                                <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">{{ optional(optional($assignment->item)->category)->category_name ?? 'General' }}</td>
+                                                <td class="px-4 py-4 font-semibold">{{ $assignment->quantity }}</td>
+                                                <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">{{ $assignment->requested_at ? $assignment->requested_at->format('M d, Y h:i A') : 'N/A' }}</td>
+                                                <td class="px-4 py-4">
+                                                    <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Waiting for End User</span>
+                                                </td>
+                                            </tr>
+                                        @empty
+                                            <tr>
+                                                <td colspan="6" class="px-4 py-12 text-center text-gray-500 dark:text-gray-400">No pending assignment requests.</td>
+                                            </tr>
+                                        @endforelse
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
                         {{-- PENDING TRANSFERS (peer-to-peer, awaiting custodian approval) --}}
-                        @if($pendingTransfers->isNotEmpty())
-                        <div x-show="activeTab === 'requests'" class="mt-6">
+                        <div x-show="activeTab === 'transfers'" x-cloak class="mt-6">
                             <div class="mb-3 flex items-center gap-2">
                                 <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Pending Peer-to-Peer Transfers</h3>
-                                <span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                                    {{ $pendingTransfers->count() }} awaiting your approval
-                                </span>
                             </div>
-                            <div class="overflow-x-auto rounded-md border border-amber-200 bg-white dark:border-amber-800/40 dark:bg-gray-900">
+                            <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
                                 <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
-                                    <thead class="bg-amber-50 text-xs uppercase tracking-wide text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                                    <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                                         <tr class="text-center">
                                             <th class="px-4 py-3 text-left">From (Sender)</th>
                                             <th class="px-4 py-3 text-left">To (Recipient)</th>
@@ -282,7 +345,7 @@
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
-                                        @foreach($pendingTransfers as $transfer)
+                                        @forelse($pendingTransfers as $transfer)
                                             @php
                                                 $senderName    = $transfer->user?->full_name ?: ($transfer->user?->username ?? 'Unknown');
                                                 $recipientName = $transfer->targetUser?->full_name ?: ($transfer->targetUser?->username ?? 'Unknown');
@@ -339,7 +402,7 @@
                                                                 </div>
                                                                 <div class="flex justify-end gap-3 pt-2">
                                                                     <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                    <button type="submit" class="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700">Confirm Approval</button>
+                                                                    <x-common.button-spinner text="Confirm Approval" loadingText="Approving..." class="bg-green-600 hover:bg-green-700" />
                                                                 </div>
                                                             </form>
                                                         </x-modals.base-modal>
@@ -363,21 +426,24 @@
                                                                 </div>
                                                                 <div class="flex justify-end gap-3 pt-2">
                                                                     <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                    <button type="submit" class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700">Confirm Decline</button>
+                                                                    <x-common.button-spinner text="Confirm Decline" loadingText="Declining..." class="bg-red-600 hover:bg-red-700" />
                                                                 </div>
                                                             </form>
                                                         </x-modals.base-modal>
                                                     </div>
                                                 </td>
                                             </tr>
-                                        @endforeach
+                                        @empty
+                                            <tr>
+                                                <td colspan="6" class="px-4 py-6 text-center text-gray-500 dark:text-gray-400">No pending transfer requests.</td>
+                                            </tr>
+                                        @endforelse
                                     </tbody>
                                 </table>
                             </div>
                         </div>
-                        @endif
 
-                        {{-- TAB 3: PENDING RETURNS --}}
+                        {{-- TAB 5: PENDING RETURNS --}}
                         <div x-show="activeTab === 'returns'" x-cloak>
                             <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
                                 <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
@@ -445,7 +511,7 @@
                                                                 </div>
                                                                 <div class="flex justify-end gap-3 pt-2">
                                                                     <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                    <button type="submit" class="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700">Confirm Approval</button>
+                                                                    <x-common.button-spinner text="Confirm Approval" loadingText="Approving..." class="bg-green-600 hover:bg-green-700" />
                                                                 </div>
                                                             </form>
                                                         </x-modals.base-modal>
@@ -469,7 +535,7 @@
                                                                 </div>
                                                                 <div class="flex justify-end gap-3 pt-2">
                                                                     <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                    <button type="submit" class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700">Confirm Decline</button>
+                                                                    <x-common.button-spinner text="Confirm Decline" loadingText="Declining..." class="bg-red-600 hover:bg-red-700" />
                                                                 </div>
                                                             </form>
                                                         </x-modals.base-modal>
@@ -543,7 +609,7 @@
                         <div x-show="activeTab === 'history'" x-cloak>
                             <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                                 <div class="flex-1">
-                                    <input type="search" placeholder="Search transactions..." class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                    <input type="search" x-model="searchHistory" placeholder="Search transactions..." aria-label="Search transaction history" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
                                 </div>
                                 <div class="flex flex-wrap gap-2">
                                     <!-- Assign Inventory Item Modal -->
@@ -587,33 +653,45 @@
                                             </div>
                                             <div>
                                                 <label for="date-assigned" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Assigned</label>
-                                                <input id="date-assigned" name="transaction_date" type="date" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                                <input id="date-assigned" name="transaction_date" type="date" value="{{ old('transaction_date', now()->format('Y-m-d')) }}" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
                                             </div>
                                             <div class="flex justify-end gap-3 pt-2">
                                                 <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Assign Item</button>
+                                                <x-common.button-spinner text="Assign Item" loadingText="Assigning..." class="text-white"/>
                                             </div>
                                         </form>
                                     </x-modals.base-modal>
                                 </div>
                             </div>
 
-                            <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                            <div class="max-h-[32rem] overflow-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
                                 <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
-                                    <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                    <thead class="sticky top-0 z-10 bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                                         <tr class="text-center">
                                             <th class="px-4 py-3">Qty</th>
                                             <th class="px-4 py-3 text-left">Item Name</th>
-                                            <th class="px-4 py-3 text-left">Assigned To</th>
-                                            <th class="px-4 py-3">Date Assigned</th>
+                                            <th class="px-4 py-3 text-left">From</th>
+                                            <th class="px-4 py-3 text-left">To</th>
+                                            <th class="px-4 py-3">Transaction Date</th>
                                             <th class="px-4 py-3">Date Returned</th>
-                                            <th class="px-4 py-3">Status</th>
-                                            <th class="px-4 py-3">Actions</th>
+                                            <th class="px-4 py-3">Activity</th>
                                         </tr>
                                     </thead>
-                                    <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
+                                    <tbody x-ref="transactionRows" class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
                                         @forelse($transactions as $transaction)
-                                            <tr class="text-center hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                            <tr
+                                                x-show="matchesTransaction($el)"
+                                                data-search="{{ strtolower(implode(' ', [
+                                                    (string) $transaction->quantity,
+                                                    optional($transaction->item)->item_name ?? '',
+                                                    optional($transaction->item)->inventory_item_no ?? '',
+                                                    $transaction->fromUser?->full_name ?? $transaction->fromUser?->username ?? 'Warehouse',
+                                                    $transaction->user?->full_name ?? $transaction->user?->username ?? 'Unknown',
+                                                    $transaction->transaction_date?->format('Y-m-d') ?? '',
+                                                    $transaction->return_date?->format('Y-m-d') ?? '',
+                                                    $transaction->status ?? '',
+                                                ])) }}"
+                                                class="text-center hover:bg-gray-50 dark:hover:bg-gray-800/50">
                                                 <td class="px-4 py-4 font-semibold">{{ $transaction->quantity }}</td>
                                                 <td class="px-4 py-4 text-left">
                                                     <div class="font-medium">{{ optional($transaction->item)->item_name ?? 'Unknown item' }}</div>
@@ -621,6 +699,7 @@
                                                         <span class="text-xs text-gray-400">{{ $transaction->item->inventory_item_no }}</span>
                                                     @endif
                                                 </td>
+                                                <td class="px-4 py-4 text-left">{{ $transaction->fromUser?->full_name ?: ($transaction->fromUser?->username ?? 'Warehouse') }}</td>
                                                 <td class="px-4 py-4 text-left">{{ $transaction->user?->full_name ?: ($transaction->user?->username ?? 'Unknown') }}</td>
                                                 <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">{{ $transaction->transaction_date ? $transaction->transaction_date->format('Y-m-d') : 'N/A' }}</td>
                                                 <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">{{ $transaction->return_date ? $transaction->return_date->format('Y-m-d') : 'N/A' }}</td>
@@ -643,125 +722,6 @@
                                                         {{ ucfirst($transaction->status ?? 'N/A') }}
                                                     </span>
                                                 </td>
-                                                <td class="px-4 py-4">
-                                                    @php($isConsumable = false)
-                                                    <div x-data="{ 
-                                                        open: false,
-                                                        menuX: 0,
-                                                        menuY: 0,
-                                                        toggleMenu(event) {
-                                                            if (!this.open) {
-                                                                const rect = event.currentTarget.getBoundingClientRect();
-                                                                this.menuX = rect.right - 144;
-                                                                this.menuY = rect.bottom + 8;
-                                                            }
-                                                            this.open = !this.open;
-                                                        }
-                                                    }" @click.outside="open = false" class="relative">
-                                                        <button type="button" @click="toggleMenu($event)" class="rounded-full p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Transaction actions" :aria-expanded="open.toString()">
-                                                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                <path d="M10 6a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
-                                                            </svg>
-                                                        </button>
-
-                                                        <div x-show="open" x-cloak x-transition:enter="ease-out duration-100" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100" x-transition:leave="ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95" @click.outside="open = false" @keydown.escape.window="open = false" :style="`position: fixed; left: ${menuX}px; top: ${menuY}px;`" class="z-[9999] w-48 rounded-lg border border-gray-200 bg-white py-2 shadow-xl dark:border-gray-700 dark:bg-gray-800">
-                                                            
-                                                            <!-- Transaction Details Modal -->
-                                                            <x-modals.base-modal title="Transaction Details" subtitle="View assignment details for this transaction." maxWidth="max-w-xl">
-                                                                <x-slot:trigger>
-                                                                    <button type="button" @click="open = true" @disabled($isConsumable) class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
-                                                                        Details
-                                                                    </button>
-                                                                </x-slot:trigger>
-
-                                                                <div class="space-y-4 text-sm text-gray-700 dark:text-gray-200">
-                                                                    <div class="grid gap-2 sm:grid-cols-2">
-                                                                        <div>
-                                                                            <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Item</h3>
-                                                                            <p>{{ optional($transaction->item)->item_name ?? 'Unknown item' }}</p>
-                                                                        </div>
-                                                                        <div>
-                                                                            <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Assigned To</h3>
-                                                                            <p>{{ $transaction->user?->full_name ?: ($transaction->user?->username ?? 'Unknown') }}</p>
-                                                                        </div>
-                                                                        <div>
-                                                                            <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Quantity</h3>
-                                                                            <p>{{ $transaction->quantity }}</p>
-                                                                        </div>
-                                                                        <div>
-                                                                            <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Date Assigned</h3>
-                                                                            <p>{{ $transaction->transaction_date ? $transaction->transaction_date->format('Y-m-d') : 'N/A' }}</p>
-                                                                        </div>
-                                                                        <div class="sm:col-span-2">
-                                                                            <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Date Returned</h3>
-                                                                            <p>{{ $transaction->return_date ? $transaction->return_date->format('Y-m-d') : 'N/A' }}</p>
-                                                                        </div>
-                                                                    </div>
-                                                                    <div class="flex justify-end">
-                                                                        <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Close</button>
-                                                                    </div>
-                                                                </div>
-                                                            </x-modals.base-modal>
-
-                                                            <!-- Transfer Item Modal -->
-                                                            <x-modals.base-modal title="Transfer Item" subtitle="Confirm the transfer details for this assignment." maxWidth="max-w-xl">
-                                                                <x-slot:trigger>
-                                                                    <button type="button" @click="open = true" @disabled($isConsumable) class="block w-full px-3 py-2 text-left text-sm transition {{ $isConsumable ? 'cursor-not-allowed text-gray-400 dark:text-gray-500' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700' }}" title="{{ $isConsumable ? 'Consumable items cannot be transferred.' : 'Transfer this item.' }}">
-                                                                        Transfer
-                                                                    </button>
-                                                                </x-slot:trigger>
-
-                                                                <form method="POST" action="#" class="space-y-4">
-                                                                    @csrf
-                                                                    <input type="hidden" name="transaction_id" value="{{ $transaction->id }}" />
-                                                                    <div>
-                                                                        <label for="transfer-to-{{ $transaction->id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Transfer To</label>
-                                                                        <select id="transfer-to-{{ $transaction->id }}" name="transfer_to" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                                                                            <option value="">Select a user</option>
-                                                                            @foreach ($endUsers as $enduser)
-                                                                                @if ($enduser['id'] !== optional($transaction->user)->id)
-                                                                                    <option value="{{ $enduser['id'] }}">
-                                                                                        {{ $enduser['name'] }}
-                                                                                    </option>
-                                                                                @endif
-                                                                            @endforeach
-                                                                        </select>
-                                                                    </div>
-                                                                    <div>
-                                                                        <label for="transfer-note-{{ $transaction->id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Transfer Notes</label>
-                                                                        <textarea id="transfer-note-{{ $transaction->id }}" name="notes" rows="3" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Enter transfer details"></textarea>
-                                                                    </div>
-                                                                    <div class="flex justify-end gap-3 pt-2">
-                                                                        <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                        <button type="submit" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Confirm Transfer</button>
-                                                                    </div>
-                                                                </form>
-                                                            </x-modals.base-modal>
-
-                                                            <!-- Confirm Return Modal -->
-                                                            <x-modals.base-modal title="Confirm Return" subtitle="Confirm returning this assigned item." maxWidth="max-w-md">
-                                                                <x-slot:trigger>
-                                                                    <button type="button" @click="open = true" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
-                                                                        Return
-                                                                    </button>
-                                                                </x-slot:trigger>
-
-                                                                <div class="space-y-4 text-sm text-gray-700 dark:text-gray-200">
-                                                                    <p>Are you sure you want to mark this item as returned?</p>
-                                                                    <div class="space-y-2 rounded-md bg-gray-50 p-3 dark:bg-gray-800">
-                                                                        <p><span class="font-semibold">Item:</span> {{ optional($transaction->item)->item_name ?? 'Unknown item' }}</p>
-                                                                        <p><span class="font-semibold">Assigned To:</span> {{ $transaction->user?->full_name ?: ($transaction->user?->username ?? 'Unknown') }}</p>
-                                                                        <p><span class="font-semibold">Assigned On:</span> {{ $transaction->transaction_date ? $transaction->transaction_date->format('Y-m-d') : 'N/A' }}</p>
-                                                                    </div>
-                                                                    <div class="flex justify-end gap-3 pt-2">
-                                                                        <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                        <button type="button" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-600">Confirm Return</button>
-                                                                    </div>
-                                                                </div>
-                                                            </x-modals.base-modal>
-                                                        </div>
-                                                    </div>
-                                                </td>
                                             </tr>
                                         @empty
                                             <tr>
@@ -770,6 +730,13 @@
                                                 </td>
                                             </tr>
                                         @endforelse
+                                        @if($transactions->isNotEmpty())
+                                            <tr x-show="normalizeSearch(searchHistory) !== '' && !hasTransactionMatches()" x-cloak>
+                                                <td colspan="7" class="px-4 py-10 text-center text-gray-500 dark:text-gray-400">
+                                                    Transaction not found.
+                                                </td>
+                                            </tr>
+                                        @endif
                                     </tbody>
                                 </table>
                             </div>

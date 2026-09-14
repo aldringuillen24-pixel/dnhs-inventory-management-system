@@ -11,6 +11,7 @@ class Transaction extends Model
 
     protected $fillable = [
         'user_id',
+        'from_user_id',
         'item_id',
         'quantity',
         'transaction_date',
@@ -29,6 +30,11 @@ class Transaction extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function fromUser()
+    {
+        return $this->belongsTo(User::class, 'from_user_id');
     }
 
     public function item()

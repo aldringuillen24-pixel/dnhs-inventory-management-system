@@ -13,9 +13,11 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\AiAssistantController;
+use App\Http\Controllers\Auth\PasswordResetController;
 use App\Models\User;
 
 // Authentication Routes
+
 Route::get('/signin', function () {
     return view('components.auth.signin', ['title' => 'Sign In'])->with('success', session('success'))->with('error', session('error'));
 })->name('signin');
@@ -24,10 +26,29 @@ Route::get('/login', function () {
     return redirect()->route('signin');
 })->name('login');
 
-Route::post('/signin', [LoginController::class, 'login'])->name('signin.post');
+Route::post('/signin', [LoginController::class, 'login'])->name('signin.post')->middleware('throttle:5,1');
 
 Route::post('/logout', [LogoutController::class, 'logout'])->name('logout');
 
+Route::get('/forgot-password', [PasswordResetController::class, 'showForgotPasswordForm'])
+    ->name('password.forgot');
+
+Route::post('/forgot-password', [PasswordResetController::class, 'sendOtp'])
+    ->name('password.email')
+    ->middleware('throttle:100,1'); //3,10
+
+Route::get('/reset-password/verify', [PasswordResetController::class, 'showOtpForm'])
+    ->name('password.otp');
+
+Route::post('/reset-password/verify', [PasswordResetController::class, 'verifyOtp'])
+    ->name('password.otp.verify')
+    ->middleware('throttle:5,10');
+
+Route::get('/reset-password/new', [PasswordResetController::class, 'showResetForm'])
+    ->name('password.reset.form');
+
+Route::post('/reset-password', [PasswordResetController::class, 'updatePassword'])
+    ->name('password.update');
 
 // Protected Routes (require authentication)
 Route::middleware('auth')->group(function () {
@@ -99,6 +120,10 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::post('/returns/{id}/decline', [PropertyCustodianController::class, 'declineReturn'])->name('returns.decline');
 
     Route::post('/inventory/{itemId}/mark-returned', [PropertyCustodianController::class, 'markReturned'])->name('inventory.mark-returned');
+
+    Route::post('/inventory/{itemId}/send-to-maintenance', [PropertyCustodianController::class, 'sendToMaintenance'])->name('inventory.send-to-maintenance');
+
+    Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
 
     Route::get('/reports', [PropertyCustodianController::class, 'reports'])->name('reports');
 
