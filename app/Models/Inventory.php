@@ -62,4 +62,21 @@ class Inventory extends Model
     {
         return $this->hasMany(MaintenanceRecord::class, 'inventory_id', 'item_id');
     }
+
+    public function latestMaintenance()
+    {
+        return $this->hasOne(MaintenanceRecord::class, 'inventory_id', 'item_id')->latestOfMany();
+    }
+
+    public function latestStockMovement()
+    {
+        return $this->hasOne(StockMovement::class, 'inventory_id', 'item_id')->latestOfMany();
+    }
+
+    public function latestDisposalMovement()
+    {
+        return $this->hasOne(StockMovement::class, 'inventory_id', 'item_id')
+            ->whereIn('movement_type', ['disposed', 'ready_to_dispose'])
+            ->latestOfMany();
+    }
 }

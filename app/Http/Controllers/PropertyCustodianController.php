@@ -169,7 +169,7 @@ class PropertyCustodianController extends Controller
             ->get();
 
         $sourceItemsByGroup = Inventory::query()
-            ->with(['assignedTo', 'maintenanceRecords' => fn ($query) => $query->latest('created_at'), 'stockMovements' => fn ($query) => $query->latest('created_at')])
+            ->with(['assignedTo', 'latestMaintenance', 'latestStockMovement', 'latestDisposalMovement'])
             ->orderBy('item_name')
             ->orderBy('item_id')
             ->get()
@@ -194,10 +194,8 @@ class PropertyCustodianController extends Controller
         $inventoryItems->each(function (Inventory $inventoryItem) use ($latestAssignments): void {
             $inventoryItem->sourceItems->each(function (Inventory $sourceItem) use ($latestAssignments): void {
                 $sourceItem->latestAssignment = $latestAssignments->get($sourceItem->item_id);
-                $sourceItem->latestMaintenance = $sourceItem->maintenanceRecords->first();
-                $sourceItem->latestMovement = $sourceItem->stockMovements->first();
-                $sourceItem->disposalMovement = $sourceItem->stockMovements
-                    ->first(fn (StockMovement $movement): bool => in_array($movement->movement_type, ['disposed', 'ready_to_dispose'], true));
+                $sourceItem->latestMovement = $sourceItem->latestStockMovement;
+                $sourceItem->disposalMovement = $sourceItem->latestDisposalMovement;
             });
         });
 
@@ -982,7 +980,7 @@ class PropertyCustodianController extends Controller
 
             MaintenanceRecord::create([
                 'inventory_id' => $inventory->item_id,
-                'reported_by' => $request->user()?->id,
+                'reported_by' => $request->user()->id,
                 'status' => 'reported',
                 'issue_description' => $validated['issue_description'],
             ]);

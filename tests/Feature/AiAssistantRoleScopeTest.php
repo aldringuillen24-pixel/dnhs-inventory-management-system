@@ -22,12 +22,14 @@ test('end users receive warehouse availability without another users assigned it
         'first_name' => 'Current',
         'last_name' => 'User',
         'username' => 'current-user',
+        'password' => 'password',
         'status' => 'active',
     ]);
     $otherUser = User::create([
         'first_name' => 'Other',
         'last_name' => 'User',
         'username' => 'other-user',
+        'password' => 'password',
         'status' => 'active',
     ]);
     $category = Category::create(['category_name' => 'Equipment']);
