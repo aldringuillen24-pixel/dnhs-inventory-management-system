@@ -68,6 +68,16 @@ class User extends Authenticatable
         return $this->hasMany(Inventory::class);
     }
 
+    public function reportedMaintenanceRecords()
+    {
+        return $this->hasMany(MaintenanceRecord::class, 'reported_by');
+    }
+
+    public function assignedMaintenanceRecords()
+    {
+        return $this->hasMany(MaintenanceRecord::class, 'assigned_to');
+    }
+
     /**
      * Get the user's full name.
      */

@@ -123,6 +123,10 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/inventory/{itemId}/send-to-maintenance', [PropertyCustodianController::class, 'sendToMaintenance'])->name('inventory.send-to-maintenance');
 
+    Route::post('/inventory/{itemId}/mark-repaired', [PropertyCustodianController::class, 'markRepaired'])->name('inventory.mark-repaired');
+
+    Route::post('/inventory/{itemId}/mark-ready-to-dispose', [PropertyCustodianController::class, 'markReadyToDispose'])->name('inventory.mark-ready-to-dispose');
+
     Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
 
     Route::get('/reports', [PropertyCustodianController::class, 'reports'])->name('reports');

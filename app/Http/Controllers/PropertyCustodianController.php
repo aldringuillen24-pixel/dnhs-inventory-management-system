@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\User;
 use App\Models\Transaction;
 use App\Models\Inventory;
+use App\Models\MaintenanceRecord;
 use App\Models\StockMovement;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -142,6 +143,12 @@ class PropertyCustodianController extends Controller
     public function inventory()
     {
         $categories = Category::orderBy('category_name')->get();
+        $endUsers = User::query()
+            ->with('role:role_id,role_name')
+            ->whereHas('role', fn ($query) => $query->where('role_name', 'End User'))
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get();
         $inventoryMetrics = [
             'total' => (int) Inventory::where('status', '!=', 'disposed')->sum('quantity'),
             'available' => (int) Inventory::where('status', 'available')->sum('quantity'),
@@ -149,35 +156,62 @@ class PropertyCustodianController extends Controller
             'attention' => (int) Inventory::whereIn('status', ['under_inspection', 'under_maintenance'])->sum('quantity'),
         ];
         $inventoryItems = Inventory::query()
-            ->with('category:category_id,category_name')
-            ->where('status', '!=', 'disposed')
-            ->select('item_name', 'category_id')
+            ->with('category:category_id,category_name,is_maintenance_eligible')
+            ->select('item_name', 'category_id', 'status')
             ->selectRaw('MAX(unit) as unit')
             ->selectRaw('MAX(ics_no) as ics_no')
             ->selectRaw('SUM(quantity) as quantity')
             ->selectRaw('SUM(quantity * unit_cost) as total_cost')
             ->selectRaw('SUM(quantity * unit_cost) / NULLIF(SUM(quantity), 0) as unit_cost')
             ->selectRaw('MAX(date_acquired) as date_acquired')
-            ->groupBy('item_name', 'category_id')
+            ->groupBy('item_name', 'category_id', 'status')
             ->orderBy('item_name')
             ->get();
 
         $sourceItemsByGroup = Inventory::query()
-            ->with('assignedTo')
-            ->where('status', '!=', 'disposed')
+            ->with(['assignedTo', 'maintenanceRecords' => fn ($query) => $query->latest('created_at'), 'stockMovements' => fn ($query) => $query->latest('created_at')])
             ->orderBy('item_name')
             ->orderBy('item_id')
             ->get()
-            ->groupBy(fn (Inventory $item) => $item->item_name . '|' . $item->category_id);
+            ->groupBy(fn (Inventory $item) => $item->item_name . '|' . $item->category_id . '|' . $item->status);
+
+        $latestAssignments = Transaction::query()
+            ->with('user:id,first_name,last_name,username')
+            ->where('status', 'assigned')
+            ->latest('transaction_date')
+            ->latest('id')
+            ->get()
+            ->unique('item_id')
+            ->keyBy('item_id');
 
         $inventoryItems->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup): void {
             $inventoryItem->sourceItems = $sourceItemsByGroup->get(
-                $inventoryItem->item_name . '|' . $inventoryItem->category_id,
+                $inventoryItem->item_name . '|' . $inventoryItem->category_id . '|' . $inventoryItem->status,
                 collect(),
             );
         });
 
-        return view('pages.propertyCustodian.inventory', compact('categories', 'inventoryItems', 'inventoryMetrics'));
+        $inventoryItems->each(function (Inventory $inventoryItem) use ($latestAssignments): void {
+            $inventoryItem->sourceItems->each(function (Inventory $sourceItem) use ($latestAssignments): void {
+                $sourceItem->latestAssignment = $latestAssignments->get($sourceItem->item_id);
+                $sourceItem->latestMaintenance = $sourceItem->maintenanceRecords->first();
+                $sourceItem->latestMovement = $sourceItem->stockMovements->first();
+                $sourceItem->disposalMovement = $sourceItem->stockMovements
+                    ->first(fn (StockMovement $movement): bool => in_array($movement->movement_type, ['disposed', 'ready_to_dispose'], true));
+            });
+        });
+
+        $inventoryByStatus = $inventoryItems->groupBy('status');
+        $inventoryStatusCounts = $inventoryByStatus->map(fn ($items): int => (int) $items->sum('quantity'));
+
+        return view('pages.propertyCustodian.inventory', compact(
+            'categories',
+            'endUsers',
+            'inventoryItems',
+            'inventoryByStatus',
+            'inventoryStatusCounts',
+            'inventoryMetrics',
+        ));
     }
 
     // Transactions method to display the transactions page with available inventory items, incoming requests, and transactions
@@ -918,13 +952,19 @@ class PropertyCustodianController extends Controller
     public function sendToMaintenance(Request $request, $itemId)
     {
         $validated = $request->validate([
+            'issue_description' => ['required', 'string', 'max:1000'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
 
         $inventory = Inventory::findOrFail($itemId);
+        $inventory->loadMissing('category');
 
         if ($inventory->status !== 'available') {
             return redirect()->back()->with('error', 'Only available items can be sent to maintenance.');
+        }
+
+        if ($inventory->category?->is_maintenance_eligible === false) {
+            return redirect()->back()->with('error', 'Items in this category are not eligible for maintenance.');
         }
 
         DB::transaction(function () use ($inventory, $validated, $request) {
@@ -939,6 +979,13 @@ class PropertyCustodianController extends Controller
             $quantity = $inventory->quantity;
 
             $inventory->update(['status' => 'under_maintenance']);
+
+            MaintenanceRecord::create([
+                'inventory_id' => $inventory->item_id,
+                'reported_by' => $request->user()?->id,
+                'status' => 'reported',
+                'issue_description' => $validated['issue_description'],
+            ]);
 
             StockMovement::create([
                 'inventory_id' => $inventory->item_id,
@@ -956,6 +1003,96 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Item sent to maintenance.');
     }
 
+    public function markRepaired(Request $request, $itemId)
+    {
+        $validated = $request->validate([
+            'repair_notes' => ['nullable', 'string', 'max:1000'],
+            'maintenance_cost' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        DB::transaction(function () use ($itemId, $validated, $request): void {
+            $inventory = Inventory::whereKey($itemId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($inventory->status !== 'under_maintenance') {
+                throw new \Exception('Item is not currently under maintenance.');
+            }
+
+            $maintenanceRecord = MaintenanceRecord::query()
+                ->where('inventory_id', $inventory->item_id)
+                ->whereIn('status', ['reported', 'in_progress'])
+                ->latest('created_at')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $maintenanceRecord) {
+                throw new \Exception('No active maintenance record was found.');
+            }
+
+            $quantity = $inventory->quantity;
+            $completedAt = now();
+
+            $inventory->update(['status' => 'available']);
+
+            $maintenanceRecord->update([
+                'status' => 'completed',
+                'repair_notes' => $validated['repair_notes'] ?? $maintenanceRecord->repair_notes,
+                'maintenance_cost' => $validated['maintenance_cost'] ?? $maintenanceRecord->maintenance_cost,
+                'started_at' => $maintenanceRecord->started_at ?? $completedAt,
+                'completed_at' => $completedAt,
+            ]);
+
+            StockMovement::create([
+                'inventory_id' => $inventory->item_id,
+                'user_id' => $request->user()?->id,
+                'movement_type' => 'maintenance_completed',
+                'quantity' => $quantity,
+                'quantity_before' => $quantity,
+                'quantity_after' => $quantity,
+                'reference_type' => 'maintenance_record',
+                'reference_id' => $maintenanceRecord->id,
+                'notes' => $validated['repair_notes'] ?? 'Item repaired and returned to inventory',
+            ]);
+        });
+
+        return redirect()->route('propertyCustodian.inventory')->with('success', 'Item marked as repaired and now available.');
+    }
+
+    public function markReadyToDispose(Request $request, $itemId)
+    {
+        $validated = $request->validate([
+            'notes' => ['required', 'string', 'max:500'],
+        ]);
+
+        DB::transaction(function () use ($itemId, $validated, $request): void {
+            $inventory = Inventory::whereKey($itemId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($inventory->status !== 'under_maintenance') {
+                throw new \Exception('Only items under maintenance can be marked ready to dispose.');
+            }
+
+            $quantity = $inventory->quantity;
+            $inventory->update(['status' => 'ready_to_dispose']);
+
+            StockMovement::create([
+                'inventory_id' => $inventory->item_id,
+                'user_id' => $request->user()?->id,
+                'movement_type' => 'ready_to_dispose',
+                'quantity' => $quantity,
+                'quantity_before' => $quantity,
+                'quantity_after' => $quantity,
+                'reference_type' => 'inventory',
+                'reference_id' => $inventory->item_id,
+                'notes' => $validated['notes'],
+            ]);
+        });
+
+        return redirect()->route('propertyCustodian.inventory')->with('success', 'Item marked ready for disposal.');
+    }
+
     public function disposeInventory(Request $request, $itemId)
     {
         $validated = $request->validate([
@@ -964,8 +1101,8 @@ class PropertyCustodianController extends Controller
 
         $inventory = Inventory::findOrFail($itemId);
 
-        if ($inventory->status !== 'available') {
-            return redirect()->back()->with('error', 'Only available items can be disposed.');
+        if (! in_array($inventory->status, ['available', 'ready_to_dispose'], true)) {
+            return redirect()->back()->with('error', 'Only available or ready-to-dispose items can be disposed.');
         }
 
         DB::transaction(function () use ($inventory, $validated, $request) {
@@ -973,8 +1110,8 @@ class PropertyCustodianController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($inventory->status !== 'available') {
-                throw new \Exception('Item is not currently available.');
+            if (! in_array($inventory->status, ['available', 'ready_to_dispose'], true)) {
+                throw new \Exception('Item is not available for disposal.');
             }
 
             $quantity = $inventory->quantity;

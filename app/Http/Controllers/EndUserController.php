@@ -581,7 +581,7 @@ class EndUserController extends Controller
 
         if ($existingRequest) {
             // Return request already exists, no duplicate needed
-            return redirect()->route('endUser.my-assigned-items')->with('success', 'Return request submitted to property custodian.');
+            return redirect()->route('endUser.my-requests')->with('success', 'Return request submitted to property custodian.');
         }
 
         $returnQuantity = $approvedAssignment?->quantity ?? $inventory->quantity;
@@ -605,7 +605,7 @@ class EndUserController extends Controller
             'requested_at' => now(),
         ]);
 
-        return redirect()->route('endUser.my-assigned-items')->with('success', 'Return request submitted to property custodian.');
+        return redirect()->route('endUser.my-requests')->with('success', 'Return request submitted to property custodian.');
     }
 
     public function cancelReturnRequest(Request $request, $itemId)

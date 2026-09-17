@@ -10,7 +10,7 @@ class CategorySeeder extends Seeder
     public function run(): void
     {
         $categories = [
-            ['category_name' => 'Furniture and Fixtures', 'requires_serial_number' => false],
+            ['category_name' => 'Furniture and Fixtures', 'requires_serial_number' => false, 'is_maintenance_eligible' => false],
             ['category_name' => 'ICT Equipment', 'requires_serial_number' => true],
             ['category_name' => 'Office Equipment', 'requires_serial_number' => true],
             ['category_name' => 'Laboratory Equipment', 'requires_serial_number' => true],

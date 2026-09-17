@@ -14,12 +14,14 @@ class Category extends Model
     protected $fillable = [
         'category_name',
         'requires_serial_number',
+        'is_maintenance_eligible',
     ];
 
     protected function casts(): array
     {
         return [
             'requires_serial_number' => 'boolean',
+            'is_maintenance_eligible' => 'boolean',
         ];
     }
 

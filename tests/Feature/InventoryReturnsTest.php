@@ -497,6 +497,7 @@ class InventoryReturnsTest extends TestCase
 
         $this->actingAs($this->custodian)
             ->post(route('propertyCustodian.inventory.send-to-maintenance', $this->assignedItem->item_id), [
+                'issue_description' => 'Needs repair',
                 'notes' => 'Needs repair',
             ])
             ->assertRedirect(route('propertyCustodian.inventory'));
@@ -505,10 +506,153 @@ class InventoryReturnsTest extends TestCase
             'item_id' => $this->assignedItem->item_id,
             'status' => 'under_maintenance',
         ]);
+        $this->assertDatabaseHas('maintenance_records', [
+            'inventory_id' => $this->assignedItem->item_id,
+            'reported_by' => $this->custodian->id,
+            'status' => 'reported',
+            'issue_description' => 'Needs repair',
+        ]);
         $this->assertDatabaseHas('stock_movements', [
             'inventory_id' => $this->assignedItem->item_id,
             'movement_type' => 'maintenance',
             'notes' => 'Needs repair',
+        ]);
+    }
+
+    public function test_ineligible_category_disables_send_to_maintenance_in_available_inventory()
+    {
+        $category = Category::create([
+            'category_name' => 'Learning Resources',
+            'requires_serial_number' => false,
+            'is_maintenance_eligible' => false,
+        ]);
+
+        Inventory::create([
+            'category_id' => $category->category_id,
+            'item_name' => 'Workbook',
+            'quantity' => 1,
+            'unit' => 'copy',
+            'unit_cost' => 100,
+            'date_acquired' => now()->toDateString(),
+            'status' => 'available',
+            'user_id' => $this->custodian->id,
+        ]);
+
+        $response = $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.inventory'));
+
+        $response->assertOk();
+        $response->assertSee('disabled title="This category is not eligible for maintenance."', false);
+    }
+
+    public function test_furniture_category_is_not_eligible_for_maintenance()
+    {
+        $this->seed(\Database\Seeders\CategorySeeder::class);
+        $category = Category::where('category_name', 'Furniture and Fixtures')->firstOrFail();
+
+        $item = Inventory::create([
+            'category_id' => $category->category_id,
+            'item_name' => 'Teacher Desk',
+            'quantity' => 1,
+            'unit' => 'piece',
+            'unit_cost' => 3500,
+            'date_acquired' => now()->toDateString(),
+            'status' => 'available',
+            'user_id' => $this->custodian->id,
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.inventory'))
+            ->assertOk()
+            ->assertSee('disabled title="This category is not eligible for maintenance."', false);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.send-to-maintenance', $item->item_id), [
+                'issue_description' => 'Furniture should not enter maintenance.',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('error', 'Items in this category are not eligible for maintenance.');
+
+        $this->assertDatabaseHas('inventory', [
+            'item_id' => $item->item_id,
+            'status' => 'available',
+        ]);
+    }
+
+    public function test_ineligible_category_cannot_be_sent_to_maintenance_directly()
+    {
+        $category = Category::create([
+            'category_name' => 'Learning Resources',
+            'requires_serial_number' => false,
+            'is_maintenance_eligible' => false,
+        ]);
+
+        $item = Inventory::create([
+            'category_id' => $category->category_id,
+            'item_name' => 'Workbook',
+            'quantity' => 1,
+            'unit' => 'copy',
+            'unit_cost' => 100,
+            'date_acquired' => now()->toDateString(),
+            'status' => 'available',
+            'user_id' => $this->custodian->id,
+        ]);
+
+        $response = $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.send-to-maintenance', $item->item_id), [
+                'issue_description' => 'Should be rejected',
+            ])
+            ->assertRedirect();
+
+        $response->assertSessionHas('error', 'Items in this category are not eligible for maintenance.');
+        $this->assertDatabaseHas('inventory', [
+            'item_id' => $item->item_id,
+            'status' => 'available',
+        ]);
+        $this->assertDatabaseMissing('maintenance_records', [
+            'inventory_id' => $item->item_id,
+        ]);
+        $this->assertDatabaseMissing('stock_movements', [
+            'inventory_id' => $item->item_id,
+            'movement_type' => 'maintenance',
+        ]);
+    }
+
+    public function test_custodian_can_mark_a_maintenance_item_as_repaired_and_audit_it()
+    {
+        $this->assignedItem->update([
+            'status' => 'under_maintenance',
+            'assigned_to_user_id' => null,
+        ]);
+
+        $maintenanceRecord = \App\Models\MaintenanceRecord::create([
+            'inventory_id' => $this->assignedItem->item_id,
+            'reported_by' => $this->custodian->id,
+            'status' => 'reported',
+            'issue_description' => 'Needs repair',
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.mark-repaired', $this->assignedItem->item_id), [
+                'repair_notes' => 'Power cable replaced.',
+                'maintenance_cost' => '250.00',
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'));
+
+        $this->assertDatabaseHas('inventory', [
+            'item_id' => $this->assignedItem->item_id,
+            'status' => 'available',
+        ]);
+        $this->assertDatabaseHas('maintenance_records', [
+            'id' => $maintenanceRecord->id,
+            'status' => 'completed',
+            'repair_notes' => 'Power cable replaced.',
+            'maintenance_cost' => '250.00',
+        ]);
+        $this->assertDatabaseHas('stock_movements', [
+            'inventory_id' => $this->assignedItem->item_id,
+            'movement_type' => 'maintenance_completed',
+            'notes' => 'Power cable replaced.',
         ]);
     }
 

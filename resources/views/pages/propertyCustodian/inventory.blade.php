@@ -1,531 +1,257 @@
 @extends('layouts.app', ['title' => 'Inventory'])
 
+@php
+    $statusLabels = [
+        'all' => 'All Inventory', 'available' => 'Available', 'assigned' => 'Assigned',
+        'under_maintenance' => 'Under Maintenance', 'under_inspection' => 'Under Inspection',
+        'ready_to_dispose' => 'Ready to Dispose', 'disposed' => 'Disposed',
+    ];
+    $statusCollections = collect(['available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose', 'disposed'])
+        ->mapWithKeys(fn ($status) => [$status => $inventoryByStatus->get($status, collect())]);
+@endphp
+
 @section('content')
     <x-common.page-breadcrumb pageTitle="Inventory" />
 
-    <div class="grid gap-6 xl:grid-cols-12">
-        <div class="col-span-12 md:col-span-6 xl:col-span-3">
-            <x-cards.metric-card
-                    label="Total Inventory Units"
-                    value="{{ number_format($inventoryMetrics['total']) }}"
-                    subtitle="Non-disposed inventory"
-                icon="<svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5' viewBox='0 0 20 20' fill='currentColor'><path d='M4 3a1 1 0 00-1 1v2a1 1 0 001 1h1v8a1 1 0 001 1h8a1 1 0 001-1V7h1a1 1 0 001-1V4a1 1 0 00-1-1H4z'/><path d='M5 7V5h10V7H5z'/></svg>"
-            >
-                    <span class="text-sm text-gray-500 dark:text-gray-400">Live inventory quantity.</span>
-            </x-cards.metric-card>
-        </div>
-        <div class="col-span-12 md:col-span-6 xl:col-span-3">
-            <x-cards.metric-card
-                    label="Available Units"
-                    value="{{ number_format($inventoryMetrics['available']) }}"
-                    subtitle="Ready for assignment"
-                icon="<svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5' viewBox='0 0 20 20' fill='currentColor'><path fill-rule='evenodd' d='M10 18a8 8 0 100-16 8 8 0 000 16zm1-11V5a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0V9h2a1 1 0 100-2h-2z' clip-rule='evenodd'/></svg>"
-                tone="positive"
-            >
-                    Ready to be assigned.
-            </x-cards.metric-card>
-        </div>
-        <div class="col-span-12 md:col-span-6 xl:col-span-3">
-            <x-cards.metric-card
-                    label="Assigned Units"
-                    value="{{ number_format($inventoryMetrics['assigned']) }}"
-                    subtitle="Currently assigned"
-                icon="<svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5' viewBox='0 0 20 20' fill='currentColor'><path d='M10 2a8 8 0 100 16 8 8 0 000-16zm1 9H9V7a1 1 0 112 0v4z'/></svg>"
-                    tone="neutral"
-            >
-                    Currently in use.
-            </x-cards.metric-card>
-        </div>
-        <div class="col-span-12 md:col-span-6 xl:col-span-3">
-            <x-cards.metric-card
-                    label="Items Needing Attention"
-                    value="{{ number_format($inventoryMetrics['attention']) }}"
-                    subtitle="Inspection or maintenance"
-                icon="<svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5' viewBox='0 0 20 20' fill='currentColor'><path d='M9.049 2.927a1 1 0 011.902 0l.518 2.128a8.04 8.04 0 013.054 1.771l1.996-.39a1 1 0 011.149 1.254l-.901 2.93a8.072 8.072 0 010 2.356l.9 2.929a1 1 0 01-1.15 1.255l-1.995-.39a8.04 8.04 0 01-3.056 1.772l-.516 2.128a1 1 0 01-1.902 0l-.517-2.128a8.04 8.04 0 01-3.055-1.772l-1.996.39a1 1 0 01-1.15-1.255l.901-2.93a8.072 8.072 0 010-2.356l-.9-2.929a1 1 0 011.15-1.255l1.995.39a8.04 8.04 0 013.055-1.771l.517-2.128z'/></svg>"
-                tone="neutral"
-            >
-                    {{ $inventoryMetrics['attention'] > 0 ? 'Review these inventory items.' : 'No items need attention.' }}
-            </x-cards.metric-card>
-        </div>
+    <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+        <x-cards.metric-card label="Total Inventory Units" value="{{ number_format($inventoryMetrics['total']) }}" subtitle="Non-disposed inventory" />
+        <x-cards.metric-card label="Available Units" value="{{ number_format($inventoryMetrics['available']) }}" subtitle="Ready for assignment" tone="positive" />
+        <x-cards.metric-card label="Assigned Units" value="{{ number_format($inventoryMetrics['assigned']) }}" subtitle="Currently assigned" />
+        <x-cards.metric-card label="Items Needing Attention" value="{{ number_format($inventoryMetrics['attention']) }}" subtitle="Inspection or maintenance" />
     </div>
 
-    <div class="grid gap-6 xl:grid-cols-12 mt-6">
-        <div class="col-span-12 xl:col-span-12">
-            <x-cards.base-card title="Manage Inventory" subtitle="Search and manage assigned assets">
-                <div x-data="{
-                    search: '',
-                    category: '',
-                    scanOpen: false,
-                    scanProcessing: false,
-                    scanFile: null,
-                    scanPreview: '',
-                    extractedItems: [],
-                    chooseScanFile(event) {
-                        const file = event.target.files[0];
-                        if (!file || !file.type.startsWith('image/')) return;
-                        this.scanFile = file;
-                        this.scanPreview = URL.createObjectURL(file);
-                        this.extractedItems = [];
-                    },
-                    processScan() {
-                        if (!this.scanFile) return;
-                        this.scanProcessing = true;
-                        setTimeout(() => {
-                            this.extractedItems = [{
-                                item_name: this.scanFile.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
-                                category_id: '',
-                                unit: 'pcs',
-                                unit_cost: '0.00',
-                                date_acquired: new Date().toISOString().slice(0, 10),
-                                quantity: 1,
-                                serial_numbers: []
-                            }];
-                            this.scanProcessing = false;
-                        }, 1200);
-                    },
-                    addScanItem() {
-                        this.extractedItems.push({ item_name: '', category_id: '', unit: 'pcs', unit_cost: '0.00', date_acquired: new Date().toISOString().slice(0, 10), quantity: 1, serialized: false, serial_numbers: [] });
-                    },
-                    removeScanItem(index) {
-                        this.extractedItems.splice(index, 1);
-                    },
-                    fillSingleForm() {
-                        const item = this.extractedItems[0];
-                        const form = document.querySelector('[data-stock-in-form]');
-                        if (!item || !form) return;
-                        ['item_name', 'unit', 'unit_cost', 'date_acquired', 'quantity'].forEach((field) => {
-                            const input = form.elements[field];
-                            if (input) input.value = item[field] ?? '';
-                        });
-                        const categoryInput = form.elements.category_id;
-                        if (categoryInput) {
-                            categoryInput.value = item.category_id;
-                            categoryInput.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
-                        document.getElementById('stock-in-trigger')?.click();
-                        this.scanOpen = false;
-                    },
-                    async saveAllScan() {
-                        if (!this.extractedItems.length) return;
-                        this.scanProcessing = true;
-                        for (const item of this.extractedItems) {
-                            const formData = new FormData();
-                            formData.append('_token', '{{ csrf_token() }}');
-                            Object.entries(item).forEach(([key, value]) => {
-                                if (key !== 'serial_numbers') formData.append(key, value ?? '');
-                            });
-                            item.serial_numbers.forEach((serial, index) => formData.append(`serial_numbers[${index}]`, serial));
-                            await fetch('{{ route('propertyCustodian.inventory.stock-in') }}', { method: 'POST', body: formData });
-                        }
-                        window.location.reload();
-                    },
-                    items: @js($inventoryItems->map(fn ($item) => [
-                        'categoryId' => (string) $item->category_id,
-                        'searchable' => \Illuminate\Support\Str::lower(implode(' ', [$item->item_name, $item->unit, $item->category?->category_name ?? '', $item->ics_no ?? ''])),
-                    ])->values()),
-                    matches(item) {
-                        return item.searchable.includes(this.search.toLowerCase()) && (!this.category || item.categoryId === this.category);
-                    },
-                    hasMatches() {
-                        return this.items.some((item) => this.matches(item));
-                    },
-                }">
-                <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div class="flex-1">
-                        <input x-model="search" type="search" placeholder="Search assets" aria-label="Search assets" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+    <div class="mt-6">
+        <x-cards.base-card title="Inventory Workspaces" subtitle="Manage each inventory lifecycle stage in its own workspace.">
+            <div x-data="{
+                activeTab: 'all', allSearch: '', allCategory: '', availableSearch: '', assignedSearch: '',
+                underMaintenanceSearch: '', underInspectionSearch: '', readyToDisposeSearch: '', disposedSearch: '',
+                scanOpen: false, scanFile: null, extractedName: '', maintenanceOpen: false, maintenanceItemId: '', maintenanceBase: @js(url('/property-custodian/inventory')),
+                openMaintenance(itemId) { this.maintenanceItemId = String(itemId); this.maintenanceOpen = true; },
+                chooseScanFile(event) { const file = event.target.files[0]; if (!file || !file.type.startsWith('image/')) return; this.scanFile = file; this.extractedName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '); },
+                matches(search, row, filterCategory = 'false') { const query = (search || '').toLowerCase().trim(); return (!query || row.dataset.search.includes(query)) && (filterCategory !== 'true' || !this.allCategory || row.dataset.category === this.allCategory); },
+                hasMatches(search, panel, filterCategory = 'false') { return [...document.querySelectorAll('[data-inventory-panel]')].filter((row) => row.dataset.inventoryPanel === panel).some((row) => this.matches(search, row, filterCategory)); }
+            }">
+                <div class="mb-5 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
+                    <div class="flex min-w-max gap-1" role="tablist" aria-label="Inventory workspaces">
+                        @foreach ($statusLabels as $tab => $label)
+                            @php($count = $tab === 'all' ? $inventoryItems->where('status', '!=', 'disposed')->sum('quantity') : $inventoryStatusCounts->get($tab, 0))
+                            <button type="button" role="tab" @click="activeTab = '{{ $tab }}'" :aria-selected="activeTab === '{{ $tab }}'" :class="activeTab === '{{ $tab }}' ? 'border-brand-500 text-brand-500 font-semibold' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'" class="border-b-2 px-4 py-3 text-sm transition">
+                                {{ $label }}
+                                <span class="ml-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">{{ number_format($count) }}</span>
+                            </button>
+                        @endforeach
                     </div>
-                    <div class="flex flex-wrap gap-2">
-                        <select x-model="category" aria-label="Filter by category" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                            <option value="">All categories</option>
-                            @foreach ($categories as $category)
-                                <option value="{{ $category->category_id }}">{{ $category->category_name }}</option>
-                            @endforeach
-                        </select>
-                        <button type="button" @click="scanOpen = true" class="inline-flex items-center gap-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 transition hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300" title="Scan an inventory document">
-                            <i data-lucide="scan-line" class="h-4 w-4" aria-hidden="true"></i>
-                            AI Document Scan
-                        </button>
-                        
-                        <x-modals.base-modal title="Stock In Item" subtitle="Add an item to the inventory." maxWidth="max-w-2xl" :open="$errors->any()">
-                            <x-slot:trigger>
-                                <button id="stock-in-trigger" type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
-                                    <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                        <path fill-rule="evenodd" d="M10 5a1 1 0 0 1 1 1v3h3a1 1 0 1 1 0 2h-3v3a1 1 0 1 1-2 0v-3H6a1 1 0 1 1 0-2h3V6a1 1 0 0 1 1-1Z" clip-rule="evenodd" />
-                                    </svg>
-                                    Stock In
-                                </button>
-                            </x-slot:trigger>
+                </div>
 
-                            @php($selectedCategory = $categories->firstWhere('category_id', (int) old('category_id')))
-                            <form data-stock-in-form x-data="{ quantity: {{ old('quantity', 1) }}, requiresSerialNumber: {{ $selectedCategory?->requires_serial_number ? 'true' : 'false' }}, serialNumbers: @js(old('serial_numbers', [])), setQuantity(value) { const count = Math.max(1, Math.min(100, Number(value) || 1)); this.quantity = count; this.serialNumbers = Array.from({ length: count }, (_, index) => this.serialNumbers[index] ?? ''); }, setCategory(event) { this.requiresSerialNumber = event.target.selectedOptions[0]?.dataset.requiresSerialNumber === 'true'; if (this.requiresSerialNumber) { this.setQuantity(this.quantity); } else { this.serialNumbers = []; } } }" method="POST" action="{{ route('propertyCustodian.inventory.stock-in') }}" class="space-y-4">
-                                @csrf
+                <div x-show="activeTab === 'all'" x-cloak>
+                    <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <input x-model="allSearch" type="search" placeholder="Search the asset catalogue" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 lg:max-w-md" />
+                        <div class="flex flex-wrap gap-2">
+                            <select x-model="allCategory" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                <option value="">All categories</option>
+                                @foreach ($categories as $category)
+                                    <option value="{{ $category->category_id }}">{{ $category->category_name }}</option>
+                                @endforeach
+                            </select>
+                            <button type="button" @click="scanOpen = true" class="inline-flex items-center gap-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                                <i data-lucide="scan-line" class="h-4 w-4"></i>
+                                AI Document Scan
+                            </button>
 
-                                @if ($errors->any())
-                                    <div class="rounded-md border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">
-                                        Please correct the highlighted fields and try again.
+                            <x-modals.base-modal :open="$errors->any()" title="Stock In Item" subtitle="Add an item to available inventory." maxWidth="max-w-2xl">
+                                <x-slot:trigger><button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600"><i data-lucide="plus" class="h-4 w-4"></i>Stock In</button></x-slot:trigger>
+                                @php($selectedCategory = $categories->firstWhere('category_id', (int) old('category_id')))
+                                <form x-data="{ quantity: {{ old('quantity', 1) }}, requiresSerialNumber: {{ $selectedCategory?->requires_serial_number ? 'true' : 'false' }}, serialNumbers: @js(old('serial_numbers', [])), setQuantity(value) { const count = Math.max(1, Math.min(100, Number(value) || 1)); this.quantity = count; this.serialNumbers = Array.from({ length: count }, (_, index) => this.serialNumbers[index] ?? ''); }, setCategory(event) { this.requiresSerialNumber = event.target.selectedOptions[0]?.dataset.requiresSerialNumber === 'true'; if (this.requiresSerialNumber) this.setQuantity(this.quantity); else this.serialNumbers = []; } }" method="POST" action="{{ route('propertyCustodian.inventory.stock-in') }}" class="space-y-5">@csrf
+                                    @if ($errors->any())
+                                        <div class="rounded-md border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">Please correct the highlighted fields and try again.</div>
+                                    @endif
+
+                                    <div class="grid gap-6 md:grid-cols-[minmax(0,1fr)_14rem]">
+                                        <div class="space-y-4">
+                                            <div><label for="stock-in-item-name" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Name</label><input id="stock-in-item-name" name="item_name" value="{{ old('item_name') }}" type="text" placeholder="Enter item name" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div>
+                                            <div><label for="stock-in-category" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Category</label><select id="stock-in-category" name="category_id" @change="setCategory($event)" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"><option value="">Select a category</option>@foreach ($categories as $category)<option value="{{ $category->category_id }}" data-requires-serial-number="{{ $category->requires_serial_number ? 'true' : 'false' }}" @selected(old('category_id') == $category->category_id)>{{ $category->category_name }}</option>@endforeach</select></div>
+                                            <div><label for="stock-in-description" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Description</label><input id="stock-in-description" name="description" value="{{ old('description') }}" type="text" placeholder="Enter item description" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div>
+                                            <div class="grid gap-4 sm:grid-cols-2"><div><label for="stock-in-ics" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">ICS No.</label><input id="stock-in-ics" name="ics_no" value="{{ old('ics_no') }}" type="text" placeholder="Enter ICS number" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div><div><label for="stock-in-unit" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit</label><input id="stock-in-unit" name="unit" value="{{ old('unit') }}" type="text" placeholder="e.g. piece" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div></div>
+                                            <div class="grid gap-4 sm:grid-cols-2"><div><label for="stock-in-cost" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit Cost</label><input id="stock-in-cost" name="unit_cost" value="{{ old('unit_cost') }}" type="number" min="0" step="0.01" placeholder="0.00" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div><div><label for="stock-in-date" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Acquired</label><input id="stock-in-date" name="date_acquired" value="{{ old('date_acquired') }}" type="date" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div></div>
+                                        </div>
+
+                                        <aside :class="requiresSerialNumber && quantity >= 4 ? 'max-h-[24rem] overflow-y-auto' : ''" class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50"><label for="stock-in-quantity" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label><input id="stock-in-quantity" name="quantity" x-model.number="quantity" @input="setQuantity($event.target.value)" type="number" min="1" max="100" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /><template x-if="requiresSerialNumber"><div class="mt-4 space-y-3"><p class="text-sm font-medium text-gray-700 dark:text-gray-300">Serial Numbers</p><template x-for="index in quantity" :key="index"><div><label :for="`serial-number-${index}`" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400" x-text="`Serial Number ${index}`"></label><input :id="`serial-number-${index}`" :name="`serial_numbers[${index - 1}]`" x-model="serialNumbers[index - 1]" type="text" placeholder="Enter serial number" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div></template></div></template><p x-show="!requiresSerialNumber" class="mt-4 text-xs text-gray-500 dark:text-gray-400">Serial numbers are not required for the selected category.</p></aside>
                                     </div>
+                                    <div class="flex justify-end gap-3 pt-2"><button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button><x-common.button-spinner text="Save Item" loadingText="Saving..." class="text-white" /></div>
+                                </form>
+                            </x-modals.base-modal>
+                        </div>
+                    </div>
+                    <div class="max-h-[32rem] overflow-y-auto overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                        <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
+                            <thead class="sticky top-0 z-10 bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400"><tr><th class="px-4 py-3">Asset</th><th class="px-4 py-3">Category</th><th class="px-4 py-3">Qty</th><th class="px-4 py-3">Unit / ICS</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Unit cost</th><th class="px-4 py-3">Total cost</th><th class="px-4 py-3">Date acquired</th><th class="px-4 py-3">Actions</th></tr></thead>
+                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                                @forelse ($inventoryItems->where('status', '!=', 'disposed')->take(10) as $inventoryItem)
+                                    @php($source = $inventoryItem->sourceItems->first())
+                                    @php($searchable = strtolower(implode(' ', [$inventoryItem->item_name, $inventoryItem->unit, $inventoryItem->category?->category_name ?? '', $inventoryItem->ics_no ?? ''])))
+                                    <tr x-show="matches(allSearch, $el, 'true')" data-inventory-panel="all" data-search="{{ $searchable }}" data-category="{{ $inventoryItem->category_id }}" class="hover:bg-gray-50 dark:hover:bg-gray-800/60"><td class="px-4 py-3"><div class="font-medium text-gray-900 dark:text-white">{{ $inventoryItem->item_name }}</div></td><td class="px-4 py-3">{{ $inventoryItem->category?->category_name ?? 'Uncategorized' }}</td><td class="px-4 py-3 font-semibold">{{ number_format($inventoryItem->quantity) }}</td><td class="px-4 py-3">{{ $inventoryItem->unit }}<br><span class="text-xs text-gray-400">{{ $inventoryItem->ics_no ?: 'No ICS' }}</span></td><td class="px-4 py-3"><span class="inline-flex rounded-full bg-gray-100 px-2 py-1 text-xs font-medium capitalize text-gray-700 dark:bg-gray-800 dark:text-gray-300">{{ str_replace('_', ' ', $inventoryItem->status) }}</span></td><td class="px-4 py-3">₱{{ number_format((float) $inventoryItem->unit_cost, 2) }}</td><td class="px-4 py-3">₱{{ number_format((float) $inventoryItem->total_cost, 2) }}</td><td class="px-4 py-3">{{ optional($inventoryItem->date_acquired)->format('M d, Y') }}</td><td class="px-4 py-3"><div class="flex flex-wrap gap-2"><x-modals.base-modal title="Edit Inventory Item" subtitle="Update this available item." maxWidth="max-w-2xl"><x-slot:trigger><button type="button" @click="open = true" class="rounded-md border px-2.5 py-1.5 text-xs">Edit</button></x-slot:trigger><form method="POST" action="{{ route('propertyCustodian.inventory.update', $source?->item_id) }}" class="space-y-5">@csrf @method('PATCH')@if ($errors->any())<div class="rounded-md border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">Please correct the highlighted fields and try again.</div>@endif<div class="grid gap-6 md:grid-cols-[minmax(0,1fr)_14rem]"><div class="space-y-4"><div><label for="edit-item-name-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Name</label><input id="edit-item-name-{{ $source?->item_id }}" name="item_name" value="{{ old('item_name', $inventoryItem->item_name) }}" type="text" placeholder="Enter item name" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div><div><label for="edit-category-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Category</label><select id="edit-category-{{ $source?->item_id }}" name="category_id" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">@foreach ($categories as $category)<option value="{{ $category->category_id }}" @selected(old('category_id', $inventoryItem->category_id) == $category->category_id)>{{ $category->category_name }}</option>@endforeach</select></div><div><label for="edit-description-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Description</label><input id="edit-description-{{ $source?->item_id }}" name="description" value="{{ old('description', $inventoryItem->description) }}" type="text" placeholder="Enter item description" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div><div class="grid gap-4 sm:grid-cols-2"><div><label for="edit-ics-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">ICS No.</label><input id="edit-ics-{{ $source?->item_id }}" name="ics_no" value="{{ old('ics_no', $inventoryItem->ics_no) }}" type="text" placeholder="Enter ICS number" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div><div><label for="edit-unit-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit</label><input id="edit-unit-{{ $source?->item_id }}" name="unit" value="{{ old('unit', $inventoryItem->unit) }}" type="text" placeholder="e.g. piece" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div></div><div class="grid gap-4 sm:grid-cols-2"><div><label for="edit-cost-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit Cost</label><input id="edit-cost-{{ $source?->item_id }}" name="unit_cost" value="{{ old('unit_cost', $inventoryItem->unit_cost) }}" type="number" min="0" step="0.01" placeholder="0.00" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div><div><label for="edit-date-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Acquired</label><input id="edit-date-{{ $source?->item_id }}" name="date_acquired" value="{{ old('date_acquired', optional($inventoryItem->date_acquired)->format('Y-m-d')) }}" type="date" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div></div></div><aside class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50"><label for="edit-quantity-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label><input id="edit-quantity-{{ $source?->item_id }}" name="quantity" value="{{ old('quantity', $inventoryItem->quantity) }}" type="number" min="1" max="100" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /><p class="mt-4 text-xs text-gray-500 dark:text-gray-400">For assigned items, quantity updates are restricted.</p></aside></div><div class="flex justify-end gap-3 pt-2"><button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button><x-common.button-spinner text="Save Changes" loadingText="Saving..." class="text-white" /></div></form></x-modals.base-modal><form method="POST" action="{{ route('propertyCustodian.inventory.destroy', $source?->item_id) }}">@csrf @method('DELETE')<button class="rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700">Delete</button></form></div></td></tr>
+                                @empty
+                                    <tr><td colspan="9" class="px-4 py-12 text-center text-gray-500 dark:text-gray-400">No inventory records found.</td></tr>
+                                @endforelse
+                                @if ($inventoryItems->where('status', '!=', 'disposed')->isNotEmpty())
+                                    <tr x-show="!hasMatches(allSearch, 'all', 'true')" x-cloak><td colspan="9" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No items found.</td></tr>
                                 @endif
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
-                                <div class="grid gap-6 md:grid-cols-[minmax(0,1fr)_14rem]">
-                                    <div class="space-y-4">
-                                        <div>
-                                            <label for="item-name" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Name</label>
-                                            <input id="item-name" name="item_name" value="{{ old('item_name') }}" type="text" placeholder="Enter item name" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                        </div>
-                                        <div>
-                                            <label for="category" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Category</label>
-                                            <select id="category" name="category_id" @change="setCategory($event)" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                                                <option value="">Select a category</option>
-                                                @foreach ($categories as $category)
-                                                    <option value="{{ $category->category_id }}" data-requires-serial-number="{{ $category->requires_serial_number ? 'true' : 'false' }}" @selected(old('category_id') == $category->category_id)>{{ $category->category_name }}</option>
-                                                @endforeach
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label for="item-description" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Description</label>
-                                            <input id="item-description" name="description" value="{{ old('description') }}" type="text" placeholder="Enter item description" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                        </div>
-                                        <div class="grid gap-4 sm:grid-cols-2">
-                                            <div>
-                                                <label for="ics-number" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">ICS No.</label>
-                                                <input id="ics-number" name="ics_no" value="{{ old('ics_no') }}" type="text" placeholder="Enter ICS number" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                            </div>
-                                            <div>
-                                                <label for="unit" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit</label>
-                                                <input id="unit" name="unit" value="{{ old('unit') }}" type="text" placeholder="e.g. piece" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                            </div>
-                                        </div>
-                                        <div class="grid gap-4 sm:grid-cols-2">
-                                            <div>
-                                                <label for="unit-cost" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit Cost</label>
-                                                <input id="unit-cost" name="unit_cost" value="{{ old('unit_cost') }}" type="number" min="0" step="0.01" placeholder="0.00" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                            </div>
-                                            <div>
-                                                <label for="date-acquired" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Acquired</label>
-                                                <input id="date-acquired" name="date_acquired" value="{{ old('date_acquired') }}" type="date" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                            </div>
-                                        </div>
-                                    </div>
+                @foreach ($statusCollections as $status => $rows)
+                    @php($searchModel = match ($status) { 'under_maintenance' => 'underMaintenanceSearch', 'under_inspection' => 'underInspectionSearch', 'ready_to_dispose' => 'readyToDisposeSearch', default => $status . 'Search' })
+                    <div x-show="activeTab === '{{ $status }}'" x-cloak>
+                        <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ $statusLabels[$status] }} workspace</h3><p class="text-sm text-gray-500 dark:text-gray-400">{{ $status === 'available' ? 'Stock ready for controlled assignment.' : ($status === 'disposed' ? 'Historical records are read-only.' : 'Review records at this lifecycle stage.') }}</p></div><input x-model="{{ $searchModel }}" type="search" placeholder="Search {{ strtolower($statusLabels[$status]) }}" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 sm:w-72" /></div>
+                        <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                            <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
+                                <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                    <tr>
+                                    @if ($status === 'assigned')
+                                        <th class="px-4 py-3">Assignee</th>
+                                        <th class="px-4 py-3">Assigned date
+                                        </th>
+                                    @endif
 
-                                    <aside :class="requiresSerialNumber && quantity >= 4 ? 'max-h-[24rem] overflow-y-auto' : ''" class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
-                                        <label for="quantity" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label>
-                                        <input id="quantity" name="quantity" x-model.number="quantity" @input="setQuantity($event.target.value)" type="number" min="1" max="100" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                    @if (in_array($status, ['under_maintenance', 'under_inspection', 'ready_to_dispose'], true))
+                                        <th class="px-4 py-3">Workflow detail</th>
+                                    @endif
 
-                                        <template x-if="requiresSerialNumber">
-                                            <div class="mt-4 space-y-3">
-                                                <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Serial Numbers</p>
-                                                <template x-for="index in quantity" :key="index">
-                                                    <div>
-                                                        <label :for="`serial-number-${index}`" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400" x-text="`Serial Number ${index}`"></label>
-                                                        <input :id="`serial-number-${index}`" :name="`serial_numbers[${index - 1}]`" x-model="serialNumbers[index - 1]" type="text" placeholder="Enter serial number" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                                    @if ($status === 'disposed')
+                                        <th class="px-4 py-3">Disposal record</th>
+                                    @endif
+
+                                        <th class="px-4 py-3">Asset</th>
+                                        <th class="px-4 py-3">Category</th>
+                                        <th class="px-4 py-3">Qty</th>
+                                        <th class="px-4 py-3">Unit / ICS</th>
+                                        <th class="px-4 py-3">Unit cost</th>
+                                        <th class="px-4 py-3">Total cost</th>
+                                        <th class="px-4 py-3">Date acquired</th>
+                                        <th class="px-4 py-3">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                                    @forelse ($rows as $inventoryItem)
+                                        @php($source = $inventoryItem->sourceItems->first())
+                                        @php($searchable = strtolower(implode(' ', [$inventoryItem->item_name, $inventoryItem->unit, $inventoryItem->category?->category_name ?? '', $inventoryItem->ics_no ?? ''])))
+                                        <tr x-show="matches({{ $searchModel }}, $el)" data-inventory-panel="{{ $status }}" data-search="{{ $searchable }}" class="hover:bg-gray-50 dark:hover:bg-gray-800/60">
+                                            @if ($status === 'assigned')
+                                                <td class="px-4 py-3">{{ $source?->assignedTo?->full_name ?? 'Recorded assignee' }}</td>
+                                                <td class="px-4 py-3">{{ $source?->latestAssignment?->transaction_date?->format('M d, Y') ?? 'N/A' }}</td>
+                                            @endif
+
+                                            @if (in_array($status, ['under_maintenance', 'under_inspection', 'ready_to_dispose'], true))
+                                                <td class="max-w-xs px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ $source?->latestMaintenance?->issue_description ?? $source?->disposalMovement?->notes ?? 'Awaiting review' }}</td>
+                                            @endif
+
+                                            @if ($status === 'disposed')
+                                            <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ $source?->disposalMovement?->created_at?->format('M d, Y') ?? 'N/A' }}<br>{{ $source?->disposalMovement?->notes ?? 'No reason recorded' }}</td>
+                                            @endif
+
+                                            <td class="px-4 py-3">
+                                                <div class="font-medium text-gray-900 dark:text-white">{{ $inventoryItem->item_name }}</div>
+                
+                                            </td>
+                                            <td class="px-4 py-3">{{ $inventoryItem->category?->category_name ?? 'Uncategorized' }}</td>
+                                            <td class="px-4 py-3 font-semibold">{{ number_format($inventoryItem->quantity) }}</td>
+                                            <td class="px-4 py-3">{{ $inventoryItem->unit }}<br>
+                                                <span class="text-xs text-gray-400">{{ $inventoryItem->ics_no ?: 'No ICS' }}</span>
+                                            </td>
+                                            <td class="px-4 py-3">₱{{ number_format((float) $inventoryItem->unit_cost, 2) }}</td>
+                                            <td class="px-4 py-3">₱{{ number_format((float) $inventoryItem->total_cost, 2) }}</td>
+                                            <td class="px-4 py-3">{{ optional($inventoryItem->date_acquired)->format('M d, Y') }}</td>
+                                            <td class="px-4 py-3"><div x-data="{ repairOpen: false }" class="flex flex-wrap gap-2">
+                                                @if ($status === 'available')
+                                                    <a href="{{ route('propertyCustodian.transactions') }}" class="rounded-md bg-brand-500 px-2.5 py-1.5 text-xs font-medium text-white">Assign</a>
+                                                    @if ($inventoryItem->category?->is_maintenance_eligible === false)
+                                                        <button type="button" disabled title="This category is not eligible for maintenance." class="cursor-not-allowed rounded-md bg-orange-500 px-2.5 py-1.5 text-xs font-medium text-white opacity-50">Send to Maintenance</button>
+                                                    @else
+                                                        <button type="button" @click="openMaintenance('{{ $source?->item_id }}')" title="Send this item to maintenance" class="rounded-md bg-orange-500 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-orange-600">Send to Maintenance</button>
+                                                    @endif
+                                                @elseif ($status === 'assigned')<form method="POST" action="{{ route('propertyCustodian.inventory.mark-returned', $source?->item_id) }}">@csrf<button class="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white">Receive return</button></form><a href="{{ route('propertyCustodian.transactions') }}" class="rounded-md border px-2.5 py-1.5 text-xs">Transfer</a>
+                                                @elseif ($status === 'under_maintenance')
+                                                    <button type="button" @click="repairOpen = true" class="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700">Mark as Repaired</button>
+                                                    <form method="POST" action="{{ route('propertyCustodian.inventory.mark-ready-to-dispose', $source?->item_id) }}">@csrf<input type="hidden" name="notes" value="Marked for disposal after maintenance review"><button class="rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-700">Ready to dispose</button></form>
+                                                    <div x-show="repairOpen" x-cloak x-transition class="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" @keydown.escape.window="repairOpen = false">
+                                                        <div class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 text-left shadow-2xl dark:border-slate-700 dark:bg-slate-900" @click.outside="repairOpen = false">
+                                                            <div class="mb-5 flex items-start justify-between gap-3"><div><h3 class="text-lg font-semibold text-gray-900 dark:text-white">Mark as Repaired</h3><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Return this item to available inventory after recording the repair.</p></div><button type="button" @click="repairOpen = false" class="rounded-md p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close repair modal"><i data-lucide="x" class="h-5 w-5"></i></button></div>
+                                                            <form method="POST" action="{{ route('propertyCustodian.inventory.mark-repaired', $source?->item_id) }}" class="space-y-4">
+                                                                @csrf
+                                                                <div><label for="repair-notes-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Repair notes</label><textarea id="repair-notes-{{ $source?->item_id }}" name="repair_notes" rows="4" maxlength="1000" placeholder="Describe the repair performed" class="block w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"></textarea></div>
+                                                                <div><label for="repair-cost-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Repair cost</label><input id="repair-cost-{{ $source?->item_id }}" name="maintenance_cost" type="number" min="0" step="0.01" placeholder="0.00" class="block w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div>
+                                                                <div class="flex justify-end gap-3"><button type="button" @click="repairOpen = false" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Cancel</button><x-common.button-spinner text="Mark as Repaired" loadingText="Saving..." class="bg-green-600 text-white hover:bg-green-700" /></div>
+                                                            </form>
+                                                        </div>
                                                     </div>
-                                                </template>
-                                            </div>
-                                        </template>
+                                                @elseif ($status === 'under_inspection')<span class="rounded-md border border-blue-200 px-2.5 py-1.5 text-xs text-blue-700">Review outcome pending</span>
+                                                @elseif ($status === 'ready_to_dispose')<form method="POST" action="{{ route('propertyCustodian.inventory.dispose', $source?->item_id) }}" onsubmit="return confirm('Dispose this item? This action cannot be undone.')">@csrf<button class="rounded-md bg-red-700 px-2.5 py-1.5 text-xs text-white">Dispose</button></form>
+                                                @else<span class="text-xs text-gray-500">Read-only archive</span>@endif
+                                            </div></td>
+                                        </tr>
+                                    @empty
+                                        <tr><td colspan="12" class="px-4 py-12 text-center text-gray-500 dark:text-gray-400">No {{ strtolower($statusLabels[$status]) }} records found.</td></tr>
+                                    @endforelse
+                                    @if ($rows->isNotEmpty())
+                                        <tr x-show="!hasMatches({{ $searchModel }}, '{{ $status }}')" x-cloak><td colspan="12" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No items found.</td></tr>
+                                    @endif
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                @endforeach
 
-                                        <p x-show="!requiresSerialNumber" class="mt-4 text-xs text-gray-500 dark:text-gray-400">Serial numbers are not required for the selected category.</p>
-                                    </aside>
+                <div x-show="maintenanceOpen" x-cloak x-transition class="fixed inset-0 z-[1200] flex items-center justify-center overflow-y-auto bg-black/50 p-4" role="dialog" aria-modal="true" @keydown.escape.window="maintenanceOpen = false">
+                    <div class="my-8 w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6 text-left shadow-2xl dark:border-slate-700 dark:bg-slate-900" @click.outside="maintenanceOpen = false">
+                        <div class="mb-5 flex items-start justify-between gap-3">
+                            <div><h3 class="text-lg font-semibold text-gray-900 dark:text-white">Send to Maintenance</h3><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Choose the item and describe the issue before sending it for repair.</p></div>
+                            <button type="button" @click="maintenanceOpen = false" class="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200" aria-label="Close maintenance modal"><i data-lucide="x" class="h-5 w-5"></i></button>
+                        </div>
+                        <form method="POST" :action="`${maintenanceBase}/${maintenanceItemId}/send-to-maintenance`" class="space-y-5">
+                            @csrf
+                            <fieldset>
+                                <legend class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select item</legend>
+                                <div class="max-h-52 space-y-2 overflow-y-auto rounded-md border border-gray-200 p-2 dark:border-gray-700">
+                                    @php($availableItems = $statusCollections->get('available', collect())->filter(fn ($availableItem) => $availableItem->category?->is_maintenance_eligible !== false)->flatMap(fn ($availableItem) => $availableItem->sourceItems->map(fn ($sourceItem) => [$availableItem, $sourceItem])))
+                                    @forelse ($availableItems as [$availableItem, $availableSource])
+                                        <label class="flex cursor-pointer items-start gap-3 rounded-md border border-transparent px-3 py-2 hover:border-orange-300 hover:bg-orange-50 dark:hover:border-orange-500/40 dark:hover:bg-orange-500/10">
+                                            <input type="radio" name="maintenance_item_choice" value="{{ $availableSource->item_id }}" x-model="maintenanceItemId" required class="mt-1 border-gray-300 text-orange-500 focus:ring-orange-500">
+                                            <span><span class="block text-sm font-medium text-gray-900 dark:text-white">{{ $availableItem->item_name }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ $availableSource->inventory_item_no ?? 'No inventory number' }} · {{ $availableSource->serial_number ?? 'No serial number' }} · {{ number_format($availableSource->quantity) }} {{ $availableSource->unit }}</span></span>
+                                        </label>
+                                    @empty
+                                        <p class="px-3 py-4 text-sm text-gray-500">No available items found.</p>
+                                    @endforelse
                                 </div>
-                                <div class="flex justify-end gap-3 pt-2">
-                                    <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                    <x-common.button-spinner text="Save Item" loadingText="Saving..." class="text-white"/>
-                                </div>
-                            </form>
+                            </fieldset>
+                            <div><label for="maintenance-issue-shared" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Issue description</label><textarea id="maintenance-issue-shared" name="issue_description" rows="4" required maxlength="1000" placeholder="Describe the issue" class="block w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"></textarea></div>
+                            <div class="flex justify-end gap-3"><button type="button" @click="maintenanceOpen = false" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Cancel</button><x-common.button-spinner text="Send to Maintenance" loadingText="Sending..." class="bg-orange-500 text-white hover:bg-orange-600" /></div>
+                        </form>
+                    </div>
+                </div>
 
-                        </x-modals.base-modal>
-                        <div x-show="scanOpen" x-cloak x-transition class="fixed inset-0 z-[1400] flex items-center justify-center overflow-y-auto bg-black/50 p-4" role="dialog" aria-modal="true">
-                            <div
-                                :style="window.innerWidth >= 1280 ? { marginLeft: $store.sidebar.isExpanded ? '240px' : '90px', width: 'calc(100% - ' + ($store.sidebar.isExpanded ? '240px' : '90px') + ')' } : {}"
-                                class="my-8 flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-gray-900">
-                                <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-                                    <div><h2 class="text-base font-semibold text-gray-900 dark:text-white">AI Document Scan</h2><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Upload and verify inventory details before saving.</p></div>
-                                    <button type="button" @click="scanOpen = false" class="rounded-lg p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close document scan"><i data-lucide="x" class="h-5 w-5"></i></button>
-                                </div>
-                                <div class="flex-1 overflow-y-auto p-5">
-                                    <div x-show="!scanFile" @dragover.prevent @drop.prevent="const file = $event.dataTransfer.files[0]; if (file) { scanFile = file; scanPreview = URL.createObjectURL(file); }" class="flex min-h-48 flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 text-center dark:border-gray-700 dark:bg-gray-950"><i data-lucide="upload-cloud" class="h-8 w-8 text-brand-500"></i><p class="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200">Drop an inventory image here</p><label class="mt-4 cursor-pointer rounded-lg bg-brand-500 px-3 py-2 text-xs font-medium text-white">Choose image<input type="file" accept="image/*" class="hidden" @change="chooseScanFile($event)"></label></div>
-                                    <div x-show="scanFile && !extractedItems.length && !scanProcessing" x-cloak class="mt-5 grid gap-5 md:grid-cols-[minmax(0,1fr)_14rem]"><img :src="scanPreview" alt="Document preview" class="max-h-72 w-full rounded-xl border border-gray-200 bg-gray-50 object-contain dark:border-gray-800 dark:bg-gray-950"><div class="flex flex-col justify-between"><p class="break-all text-sm text-gray-600 dark:text-gray-300" x-text="scanFile?.name"></p><x-common.button-spinner text="Process document" loadingText="Processing..." type="button" @click="loading = true; processScan()" class="mt-4 bg-brand-500 hover:bg-brand-600" /></div></div>
-                                    <div x-show="scanProcessing" x-cloak class="mt-5 space-y-3"><div class="h-4 w-40 animate-pulse rounded bg-gray-200 dark:bg-gray-800"></div><div class="h-12 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800"></div><div class="h-12 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800"></div><div class="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800"><div class="h-full w-2/3 animate-pulse rounded-full bg-brand-500"></div></div><p class="text-xs text-gray-500">Reading document fields...</p></div>
-                                    <div x-show="extractedItems.length && !scanProcessing" x-cloak class="mt-5"><div class="mb-4 flex items-center justify-between"><div><h3 class="text-sm font-semibold text-gray-900 dark:text-white">Verify extracted items</h3><p class="mt-1 text-xs text-gray-500">Edit fields before saving.</p></div><button type="button" @click="addScanItem()" class="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-gray-700 dark:text-gray-200"><i data-lucide="plus" class="h-4 w-4"></i>Add item</button></div><div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800"><table class="min-w-[950px] w-full text-left text-xs"><thead class="bg-gray-50 uppercase text-gray-500 dark:bg-gray-800"><tr><th class="p-3">Item name</th><th class="p-3">Category</th><th class="p-3">Unit</th><th class="p-3">Unit cost</th><th class="p-3">Date</th><th class="p-3">Qty</th><th class="p-3">Serial numbers</th><th class="p-3"></th></tr></thead><tbody class="divide-y divide-gray-100 dark:divide-gray-800"><template x-for="(item, index) in extractedItems" :key="index"><tr class="align-top"><td class="p-2"><input x-model="item.item_name" class="w-36 rounded border-gray-200 px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white"></td><td class="p-2"><select x-model="item.category_id" @change="item.serialized = $event.target.selectedOptions[0]?.dataset.serialized === 'true'; item.serial_numbers = item.serialized ? Array.from({ length: item.quantity }, (_, serialIndex) => item.serial_numbers[serialIndex] || '') : []" class="w-32 rounded border-gray-200 px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">Select</option>@foreach ($categories as $category)<option value="{{ $category->category_id }}" data-serialized="{{ $category->requires_serial_number ? 'true' : 'false' }}">{{ $category->category_name }}</option>@endforeach</select></td><td class="p-2"><input x-model="item.unit" class="w-16 rounded border-gray-200 px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white"></td><td class="p-2"><input x-model="item.unit_cost" type="number" min="0" step=".01" class="w-20 rounded border-gray-200 px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white"></td><td class="p-2"><input x-model="item.date_acquired" type="date" class="rounded border-gray-200 px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white"></td><td class="p-2"><input x-model.number="item.quantity" min="1" type="number" @change="if (item.serialized) item.serial_numbers = Array.from({ length: item.quantity }, (_, serialIndex) => item.serial_numbers[serialIndex] || '')" class="w-14 rounded border-gray-200 px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white"></td><td class="p-2"><div class="flex max-w-56 flex-wrap gap-1"><template x-for="(serial, serialIndex) in item.serial_numbers" :key="serialIndex"><span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 dark:bg-gray-800"><input x-model="item.serial_numbers[serialIndex]" class="w-16 border-0 bg-transparent p-0 text-[10px] dark:text-white"><button type="button" @click="item.serial_numbers.splice(serialIndex, 1)" aria-label="Remove serial">&times;</button></span></template><button type="button" @click="item.serial_numbers.push('')" class="rounded-full border border-dashed px-2 py-1 text-[10px] text-gray-500">+ serial</button></div></td><td class="p-2"><button type="button" @click="removeScanItem(index)" class="text-gray-400 hover:text-red-500" aria-label="Remove item"><i data-lucide="trash-2" class="h-4 w-4"></i></button></td></tr></template></tbody></table></div></div>
-                                </div>
-                                <div x-show="extractedItems.length && !scanProcessing" x-cloak class="flex justify-end gap-2 border-t border-gray-200 bg-gray-50 px-5 py-4 dark:border-gray-800 dark:bg-gray-950"><button type="button" @click="fillSingleForm()" class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"><i data-lucide="file-input" class="h-4 w-4"></i>Fill Single Form</button><x-common.button-spinner text="Save All to Inventory" loadingText="Saving..." type="button" @click="loading = true; saveAllScan()" class="bg-brand-500 hover:bg-brand-600" /></div>
-                            </div>
+                <div x-show="scanOpen" x-cloak class="fixed inset-0 z-[1400] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+                    <div class="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl dark:bg-gray-900">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-base font-semibold">AI Document Scan</h2>
+                            <button type="button" @click="scanOpen = false" aria-label="Close scan">
+                                <i data-lucide="x" class="h-5 w-5"></i>
+                            </button>
+                        </div>
+                        <p class="mt-1 text-sm text-gray-500">Upload an image to prepare stock-in details for verification.</p>
+                        <input type="file" accept="image/*" @change="chooseScanFile($event)" class="mt-5 block w-full text-sm" />
+                        <div x-show="scanFile" x-cloak class="mt-4 rounded-md bg-gray-50 p-3 text-sm dark:bg-gray-800">
+                            Detected item name: <strong x-text="extractedName"></strong>
+                            <p class="mt-1 text-xs text-gray-500">Open Stock In to verify and submit all required inventory fields.</p>
+                        </div>
+                        <div class="mt-6 flex justify-end gap-2">
+                            <button type="button" @click="scanOpen = false" class="rounded-md border px-4 py-2 text-sm">Close</button>
+                            <button type="button" @click="scanOpen = false" class="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white">Continue to Stock In</button>
                         </div>
                     </div>
                 </div>
-
-                <div class="max-h-[21rem] overflow-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
-                    <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
-                        <thead class="sticky top-0 z-10 bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                            <tr>
-                                <th class="px-4 py-3">Qty</th>
-                                <th class="px-4 py-3">Unit</th>
-                                <th class="px-4 py-3">Category</th>
-                                <th class="px-4 py-3">Description</th>
-                                <th class="px-4 py-3">ICS No.</th>
-                                <th class="px-4 py-3">Unit Cost</th>
-                                <th class="px-4 py-3">Total Cost</th>
-                                <th class="px-4 py-3">Date Acquired</th>
-                                <th class="px-4 py-3">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
-                            @forelse ($inventoryItems as $inventoryItem)
-                                @php($firstSourceItem = $inventoryItem->sourceItems->first())
-                                <tr data-category-id="{{ $inventoryItem->category_id }}" data-search="{{ \Illuminate\Support\Str::lower(implode(' ', [$inventoryItem->item_name, $inventoryItem->unit, $inventoryItem->category?->category_name ?? '', $inventoryItem->ics_no ?? ''])) }}" x-show="matches({ categoryId: $el.dataset.categoryId, searchable: $el.dataset.search })" class="transition-colors duration-150 hover:bg-gray-50 dark:hover:bg-gray-800/60">
-                                    <td class="px-4 py-3">{{ $inventoryItem->quantity }}</td>
-                                    <td class="px-4 py-3">{{ $inventoryItem->unit }}</td>
-                                    <td class="px-4 py-3">{{ $inventoryItem->category?->category_name ?? '—' }}</td>
-                                    <td class="px-4 py-3">{{ $inventoryItem->item_name }}</td>
-                                    <td class="px-4 py-3">{{ $inventoryItem->ics_no ?: '—' }}</td>
-                                    <td class="px-4 py-3">₱{{ number_format((float) $inventoryItem->unit_cost, 2) }}</td>
-                                    <td class="px-4 py-3">₱{{ number_format((float) $inventoryItem->total_cost, 2) }}</td>
-                                    <td class="px-4 py-3">{{ \Illuminate\Support\Carbon::parse($inventoryItem->date_acquired)->format('M d, Y') }}</td>
-                                    <td class="px-4 py-3">
-                                        <div x-data="{ actionOpen: false, modalOpen: false, editOpen: false, deleteOpen: false, returnOpen: false, menuTop: 0, menuLeft: 0, toggleMenu(event) { this.actionOpen = !this.actionOpen; if (this.actionOpen) { const bounds = event.currentTarget.getBoundingClientRect(); this.menuTop = bounds.bottom + 4; this.menuLeft = Math.max(8, bounds.right - 144); } } }" @click.outside="actionOpen = false" class="relative">
-                                            <button type="button" @click="toggleMenu($event)" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Actions for {{ $inventoryItem->item_name }}" :aria-expanded="actionOpen.toString()">
-                                                <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                    <path d="M10 6a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
-                                                </svg>
-                                            </button>
-
-                                            <template x-teleport="body">
-                                                <div x-show="actionOpen" x-cloak x-transition @keydown.escape.window="actionOpen = false" :style="`top: ${menuTop}px; left: ${menuLeft}px;`" class="fixed z-[1200] mt-1 w-36 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
-                                                <button type="button" @click="actionOpen = false; $dispatch('open-modal', 'inventory-show-{{ $firstSourceItem->item_id }}')" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
-                                                    Show Items
-                                                </button>
-                                                <button type="button" @click="actionOpen = false; $dispatch('open-modal', 'inventory-edit-{{ $firstSourceItem->item_id }}')" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
-                                                    Edit
-                                                </button>
-                                                @if($firstSourceItem->status === 'assigned')
-                                                        <button type="button" @click="actionOpen = false; $dispatch('open-modal', 'inventory-return-{{ $firstSourceItem->item_id }}')" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">
-                                                        Receive Return
-                                                    </button>
-                                                @endif
-                                                <button type="button" @click="actionOpen = false; $dispatch('open-modal', 'inventory-delete-{{ $firstSourceItem->item_id }}')" class="block w-full px-3 py-2 text-left text-sm text-red-900 transition hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/20">
-                                                    Delete
-                                                </button>
-                                                </div>
-                                            </template>
-
-                                            <x-modals.base-modal modalId="inventory-show-{{ $firstSourceItem->item_id }}" :bare="true">
-                                                <div @click.outside="open = false" class="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-                                                    <div class="mb-4 flex items-start justify-between gap-3">
-                                                        <div>
-                                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $inventoryItem->item_name }} Items</h3>
-                                                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Individual records included in this inventory group.</p>
-                                                        </div>
-                                                        <button type="button" @click="open = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Close item list">
-                                                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 0 1 1.414 0L10 8.586l4.293-4.293a1 1 0 1 1 1.414 1.414L11.414 10l4.293 4.293a1 1 0 0 1-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 0 1-1.414-1.414L8.586 10 4.293 5.707a1 1 0 0 1 0-1.414z" clip-rule="evenodd" />
-                                                            </svg>
-                                                        </button>
-                                                    </div>
-                                                    <div class="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-700">
-                                                        <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
-                                                            <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                                                                <tr class="text-center">
-                                                                    <th class="px-4 py-3">Qty</th>
-                                                                    <th class="px-4 py-3">Unit Cost</th>
-                                                                    <th class="px-4 py-3">ICS No.</th>
-                                                                    <th class="px-4 py-3">Serial No.</th>
-                                                                    <th class="px-4 py-3">Inventory Item No.</th>
-                                                                    <th class="px-4 py-3">Date Acquired</th>
-                                                                    <th class="px-4 py-3">Status</th>
-                                                                    <th class="px-4 py-3">Actions</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                                                                @foreach ($inventoryItem->sourceItems as $sourceItem)
-                                                                    <tr class="text-center">
-                                                                        <td class="px-4 py-3">{{ $sourceItem->quantity }}</td>
-                                                                        <td class="px-4 py-3">₱{{ number_format((float) $sourceItem->unit_cost, 2) }}</td>
-                                                                        <td class="px-4 py-3">{{ $sourceItem->ics_no ?: '—' }}</td>
-                                                                        <td class="px-4 py-3">{{ $sourceItem->serial_number ?: '—' }}</td>
-                                                                        <td class="px-4 py-3">{{ $sourceItem->inventory_item_no ?? 'N/A' }}</td>
-                                                                        <td class="px-4 py-3">{{ $sourceItem->date_acquired->format('M d, Y') }}</td>
-                                                                        <td class="px-4 py-3">
-                                                                            @if ($sourceItem->status === 'available')
-                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800 dark:bg-green-800/30 dark:text-green-200">
-                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
-                                                                                    Available
-                                                                                </span>
-                                                                            @elseif ($sourceItem->status === 'assigned')
-                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-800 dark:bg-yellow-800/30 dark:text-yellow-200">
-                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
-                                                                                    Assigned
-                                                                                </span>
-                                                                            @elseif ($sourceItem->status === 'under_inspection')
-                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800 dark:bg-blue-800/30 dark:text-blue-200">
-                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
-                                                                                    Under Inspection
-                                                                                </span>
-                                                                            @elseif ($sourceItem->status === 'under_maintenance')
-                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-1 text-xs font-medium text-purple-800 dark:bg-purple-800/30 dark:text-purple-200">
-                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
-                                                                                    Under Maintenance
-                                                                                </span>
-                                                                            @elseif ($sourceItem->status === 'disposed')
-                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-800 dark:bg-red-800/30 dark:text-red-200">
-                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
-                                                                                    Disposed
-                                                                                </span>
-                                                                            @else
-                                                                                <span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-800 dark:bg-gray-800/30 dark:text-gray-200">
-                                                                                    <svg class="h-2 w-2 fill-current" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
-                                                                                    Unknown
-                                                                                </span>
-                                                                            @endif
-                                                                            </td>
-                                                                            <td class="px-4 py-3">
-                                                                                <div x-data="{ open: false, menuTop: 0, menuLeft: 0, toggleMenu(event) { this.open = !this.open; if (this.open) { const bounds = event.currentTarget.getBoundingClientRect(); this.menuTop = bounds.bottom + 4; this.menuLeft = Math.max(8, bounds.right - 192); } } }" @click.outside="open = false" class="relative inline-block">
-                                                                                    <button type="button" @click="toggleMenu($event)" class="rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" title="Item actions" aria-label="Item actions" :aria-expanded="open.toString()">
-                                                                                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                                            <path d="M10 6a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 5.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
-                                                                                        </svg>
-                                                                                    </button>
-                                                                                    <template x-teleport="body">
-                                                                                    <div x-show="open" x-cloak x-transition @keydown.escape.window="open = false" :style="`top: ${menuTop}px; left: ${menuLeft}px;`" class="fixed z-[1300] mt-1 w-48 rounded-md border border-gray-200 bg-white py-2 text-left shadow-lg dark:border-gray-700 dark:bg-gray-800">
-                                                                                        @if ($sourceItem->status === 'assigned')
-                                                                                            <form method="POST" action="{{ route('propertyCustodian.inventory.mark-returned', $sourceItem->item_id) }}" onsubmit="return confirm('Mark this item as returned?')">
-                                                                                                @csrf
-                                                                                                <button type="submit" class="block w-full px-3 py-2 text-left text-sm font-medium text-green-600 transition hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/20">Return</button>
-                                                                                            </form>
-                                                                                            <button type="button" disabled class="block w-full cursor-not-allowed px-3 py-2 text-left text-sm font-medium text-gray-400 dark:text-gray-500" title="Transfers are initiated by End Users.">Transfer</button>
-                                                                                        @endif
-                                                                                        @if ($sourceItem->status === 'available')
-                                                                                            <form method="POST" action="{{ route('propertyCustodian.inventory.send-to-maintenance', $sourceItem->item_id) }}" onsubmit="return confirm('Send this item to maintenance?')">
-                                                                                                @csrf
-                                                                                                <button type="submit" class="block w-full px-3 py-2 text-left text-sm font-medium text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">Send to Maintenance</button>
-                                                                                            </form>
-                                                                                            <form method="POST" action="{{ route('propertyCustodian.inventory.dispose', $sourceItem->item_id) }}" onsubmit="return confirm('Dispose this item? This action cannot be undone.')">
-                                                                                                @csrf
-                                                                                                <button type="submit" class="block w-full px-3 py-2 text-left text-sm font-medium text-red-900 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-700/20">Dispose</button>
-                                                                                            </form>
-                                                                                        @endif
-                                                                                    </div>
-                                                                                    </template>
-                                                                                </div>
-                                                                            </td>
-                                                                        </tr>
-                                                                    @endforeach
-                                                                </tbody>
-                                                            </table>
-                                                        </div>
-                                                </div>
-                                            </x-modals.base-modal>
-
-                                            <x-modals.base-modal modalId="inventory-edit-{{ $firstSourceItem->item_id }}" :bare="true">
-                                                <div @click.outside="open = false" class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-                                                    <div class="mb-5 flex items-start justify-between gap-3">
-                                                        <div>
-                                                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Edit Inventory Item</h3>
-                                                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Update the inventory record details.</p>
-                                                        </div>
-                                                        <button type="button" @click="open = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Close edit inventory modal">
-                                                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 0 1 1.414 0L10 8.586l4.293-4.293a1 1 0 1 1 1.414 1.414L11.414 10l4.293 4.293a1 1 0 1 1-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 1 1-1.414-1.414L8.586 10 4.293 5.707a1 1 0 0 1 0-1.414z" clip-rule="evenodd" />
-                                                            </svg>
-                                                        </button>
-                                                    </div>
-                                                    <form method="POST" action="{{ route('propertyCustodian.inventory.update', $firstSourceItem) }}" class="space-y-5">
-                                                        @csrf
-                                                        @method('PATCH')
-                                                        <div class="grid gap-5 md:grid-cols-2">
-                                                            <div>
-                                                                <label for="edit-item-name-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Name</label>
-                                                                <input id="edit-item-name-{{ $firstSourceItem->item_id }}" name="item_name" value="{{ $firstSourceItem->item_name }}" type="text" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                                            </div>
-                                                            <div>
-                                                                <label for="edit-category-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Category</label>
-                                                                <select id="edit-category-{{ $firstSourceItem->item_id }}" name="category_id" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                                                                    @foreach ($categories as $category)
-                                                                        <option value="{{ $category->category_id }}" @selected($firstSourceItem->category_id == $category->category_id)>{{ $category->category_name }}</option>
-                                                                    @endforeach
-                                                                </select>
-                                                            </div>
-                                                            <div>
-                                                                <label for="edit-unit-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit</label>
-                                                                <input id="edit-unit-{{ $firstSourceItem->item_id }}" name="unit" value="{{ $firstSourceItem->unit }}" type="text" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                                            </div>
-                                                            <div>
-                                                                <label for="edit-quantity-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label>
-                                                                <input id="edit-quantity-{{ $firstSourceItem->item_id }}" name="quantity" value="{{ $firstSourceItem->quantity }}" type="number" min="1" max="100" required @disabled($firstSourceItem->status === 'assigned') class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none disabled:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:disabled:bg-gray-900" />
-                                                            </div>
-                                                            <div>
-                                                                <label for="edit-unit-cost-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Unit Cost</label>
-                                                                <input id="edit-unit-cost-{{ $firstSourceItem->item_id }}" name="unit_cost" value="{{ $firstSourceItem->unit_cost }}" type="number" min="0" step="0.01" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                                            </div>
-                                                            <div>
-                                                                <label for="edit-date-acquired-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Acquired</label>
-                                                                <input id="edit-date-acquired-{{ $firstSourceItem->item_id }}" name="date_acquired" value="{{ optional($firstSourceItem->date_acquired)->format('Y-m-d') }}" type="date" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                                            </div>
-                                                            <div>
-                                                                <label for="edit-ics-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">ICS No.</label>
-                                                                <input id="edit-ics-{{ $firstSourceItem->item_id }}" name="ics_no" value="{{ $firstSourceItem->ics_no }}" type="text" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                                            </div>
-                                                            <div>
-                                                                <label for="edit-description-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
-                                                                <input id="edit-description-{{ $firstSourceItem->item_id }}" name="description" value="{{ $firstSourceItem->description }}" type="text" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                                            </div>
-                                                        </div>
-                                                        <div class="flex justify-end gap-3 pt-2">
-                                                            <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                            <x-common.button-spinner text="Save Changes" loadingText="Saving..." />
-                                                        </div>
-                                                    </form>
-                                                </div>
-                                            </x-modals.base-modal>
-
-                                            <x-modals.base-modal modalId="inventory-delete-{{ $firstSourceItem->item_id }}" :bare="true">
-                                                <div @click.outside="open = false" class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-                                                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Delete Inventory Item</h3>
-                                                    <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">This action affects only the first source record for <strong>{{ $firstSourceItem->item_name }}</strong>.</p>
-                                                    <div class="mt-6 flex justify-end gap-3">
-                                                        <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                        <form method="POST" action="{{ route('propertyCustodian.inventory.destroy', $firstSourceItem) }}">
-                                                            @csrf
-                                                            @method('DELETE')
-                                                            <x-common.button-spinner text="Delete" loadingText="Deleting..." class="bg-red-900 hover:bg-red-600 text-white" />
-                                                        </form>
-                                                    </div>
-                                                </div>
-                                            </x-modals.base-modal>
-
-                                            @if($firstSourceItem->status === 'assigned')
-                                                <x-modals.base-modal modalId="inventory-return-{{ $firstSourceItem->item_id }}" :bare="true">
-                                                    <div @click.outside="open = false" class="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-                                                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Receive Item Return</h3>
-                                                        <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">Mark <strong>{{ $firstSourceItem->item_name }}</strong> as returned from the end user.</p>
-                                                        <form method="POST" action="{{ route('propertyCustodian.inventory.mark-returned', $firstSourceItem->item_id) }}" class="mt-4 space-y-4">
-                                                            @csrf
-                                                            <div>
-                                                                <label for="return-notes-{{ $firstSourceItem->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Notes (Optional)</label>
-                                                                <textarea id="return-notes-{{ $firstSourceItem->item_id }}" name="notes" rows="3" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Any additional notes about this return..."></textarea>
-                                                            </div>
-                                                            <div class="flex justify-end gap-3 pt-2">
-                                                                <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                                <x-common.button-spinner text="Receive Return" loadingText="Processing..." class="bg-green-600 hover:bg-green-700" />
-                                                            </div>
-                                                        </form>
-                                                    </div>
-                                                </x-modals.base-modal>
-                                            @endif
-                                        </div>
-                                    </td>
-                                </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="9" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No inventory items have been stocked in yet.</td>
-                                </tr>
-                            @endforelse
-                            <tr x-show="items.length && !hasMatches()" x-cloak>
-                                <td colspan="9" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No items found.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                </div>
-            </x-cards.base-card>
-        </div>
+            </div>
+        </x-cards.base-card>
     </div>
 @endsection

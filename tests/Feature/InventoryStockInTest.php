@@ -165,7 +165,7 @@ test('the inventory table groups matching item names and sums their quantity and
         ->assertDontSee('₱1,800.00');
 });
 
-test('the inventory listing excludes disposed items', function () {
+test('the inventory listing provides disposed items in the disposed tab', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -184,5 +184,35 @@ test('the inventory listing excludes disposed items', function () {
     $this->actingAs($this->propertyCustodian)
         ->get(route('propertyCustodian.inventory'))
         ->assertOk()
-        ->assertDontSee('Disposed Laptop', false);
+        ->assertSee('Disposed Laptop', false)
+        ->assertSee('Disposed', false)
+        ->assertSee('ready_to_dispose', false);
+});
+
+test('failed stock-in validation reopens the modal with the error summary visible', function () {
+    $category = Category::create([
+        'category_name' => 'Learning Resources',
+        'requires_serial_number' => false,
+    ]);
+
+    $response = $this->actingAs($this->propertyCustodian)
+        ->from(route('propertyCustodian.inventory'))
+        ->post(route('propertyCustodian.inventory.stock-in'), [
+            'item_name' => '',
+            'category_id' => $category->category_id,
+            'description' => 'Bad entry',
+            'ics_no' => 'ICS-SET',
+            'unit' => 'copy',
+            'unit_cost' => 'invalid',
+            'date_acquired' => '2026-08-10',
+            'quantity' => 0,
+        ]);
+
+    $response->assertRedirect(route('propertyCustodian.inventory'));
+    $response->assertSessionHasErrors(['item_name', 'unit_cost', 'quantity']);
+
+    $this->get(route('propertyCustodian.inventory'))
+        ->assertOk()
+        ->assertSee('x-data="{ open: true }"', false)
+        ->assertSee('Please correct the highlighted fields and try again.');
 });
