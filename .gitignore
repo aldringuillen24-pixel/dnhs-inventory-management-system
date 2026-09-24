@@ -22,3 +22,14 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Local development tools and internal project files
+.continue/
+.github/
+.qodo/
+.rat/
+.rat.last.json
+.vscode/
+docs/
+scratch/
+storage/rat/

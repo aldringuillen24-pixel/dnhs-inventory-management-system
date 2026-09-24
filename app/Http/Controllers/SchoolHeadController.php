@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Models\UserAuditLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
@@ -160,6 +161,19 @@ class SchoolHeadController extends Controller
             'categoryData' => $categoryData,
             'statusData' => $statusData,
             'recentTransactions' => $recentTransactions,
+        ]);
+    }
+
+    public function auditLogs(): View
+    {
+        $logs = UserAuditLog::query()
+            ->with(['actor', 'targetUser'])
+            ->orderByDesc('created_at')
+            ->paginate(20);
+
+        return view('pages.schoolHead.audit-logs', [
+            'title' => 'Audit Logs',
+            'logs' => $logs,
         ]);
     }
 

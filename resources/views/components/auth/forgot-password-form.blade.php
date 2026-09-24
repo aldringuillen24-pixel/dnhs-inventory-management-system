@@ -5,7 +5,7 @@
 		<div class="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-5xl items-center justify-center">
 			<section class="w-full max-w-xl overflow-hidden rounded-md border border-slate-200 bg-white p-7 shadow-[0_24px_80px_rgba(15,23,42,0.10)] dark:border-slate-800 dark:bg-slate-900 sm:p-12 lg:p-16">
 					<a href="{{ route('signin') }}" class="mb-12 inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-[#173f3b] dark:text-slate-400 dark:hover:text-[#e7b86a]">
-						<span aria-hidden="true">&larr;</span>
+						<i data-lucide="arrow-left" class="h-4 w-4" aria-hidden="true"></i>
 						Back to sign in
 					</a>
 
@@ -32,8 +32,11 @@
 							@csrf
 							<div>
 								<label for="email" class="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Email address</label>
-								<input id="email" name="email" type="email" value="{{ old('email') }}" placeholder="you@dianayhs.edu.ph" autocomplete="email" required autofocus
-									class="h-12 w-full rounded-xl border border-slate-300 bg-slate-50 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#173f3b] focus:ring-4 focus:ring-[#173f3b]/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:border-[#e7b86a] dark:focus:ring-[#e7b86a]/10" />
+								<div class="relative">
+									<i data-lucide="mail" class="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"></i>
+									<input id="email" name="email" type="email" value="{{ old('email') }}" placeholder="you@dianayhs.edu.ph" autocomplete="email" required autofocus
+										class="h-12 w-full rounded-xl border border-slate-300 bg-slate-50 py-2 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#173f3b] focus:ring-4 focus:ring-[#173f3b]/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:border-[#e7b86a] dark:focus:ring-[#e7b86a]/10" />
+								</div>
 							</div>
 
 							<x-common.button-spinner

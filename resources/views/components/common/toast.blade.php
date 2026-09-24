@@ -1,4 +1,4 @@
-@props(['type' => 'info', 'title' => null, 'message' => null])
+@props(['type' => 'info', 'title' => null, 'message' => null, 'autoHide' => true, 'visible' => true])
 
 @php
     $styles = [
@@ -23,7 +23,7 @@
     $config = $styles[$type] ?? $styles['info'];
 @endphp
 
-<div x-data="{ show: true }" x-init="setTimeout(() => show = false, 3000)" x-show="show" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-300" x-transition:leave-start="opacity-100 translate-y-0" x-transition:leave-end="opacity-0 translate-y-4" {{ $attributes->merge(['class' => 'pointer-events-auto w-80 max-w-full rounded-lg border px-4 py-3 shadow-lg ' . $config['container']]) }}>
+<div x-data="{ show: @js($visible) }" @if($autoHide) x-init="setTimeout(() => show = false, 3000)" @endif x-show="show" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="transition ease-in duration-300" x-transition:leave-start="opacity-100 translate-y-0" x-transition:leave-end="opacity-0 translate-y-4" {{ $attributes->merge(['class' => 'pointer-events-auto w-80 max-w-full rounded-lg border px-4 py-3 shadow-lg ' . $config['container']]) }}>
     <div class="flex items-start gap-3">
         <div class="mt-0.5 flex-shrink-0">
             @if($type === 'success')

@@ -1,4 +1,4 @@
-const chartColors = ['#10b981', '#0ea5e9', '#f59e0b', '#8b5cf6', '#ef4444', '#64748b'];
+const chartColors = ['#0f766e', '#2563eb', '#d97706', '#7c3aed', '#dc2626', '#64748b'];
 
 export const initCustodianDashboard = () => {
     const categoryElement = document.querySelector('#custodianCategoryChart');
@@ -9,9 +9,9 @@ export const initCustodianDashboard = () => {
             series: JSON.parse(categoryElement.dataset.values || '[]'),
             labels: JSON.parse(categoryElement.dataset.labels || '[]'),
             colors: chartColors,
-            chart: { type: 'donut', height: 280, fontFamily: 'Outfit, sans-serif', toolbar: { show: false } },
+            chart: { type: 'donut', height: 250, fontFamily: 'Outfit, sans-serif', toolbar: { show: false } },
             dataLabels: { enabled: false },
-            legend: { position: 'bottom', fontFamily: 'Outfit, sans-serif' },
+            legend: { position: 'bottom', fontFamily: 'Outfit, sans-serif', fontSize: '12px', markers: { width: 8, height: 8, radius: 2 } },
             stroke: { width: 0 },
             plotOptions: { pie: { donut: { size: '68%', labels: { show: true, total: { show: true, label: 'Units' } } } } },
             tooltip: { y: { formatter: value => `${value} units` } },
@@ -23,12 +23,13 @@ export const initCustodianDashboard = () => {
         const requestChart = new ApexCharts(requestElement, {
             series: [{ name: 'Requests', data: JSON.parse(requestElement.dataset.values || '[]') }],
             colors: ['#0ea5e9'],
-            chart: { type: 'bar', height: 280, fontFamily: 'Outfit, sans-serif', toolbar: { show: false } },
-            plotOptions: { bar: { borderRadius: 5, columnWidth: '45%' } },
+            chart: { type: 'donut', height: 250, fontFamily: 'Outfit, sans-serif', toolbar: { show: false } },
+            plotOptions: { pie: { donut: { size: '68%', labels: { show: true, total: { show: true, label: 'Requests' } } } } },
             dataLabels: { enabled: false },
-            xaxis: { categories: JSON.parse(requestElement.dataset.labels || '[]') },
-            yaxis: { min: 0, forceNiceScale: true },
-            grid: { borderColor: '#e5e7eb' },
+            labels: JSON.parse(requestElement.dataset.labels || '[]'),
+            legend: { position: 'bottom', fontFamily: 'Outfit, sans-serif', fontSize: '12px', markers: { width: 8, height: 8, radius: 2 } },
+            stroke: { width: 0 },
+            tooltip: { y: { formatter: value => `${value} requests` } },
         });
         requestChart.render();
     }

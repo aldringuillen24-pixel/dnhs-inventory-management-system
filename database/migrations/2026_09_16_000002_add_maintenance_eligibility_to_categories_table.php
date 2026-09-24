@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasColumn('categories', 'is_maintenance_eligible')) {
+            return;
+        }
+
         Schema::table('categories', function (Blueprint $table): void {
             $table->boolean('is_maintenance_eligible')->default(true)->after('requires_serial_number');
         });

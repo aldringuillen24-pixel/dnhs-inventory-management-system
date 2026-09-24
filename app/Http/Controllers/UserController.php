@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Role;
 use App\Models\User;
+use App\Models\UserAuditLog;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -57,9 +58,18 @@ class UserController extends Controller
             $query->where('status', $request->input('status'));
         }
 
-        $users = $query->paginate(5)->withQueryString();
+        $users = $query->paginate(10)->withQueryString();
 
-        return view('pages.administrator.users-management', compact('users', 'roles'));
+        $metrics = [
+            'total' => User::count(),
+            'active' => User::where('status', 'active')->count(),
+            'inactive' => User::where('status', 'inactive')->count(),
+            'custodians' => User::whereHas('role', fn ($q) => $q->where('role_name', 'Property Custodian'))->count(),
+            'endUsers' => User::whereHas('role', fn ($q) => $q->where('role_name', 'End User'))->count(),
+            'admins' => User::whereHas('role', fn ($q) => $q->where('role_name', 'Administrator'))->count(),
+        ];
+
+        return view('pages.administrator.users-management', compact('users', 'roles', 'metrics'));
     }
 
     public function store(Request $request)
@@ -147,7 +157,7 @@ class UserController extends Controller
     public function update(Request $request, User $user)
     {
         $validatedData = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
+            'name' => ['nullable', 'string', 'max:255'],
             'role_id' => ['required', 'exists:roles,role_id'],
             'status' => ['required', Rule::in(['active', 'inactive'])],
             'password' => ['nullable', 'string', 'min:6'],
@@ -178,10 +188,25 @@ class UserController extends Controller
             return redirect()->back()->with('error', 'You cannot deactivate yourself.');
         }
 
-        [$firstName, $lastName] = $this->splitFullName($validatedData['name']);
+        // Prevent updating name or password once onboarding has been completed
+        $incomingName = trim($validatedData['name'] ?? '');
+        $currentFullName = trim($user->first_name . ' ' . $user->last_name);
+        $nameChanged = $incomingName !== '' && $incomingName !== $currentFullName;
+        $passwordChanged = !empty($validatedData['password']);
 
-        $user->first_name = $firstName;
-        $user->last_name = $lastName;
+        if (is_null($user->temporary_password) && ($nameChanged || $passwordChanged)) {
+            return redirect()->back()->with('error', 'Users can update their own name and password after onboarding.');
+        }
+
+        $originalRoleId = $user->role_id;
+        $originalStatus = $user->status;
+
+        if (!empty($validatedData['name'])) {
+            [$firstName, $lastName] = $this->splitFullName($validatedData['name']);
+            $user->first_name = $firstName;
+            $user->last_name = $lastName;
+        }
+
         $user->role_id = $validatedData['role_id'];
         $user->status = $validatedData['status'];
 
@@ -192,7 +217,46 @@ class UserController extends Controller
 
         $user->save();
 
+        if ((int) $originalRoleId !== (int) $validatedData['role_id']) {
+            UserAuditLog::create([
+                'actor_user_id' => $currentUser?->id,
+                'actor_name' => $currentUser?->first_name . ' ' . $currentUser?->last_name ?: $currentUser?->username,
+                'target_user_id' => $user->id,
+                'target_name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->username,
+                'action' => 'role_changed',
+                'details' => [
+                    'old_role' => optional(Role::find($originalRoleId))->role_name,
+                    'new_role' => optional(Role::find($validatedData['role_id']))->role_name,
+                ],
+            ]);
+        }
+
+        if ($originalStatus !== $validatedData['status']) {
+            UserAuditLog::create([
+                'actor_user_id' => $currentUser?->id,
+                'actor_name' => $currentUser?->first_name . ' ' . $currentUser?->last_name ?: $currentUser?->username,
+                'target_user_id' => $user->id,
+                'target_name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->username,
+                'action' => 'status_changed',
+                'details' => [
+                    'old_status' => $originalStatus,
+                    'new_status' => $validatedData['status'],
+                ],
+            ]);
+        }
+
         return redirect()->route('admin.users-management')->with('success', 'User updated successfully.');
+    }
+
+    public function destroy(User $user)
+    {
+        if (!$user->temporary_password) {
+            return redirect()->back()->with('error', 'Accounts that completed onboarding cannot be deleted.');
+        }
+
+        $user->delete();
+
+        return redirect()->route('admin.users-management')->with('success', 'Pending user account deleted successfully.');
     }
 
     private function splitFullName(string $fullName): array

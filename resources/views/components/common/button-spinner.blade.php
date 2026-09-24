@@ -3,6 +3,7 @@
     'loadingText' => 'Loading...',
     'type' => 'submit',
     'loadOnClick' => false,
+    'resetEvent' => null,
 ])
 
 <button
@@ -10,6 +11,9 @@
     x-data="{ loading: false }"
     @if ($type === 'submit' || $loadOnClick)
         @click="if (!$el.form || $el.form.checkValidity()) setTimeout(() => loading = true, 0)"
+    @endif
+    @if ($resetEvent)
+        x-on:{{ $resetEvent }}.window="loading = false"
     @endif
     :disabled="loading"
     {{ $attributes->merge(['class' => 'inline-flex items-center justify-center gap-2 rounded-md bg-brand-500 px-4 py-2 text-sm font-medium transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60']) }}

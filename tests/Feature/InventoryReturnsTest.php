@@ -630,6 +630,7 @@ class InventoryReturnsTest extends TestCase
             'reported_by' => $this->custodian->id,
             'status' => 'reported',
             'issue_description' => 'Needs repair',
+            'started_at' => now()->subHour(),
         ]);
 
         $this->actingAs($this->custodian)
@@ -649,6 +650,10 @@ class InventoryReturnsTest extends TestCase
             'repair_notes' => 'Power cable replaced.',
             'maintenance_cost' => '250.00',
         ]);
+        $maintenanceRecord->refresh();
+        $this->assertNotNull($maintenanceRecord->started_at);
+        $this->assertNotNull($maintenanceRecord->completed_at);
+        $this->assertLessThanOrEqual($maintenanceRecord->completed_at, $maintenanceRecord->started_at);
         $this->assertDatabaseHas('stock_movements', [
             'inventory_id' => $this->assignedItem->item_id,
             'movement_type' => 'maintenance_completed',

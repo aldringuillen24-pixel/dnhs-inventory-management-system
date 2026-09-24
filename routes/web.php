@@ -12,6 +12,7 @@ use App\Http\Controllers\EndUserController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\AdminSettingsController;
 use App\Http\Controllers\AiAssistantController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Models\User;
@@ -96,6 +97,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::get('/dashboard', [PropertyCustodianController::class, 'dashboard'])->name('dashboard');
 
     Route::get('/inventory', [PropertyCustodianController::class, 'inventory'])->name('inventory');
+    Route::get('/inventory/export', [PropertyCustodianController::class, 'exportInventory'])->name('inventory.export');
 
     Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
 
@@ -128,6 +130,12 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::post('/inventory/{itemId}/mark-ready-to-dispose', [PropertyCustodianController::class, 'markReadyToDispose'])->name('inventory.mark-ready-to-dispose');
 
     Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
+
+    Route::get('/inventory/qr/lookup', [PropertyCustodianController::class, 'qrLookup'])->name('inventory.qr.lookup');
+
+    Route::get('/inventory/{inventory}/print-qr', [PropertyCustodianController::class, 'printQr'])->name('inventory.print-qr');
+    Route::get('/inventory/{inventory}/qr-label', [PropertyCustodianController::class, 'printQr'])->name('inventory.qr.label');
+    Route::get('/inventory/{inventory}/qr-labels', [PropertyCustodianController::class, 'printQr'])->name('inventory.qr.labels');
 
     Route::get('/reports', [PropertyCustodianController::class, 'reports'])->name('reports');
 
@@ -169,6 +177,7 @@ Route::middleware(['auth', 'role:School Head'])->prefix('school-head')->name('sc
     Route::get('/dashboard', [SchoolHeadController::class, 'index'])->name('dashboard');
     Route::get('/inventory/overview', [SchoolHeadController::class, 'inventoryOverview'])->name('inventory.overview');
     Route::get('/reports', [SchoolHeadController::class, 'reports'])->name('reports');
+    Route::get('/audit-logs', [SchoolHeadController::class, 'auditLogs'])->name('audit-logs');
     Route::get('/profile', [SchoolHeadController::class, 'profile'])->name('profile');
     Route::patch('/profile', [SchoolHeadController::class, 'updateProfile'])->name('profile.update');
 });
@@ -177,6 +186,10 @@ Route::middleware(['auth', 'role:School Head'])->prefix('school-head')->name('sc
 // Admin Routes (require admin role)
 Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.')->group(function () {
     Route::get('/dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
+
+    Route::get('/reports', [AdminDashboardController::class, 'reports'])->name('reports');
+
+    Route::get('/reports/download', [AdminDashboardController::class, 'downloadReports'])->name('reports.download');
 
     Route::get('/users-management', [UserController::class, 'index'])->name('users-management');
 
@@ -187,6 +200,13 @@ Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.
     Route::post('/users-management/generate-users', [UserController::class, 'generateUsers'])->name('users-management.generate-users');
    
     Route::patch('/users-management/{user}', [UserController::class, 'update'])->name('users-management.update');
+
+    Route::delete('/users-management/{user}', [UserController::class, 'destroy'])->name('users-management.destroy');
+
+    Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings');
+    Route::post('/settings', [AdminSettingsController::class, 'update'])->name('settings.update');
+    Route::post('/settings/clear-cache', [AdminSettingsController::class, 'clearCache'])->name('settings.clear-cache');
+    Route::post('/settings/ping-ai', [AdminSettingsController::class, 'pingAi'])->name('settings.ping-ai');
 
     Route::get('/profile', function () {
         return view('pages.administrator.profile', ['title' => 'Profile']);

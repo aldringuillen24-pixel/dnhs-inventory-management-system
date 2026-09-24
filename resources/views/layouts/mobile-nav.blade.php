@@ -15,7 +15,7 @@
     <nav x-data="{ moreOpen: false }" class="fixed inset-x-0 bottom-0 z-[1000] border-t border-gray-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-lg backdrop-blur xl:hidden dark:border-gray-800 dark:bg-gray-900/95" aria-label="Mobile navigation">
         <div class="mx-auto flex max-w-lg items-end justify-around gap-1">
             @foreach ($primaryItems as $item)
-                <a href="{{ $item['path'] }}" class="flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5 text-[11px] font-medium {{ MenuHelper::isActive($item['path']) ? 'text-brand-600 dark:text-brand-400' : 'text-gray-500 dark:text-gray-400' }}" aria-label="{{ $item['name'] }}">
+                <a href="{{ $item['path'] }}" @if ($item['path'] === '/property-custodian/inventory') onclick="window.location.replace(this.href); return false;" @endif class="flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-1 py-1.5 text-[11px] font-medium {{ MenuHelper::isActive($item['path']) ? 'text-brand-600 dark:text-brand-400' : 'text-gray-500 dark:text-gray-400' }}" aria-label="{{ $item['name'] }}">
                     <span class="flex h-6 w-6 items-center justify-center {{ MenuHelper::isActive($item['path']) ? 'rounded-md bg-brand-50 dark:bg-brand-500/15' : '' }}">
                         {!! MenuHelper::getIconSvg($item['icon']) !!}
                     </span>

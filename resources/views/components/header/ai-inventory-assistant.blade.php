@@ -31,13 +31,38 @@
         this.inputMessage = '';
         this.showHistory = false;
     },
+    scrollToBottom() {
+        this.$nextTick(() => {
+            if (this.$refs.messagesContainer) {
+                this.$refs.messagesContainer.scrollTo({
+                    top: this.$refs.messagesContainer.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }
+        });
+    },
     loadConversation(conversation) {
         this.messages = conversation.messages;
         this.showHistory = false;
+        this.scrollToBottom();
     },
     deleteConversation(id) {
         this.conversations = this.conversations.filter(conversation => conversation.id !== id);
         localStorage.setItem('dnhs-ai-conversations', JSON.stringify(this.conversations));
+    },
+    parseMarkdown(text) {
+        if (!text) return '';
+        if (typeof window.renderMarkdown === 'function') {
+            return window.renderMarkdown(text);
+        }
+        if (typeof window.marked !== 'undefined') {
+            const raw = window.marked.parse(text, { breaks: true, gfm: true });
+            if (typeof window.DOMPurify !== 'undefined') {
+                return window.DOMPurify.sanitize(raw);
+            }
+            return raw;
+        }
+        return text;
     },
     async sendMessage() {
         const message = this.inputMessage.trim();
@@ -46,6 +71,7 @@
         this.messages.push({ sender: 'user', text: message, time: 'Now' });
         this.inputMessage = '';
         this.loading = true;
+        this.scrollToBottom();
 
         try {
             const response = await fetch('{{ route('ai.chat') }}', {
@@ -64,16 +90,19 @@
                 time: 'Now'
             });
             this.saveConversation();
+            this.scrollToBottom();
         } catch (error) {
             this.messages.push({ sender: 'ai', text: 'Connection error. Please try again.', time: 'Now' });
+            this.scrollToBottom();
         } finally {
             this.loading = false;
+            this.scrollToBottom();
         }
     }
 }" @keydown.escape.window="open = false" class="relative">
     <button
         type="button"
-        @click="open = true"
+        @click="open = true; scrollToBottom()"
         class="relative flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white"
         title="AI Inventory Assistant"
         aria-label="Open AI Inventory Assistant">
@@ -132,12 +161,17 @@
             </div>
         </div>
 
-        <div x-show="!showHistory" class="flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
+        <div x-ref="messagesContainer" x-show="!showHistory" class="flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
             <template x-for="(message, index) in messages" :key="index">
                 <div :class="message.sender === 'user' ? 'flex justify-end' : 'flex justify-start'">
-                    <div :class="message.sender === 'user' ? 'max-w-[85%] rounded-2xl rounded-br-sm bg-emerald-600 px-4 py-3 text-sm text-white' : 'max-w-[85%] rounded-2xl rounded-bl-sm border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200'">
-                        <p x-text="message.text" class="leading-6"></p>
-                        <span x-text="message.time" class="mt-1 block text-[10px] opacity-60"></span>
+                    <div :class="message.sender === 'user' ? 'max-w-[85%] rounded-2xl rounded-br-sm bg-emerald-600 px-4 py-3 text-sm text-white' : 'max-w-[90%] rounded-2xl rounded-bl-sm border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200'">
+                        <template x-if="message.sender === 'user'">
+                            <p x-text="message.text" class="leading-6 whitespace-pre-wrap"></p>
+                        </template>
+                        <template x-if="message.sender !== 'user'">
+                            <div x-html="parseMarkdown(message.text)" class="ai-markdown-content text-gray-800 dark:text-gray-200"></div>
+                        </template>
+                        <span x-text="message.time" class="mt-1.5 block text-[10px] opacity-60"></span>
                     </div>
                 </div>
             </template>

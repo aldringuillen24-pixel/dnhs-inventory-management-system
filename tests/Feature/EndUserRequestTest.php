@@ -72,6 +72,44 @@ test('end user request stores with property custodian target', function () {
     ]);
 });
 
+test('assignment modal receives only available inventory with stock', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+
+    $available = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Available Laptop',
+        'quantity' => 2,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    foreach ([
+        ['item_name' => 'Assigned Laptop', 'status' => 'assigned', 'quantity' => 1],
+        ['item_name' => 'Maintenance Laptop', 'status' => 'under_maintenance', 'quantity' => 1],
+        ['item_name' => 'Empty Laptop', 'status' => 'available', 'quantity' => 0],
+    ] as $item) {
+        Inventory::create([
+            'category_id' => $category->category_id,
+            'unit' => 'piece',
+            'user_id' => $this->propertyCustodian->id,
+            'date_acquired' => '2026-08-10',
+            ...$item,
+        ]);
+    }
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.transactions'))
+        ->assertOk()
+        ->assertViewHas('availableInventoryItems', fn ($items) => $items->count() === 1
+            && $items->first()['item_id'] === $available->item_id
+            && $items->first()['quantity'] === 2);
+});
+
 test('custodian-created assignment records the target end user as assignee', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',

@@ -1,4 +1,4 @@
-@props(['title' => null, 'value' => null, 'subtitle' => null, 'icon' => null, 'class' => ''])
+@props(['title' => null, 'value' => null, 'subtitle' => null, 'icon' => null, 'iconClass' => 'bg-brand-50 text-brand-600 dark:bg-brand-900/20 dark:text-brand-400', 'class' => ''])
 
 <div {{ $attributes->merge(['class' => 'rounded-md border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800 ' . $class]) }}>
     <div class="flex items-start justify-between gap-3">
@@ -14,7 +14,7 @@
             @endif
         </div>
         @if ($icon)
-            <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-900/20 dark:text-brand-400">
+            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl {{ $iconClass }}">
                 {!! $icon !!}
             </div>
         @endif

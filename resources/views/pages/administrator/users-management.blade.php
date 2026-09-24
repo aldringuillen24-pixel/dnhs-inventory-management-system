@@ -1,15 +1,36 @@
-@extends('layouts.app')
+@extends('layouts.app', ['title' => 'User Management'])
 
 @section('content')
 
     <x-common.page-breadcrumb pageTitle="User Management" />
 
+    {{-- Top Metrics Grid --}}
+    <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <x-cards.metric-card 
+            title="Total Accounts" 
+            value="{{ number_format($metrics['total']) }}" 
+            subtitle="Registered system users"
+        />
+        <x-cards.metric-card 
+            title="Active Users" 
+            value="{{ number_format($metrics['active']) }}" 
+            subtitle="Currently enabled access" 
+            class="border-l-4 border-l-green-500"
+        />
+        <x-cards.metric-card 
+            title="Inactive Users" 
+            value="{{ number_format($metrics['inactive']) }}" 
+            subtitle="Deactivated or suspended" 
+            class="border-l-4 border-l-gray-400"
+        />
+        <x-cards.metric-card 
+            title="Roles Breakdown" 
+            value="{{ number_format($metrics['custodians'] + $metrics['endUsers'] + $metrics['admins']) }}" 
+            subtitle="{{ $metrics['custodians'] }} Custodian · {{ $metrics['endUsers'] }} End User · {{ $metrics['admins'] }} Admin"
+        />
+    </div>
+
     <div x-data="{
-        showSlipModal: false,
-        showEditModal: false,
-        showGenerateModal: false,
-        showFilterPanel: false,
-        openMenuId: null,
         selectedUsers: [],
         allUserIds: @js($users->pluck('id')->all()),
         editUserId: null,
@@ -17,10 +38,11 @@
         editRoleId: '',
         editStatus: 'active',
         editPassword: '',
+        canEditIdentity: false,
         generateRoleId: '{{ $roles->first()?->role_id ?? '' }}',
         generateCount: 5,
         isAllSelected() {
-            return this.selectedUsers.length > 0 && this.selectedUsers.length === this.allUserIds.length;
+            return this.allUserIds.length > 0 && this.selectedUsers.length === this.allUserIds.length;
         },
         toggleUser(userId) {
             if (this.selectedUsers.includes(userId)) {
@@ -38,272 +60,317 @@
             this.editRoleId = user.role_id;
             this.editStatus = user.status || 'active';
             this.editPassword = '';
-            this.showEditModal = true;
-            this.openMenuId = null;
-        },
-        closeEdit() {
-            this.showEditModal = false;
-            this.editUserId = null;
-            this.editName = '';
-            this.editRoleId = '';
-            this.editStatus = 'active';
-            this.editPassword = '';
-        },
-        openGenerate() {
-            this.generateRoleId = '{{ $roles->first()?->role_id ?? '' }}';
-            this.generateCount = 5;
-            this.showGenerateModal = true;
-        },
-        closeGenerate() {
-            this.showGenerateModal = false;
+            this.canEditIdentity = Boolean(user.temporary_password !== null && user.temporary_password !== '');
+            this.$dispatch('open-modal', 'edit-user-modal');
         },
         get editFormAction() {
             return this.editUserId ? '{{ url('/admin/users-management') }}/' + this.editUserId : '#';
         }
     }">
-        <div class="grid grid-cols-1 gap-6 xl:grid-cols-12">
-        <div class="xl:col-span-4">
-            <x-cards.base-card title="Add New User" subtitle="Create a user account for the system">
-                <form method="POST" action="{{ route('admin.users-management.store') }}" class="space-y-4">
-                    @csrf
-                    <div>
-                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">User Name</label>
-                        <input type="text" name="username" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Enter full name" required />
+        {{-- Main Table Card --}}
+        <x-cards.base-card title="System User Accounts" subtitle="Manage registered user credentials, roles, and status.">
+            {{-- Toolbar: Filters on left, Action buttons on right --}}
+            <div class="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <form method="GET" action="{{ route('admin.users-management') }}" class="flex flex-1 flex-wrap items-center gap-3">
+                    <div class="w-full sm:w-64">
+                        <input
+                            type="search"
+                            name="search"
+                            value="{{ request('search') }}"
+                            placeholder="Search by name, username..."
+                            x-on:input.debounce.300ms="$el.form.submit()"
+                            class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                        />
                     </div>
-                    <div>
-                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
-                        <input type="password" name="password" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Enter password (optional)" />
-                    </div>
-                    <div>
-                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
-                        <select name="role_id" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required>
+
+                    <div class="w-full sm:w-44">
+                        <select name="role_id" onchange="this.form.submit()" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                            <option value="">All Roles</option>
                             @foreach($roles as $role)
-                                <option value="{{ $role->role_id }}">{{ $role->role_name }}</option>
+                                <option value="{{ $role->role_id }}" @selected(request('role_id') == $role->role_id)>{{ $role->role_name }}</option>
                             @endforeach
                         </select>
                     </div>
-                    <x-common.button-spinner text="Create User" loadingText="Creating..." class="w-full" />
-                    <button type="button" @click="openGenerate()" class="mt-3 w-full rounded-md border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-900">
-                        Generate Multiple Users
-                    </button>
-                </form>
-            </x-cards.base-card>
-        </div>
 
-        <div class="xl:col-span-8">
-            <x-cards.base-card title="User Accounts" subtitle="Manage registered users and access roles">
-                <form method="GET" action="{{ route('admin.users-management') }}" class="mb-4">
-                    <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div class="w-full md:max-w-sm">
-                            <input
-                                type="search"
-                                name="search"
-                                value="{{ request('search') }}"
-                                @input.debounce.500ms="$event.target.form.submit()"
-                                class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-                                placeholder="Search users"
-                                aria-label="Search users"
-                            />
-                        </div>
-                        <div class="flex flex-wrap gap-2 items-center">
-                            <button
-                                type="button"
-                                @click.prevent="showFilterPanel = !showFilterPanel"
-                                class="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200"
-                            >
-                                Filter
-                            </button>
-                            <a
-                                href="{{ route('admin.users-management') }}"
-                                class="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200"
-                            >
-                                Reset
-                            </a>
-                            <button type="button" @click="showSlipModal = true" class="rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
-                                Export Slip
-                            </button>
-                        </div>
+                    <div class="w-full sm:w-36">
+                        <select name="status" onchange="this.form.submit()" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                            <option value="">All Statuses</option>
+                            <option value="active" @selected(request('status') === 'active')>Active</option>
+                            <option value="inactive" @selected(request('status') === 'inactive')>Inactive</option>
+                        </select>
                     </div>
 
-                    <div x-show="showFilterPanel" x-cloak class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
-                        <div class="grid gap-4 md:grid-cols-2">
+                    @if(request()->hasAny(['search', 'role_id', 'status']))
+                        <a href="{{ route('admin.users-management') }}" class="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                            Reset
+                        </a>
+                    @endif
+                </form>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    {{-- Add User Modal Trigger --}}
+                    <x-modals.base-modal modalId="add-user-modal" title="Add New User" subtitle="Create a single user account for the system." maxWidth="max-w-lg">
+                        <x-slot:trigger>
+                            <button type="button" @click="open = true" class="inline-flex items-center gap-1.5 rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-600">
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                </svg>
+                                Add User
+                            </button>
+                        </x-slot:trigger>
+
+                        <form method="POST" action="{{ route('admin.users-management.store') }}" class="space-y-4">
+                            @csrf
+                            <div>
+                                <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">User Full Name / Identifier</label>
+                                <input type="text" name="username" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="e.g. Maria Santos" required />
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">A unique username slug will be generated automatically.</p>
+                            </div>
                             <div>
                                 <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
-                                <select name="role_id" @change="$event.target.form.submit()" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                                    <option value="">All roles</option>
+                                <select name="role_id" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required>
                                     @foreach($roles as $role)
-                                        <option value="{{ $role->role_id }}" {{ request('role_id') == $role->role_id ? 'selected' : '' }}>{{ $role->role_name }}</option>
+                                        @if(strtolower($role->role_name) !== 'administrator')
+                                            <option value="{{ $role->role_id }}">{{ $role->role_name }}</option>
+                                        @endif
                                     @endforeach
                                 </select>
                             </div>
                             <div>
-                                <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
-                                <select name="status" @change="$event.target.form.submit()" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                                    <option value="">All statuses</option>
-                                    <option value="active" {{ request('status') === 'active' ? 'selected' : '' }}>Active</option>
-                                    <option value="inactive" {{ request('status') === 'inactive' ? 'selected' : '' }}>Inactive</option>
+                                <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Password (Optional)</label>
+                                <input type="password" name="password" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Leave blank to auto-generate temporary password" />
+                            </div>
+                            <div class="flex justify-end gap-3 pt-2">
+                                <button type="button" @click="open = false" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200">
+                                    Cancel
+                                </button>
+                                <x-common.button-spinner text="Create User" loadingText="Creating..." class="text-white" />
+                            </div>
+                        </form>
+                    </x-modals.base-modal>
+
+                    {{-- Generate Multiple Users Modal Trigger --}}
+                    <x-modals.base-modal modalId="generate-users-modal" title="Generate Multiple Accounts" subtitle="Batch-create temporary random user accounts for quick assignment." maxWidth="max-w-lg">
+                        <x-slot:trigger>
+                            <button type="button" @click="open = true" class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:border-brand-500 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                </svg>
+                                Generate Multiple
+                            </button>
+                        </x-slot:trigger>
+
+                        <form method="POST" action="{{ route('admin.users-management.generate-users') }}" class="space-y-4">
+                            @csrf
+                            <div>
+                                <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Target Role</label>
+                                <select name="role_id" x-model="generateRoleId" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required>
+                                    @foreach($roles as $role)
+                                        @if(strtolower($role->role_name) !== 'administrator')
+                                            <option value="{{ $role->role_id }}">{{ $role->role_name }}</option>
+                                        @endif
+                                    @endforeach
                                 </select>
                             </div>
-                        </div>
-                    </div>
-                </form>
-
-                <div class="space-y-3">
-                    @forelse($users as $user)
-                        <div class="flex items-center justify-between rounded-md border border-gray-200 p-3 dark:border-gray-700">
                             <div>
-                                <p class="font-medium text-gray-900 dark:text-white">{{ $user->first_name }} {{ $user->last_name }}</p>
-                                <p class="text-sm text-gray-500 dark:text-gray-400">{{ $user->role?->role_name ?? 'No role assigned' }}</p>
+                                <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Number of Accounts</label>
+                                <input type="number" name="count" x-model="generateCount" min="1" max="20" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required />
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Generates between 1 to 20 accounts with random credentials.</p>
                             </div>
-                            <div class="relative flex items-center gap-2">
-                                <span class="rounded-md px-3 py-1 text-xs font-medium {{ $user->status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300' }}">
-                                    {{ ucfirst($user->status ?? 'inactive') }}
-                                </span>
-                                <div class="relative">
-                                    <button type="button" @click="openMenuId = openMenuId === {{ $user->id }} ? null : {{ $user->id }}" class="rounded-full p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="More actions">
-                                        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                            <path d="M10 6a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 5.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 5.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
-                                        </svg>
-                                    </button>
-                                    <div x-show="openMenuId === {{ $user->id }}" x-cloak class="absolute right-0 top-7 z-10 w-32 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
-                                        <button type="button" @click="openEdit(@js(['id' => $user->id, 'name' => trim($user->first_name . ' ' . $user->last_name), 'role_id' => $user->role_id ?? '', 'status' => $user->status ?? 'active']))" class="block w-full px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700">Edit</button>
-                                    </div>
-                                </div>
+                            <div class="flex justify-end gap-3 pt-2">
+                                <button type="button" @click="open = false" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200">
+                                    Cancel
+                                </button>
+                                <x-common.button-spinner text="Generate Users" loadingText="Generating..." class="text-white" />
                             </div>
-                        </div>
-                    @empty
-                        <div class="rounded-md border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                            No account yet
-                        </div>
-                    @endforelse
-                </div>
+                        </form>
+                    </x-modals.base-modal>
 
-                <div class="mt-4 border-t border-gray-200 pt-4 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-400">
-                    @if ($users->lastPage() > 1)
-                        {{ $users->links() }}
-                    @else
-                        <nav class="flex items-center justify-center gap-2">
-                            <button class="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800" disabled>
-                                1
+                    {{-- Export Slips Modal Trigger --}}
+                    <x-modals.base-modal modalId="export-slips-modal" title="Export Account Slips" subtitle="Download printable PDF slips with account credentials." maxWidth="max-w-lg">
+                        <x-slot:trigger>
+                            <button type="button" @click="open = true" class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:border-brand-500 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                Export Slips
                             </button>
-                        </nav>
-                    @endif
+                        </x-slot:trigger>
+
+                        <form method="POST" action="{{ route('admin.users-management.export-slips') }}" class="space-y-4" x-data="{ async exportSlips(event) { const response = await fetch(event.currentTarget.action, { method: 'POST', body: new FormData(event.currentTarget), headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/pdf' } }); if (!response.ok || !response.headers.get('content-type')?.includes('application/pdf')) { throw new Error('Unable to generate the PDF.'); } const blob = await response.blob(); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'user-account-slips.pdf'; link.click(); URL.revokeObjectURL(link.href); window.dispatchEvent(new CustomEvent('pdf-download-finished')); window.dispatchEvent(new CustomEvent('export-slips-success')); window.dispatchEvent(new CustomEvent('close-modal', { detail: 'export-slips-modal' })); } }" @submit.prevent="exportSlips($event).catch(() => { window.dispatchEvent(new CustomEvent('pdf-download-finished')); alert('Unable to generate the PDF. Please try again.'); })">
+                            @csrf
+                            <template x-for="userId in selectedUsers" :key="userId">
+                                <input type="hidden" name="selected_user_ids[]" :value="userId">
+                            </template>
+
+                            <div class="flex items-center justify-between">
+                                <p class="text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">
+                                    Select Accounts (<span x-text="selectedUsers.length"></span> selected)
+                                </p>
+                                <button type="button" @click="toggleSelectAll()" class="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                                    <span x-text="isAllSelected() ? 'Clear All' : 'Select All'"></span>
+                                </button>
+                            </div>
+
+                            <div class="max-h-64 space-y-1.5 overflow-y-auto rounded-lg border border-gray-200 p-2.5 dark:border-gray-700 dark:bg-gray-800/40">
+                                @forelse($users as $user)
+                                    <label class="flex items-center justify-between rounded-md px-2.5 py-1.5 text-xs transition hover:bg-gray-50 dark:hover:bg-gray-700/60">
+                                        <div class="flex items-center gap-2.5">
+                                            <input type="checkbox" class="h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700" :checked="selectedUsers.includes({{ $user->id }})" @change="toggleUser({{ $user->id }})" />
+                                            <div>
+                                                <p class="font-medium text-gray-900 dark:text-white">{{ $user->first_name }} {{ $user->last_name }} <span class="text-gray-400">({{ '@' . $user->username }})</span></p>
+                                                <p class="text-[11px] text-gray-500 dark:text-gray-400">{{ $user->role?->role_name ?? 'No role' }}</p>
+                                            </div>
+                                        </div>
+                                        <span class="text-[11px] capitalize text-gray-500">{{ $user->status }}</span>
+                                    </label>
+                                @empty
+                                    <p class="p-3 text-center text-xs text-gray-500 dark:text-gray-400">No accounts found.</p>
+                                @endforelse
+                            </div>
+
+                            <div class="flex justify-end gap-3 pt-2">
+                                <button type="button" @click="open = false" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200">
+                                    Cancel
+                                </button>
+                                <x-common.button-spinner text="Print PDF Slips" loadingText="Preparing PDF..." resetEvent="pdf-download-finished" :disabled="'selectedUsers.length === 0'" class="text-white" />
+                            </div>
+                        </form>
+                    </x-modals.base-modal>
                 </div>
-            </x-cards.base-card>
-        </div>
-        </div>
+            </div>
 
-        <div x-show="showSlipModal" x-transition class="fixed inset-0 z-[1100] flex items-center justify-center" style="display: none;" @click.self="showSlipModal = false">
-            <div class="w-full max-w-lg rounded-md border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
-                <div class="mb-2 flex items-start justify-end gap-3">
-                    <button type="button" @click="showSlipModal = false" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white">
-                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                        </svg>
-                    </button>
-                </div>
-                <form method="POST" action="{{ route('admin.users-management.export-slips') }}" class="space-y-4">
-                    @csrf
-                    <template x-for="userId in selectedUsers" :key="userId">
-                        <input type="hidden" name="selected_user_ids[]" :value="userId">
-                    </template>
+            {{-- Full-Width User Accounts Data Table matching All Inventory styling --}}
+            <div class="max-h-[32rem] overflow-y-auto overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+                @php
+                    $roleGroups = [
+                        'End User' => 'End Users',
+                        'Administrator' => 'Administrators',
+                        'Property Custodian' => 'Property Custodians',
+                        'Inspector' => 'Inspectors',
+                        'School Head' => 'School Heads',
+                    ];
+                    $usersByRole = $users->getCollection()->groupBy(fn ($user) => $user->role?->role_name ?? 'No role assigned');
+                @endphp
+                <table class="min-w-full border-separate border-spacing-0 divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-700 dark:text-gray-200">
+                    <thead class="sticky top-0 z-20 bg-gray-50 text-xs uppercase tracking-wide text-gray-500 shadow-sm dark:bg-gray-800 dark:text-gray-400">
+                        <tr>
+                            <th class="sticky top-0 z-20 bg-gray-50 px-4 py-3 dark:bg-gray-800">User</th>
+                            <th class="sticky top-0 z-20 bg-gray-50 px-4 py-3 dark:bg-gray-800">Role</th>
+                            <th class="sticky top-0 z-20 bg-gray-50 px-4 py-3 dark:bg-gray-800">Status</th>
+                            <th class="sticky top-0 z-20 bg-gray-50 px-4 py-3 dark:bg-gray-800">Date Created</th>
+                            <th class="sticky top-0 z-20 bg-gray-50 px-4 py-3 text-right dark:bg-gray-800">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                        @if($users->isEmpty())
+                            <tr>
+                                <td colspan="6" class="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                                    No user accounts found.
+                                </td>
+                            </tr>
+                        @else
+                        @foreach($roleGroups as $roleName => $roleLabel)
+                            @if($usersByRole->has($roleName))
+                                <tr class="bg-gray-600">
+                                    <th colspan="5" class="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-white dark:text-gray-400">
+                                        {{ $roleLabel }}
+                                        <span class="ml-1 font-normal normal-case tracking-normal text-white dark:text-gray-500">({{ $usersByRole->get($roleName)->count() }})</span>
+                                    </th>
+                                </tr>
+                            @endif
 
-                    <div class="mb-4 flex items-center justify-between gap-3">
-                        <div>
-                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Generate Slip</h3>
-                            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Preview the slip before printing.</p>
-                        </div>
-                        <button type="button" @click="toggleSelectAll()" class="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200">
-                            <span x-text="isAllSelected() ? 'Clear All' : 'Select All'"></span>
-                        </button>
-                    </div>
-
-                    <div class="max-h-72 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-                        @forelse($users as $user)
-                            <label class="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2 transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">
-                                <div class="flex items-center gap-3">
-                                    <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500" :checked="selectedUsers.includes({{ $user->id }})" @change="toggleUser({{ $user->id }})" />
-                                    <div>
-                                        <p class="text-sm font-medium text-gray-900 dark:text-white">{{ $user->first_name }} {{ $user->last_name }}</p>
-                                        <p class="text-xs text-gray-500 dark:text-gray-400">{{ $user->role?->role_name ?? 'No role assigned' }}</p>
+                            @foreach($usersByRole->get($roleName, collect()) as $user)
+                                @php
+                                    $fullName = trim($user->first_name . ' ' . $user->last_name) ?: $user->username;
+                                    $roleName = $user->role?->role_name ?? 'No role assigned';
+                                @endphp
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60" :class="selectedUsers.includes({{ $user->id }}) ? 'bg-brand-50/40 dark:bg-brand-950/20' : ''">
+                                <td class="px-4 py-3">
+                                    <div class="font-medium text-gray-900 dark:text-white">
+                                        {{ $fullName }}
                                     </div>
-                                </div>
-                                <span class="text-xs tracking-wide text-green-700 dark:text-gray-400">{{ ucfirst($user->status ?? 'inactive') }}</span>
-                            </label>
-                        @empty
-                            <p class="text-sm text-gray-500 dark:text-gray-400">No accounts available.</p>
-                        @endforelse
-                    </div>
-
-                    <div class="flex justify-end gap-3">
-                        <button type="button" @click="showSlipModal = false" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200">
-                            Close
-                        </button>
-                        <x-common.button-spinner text="Print PDF" loadingText="Preparing PDF..." />
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div x-show="showGenerateModal" x-transition class="fixed inset-0 z-[1200] flex items-center justify-center" style="display: none;" @click.self="closeGenerate()">
-            <div class="w-full max-w-lg rounded-md border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
-                <div class="mb-4 flex items-start justify-between gap-3">
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Generate Users</h3>
-                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Select role and quantity to create random user accounts.</p>
-                    </div>
-                    <button type="button" @click="closeGenerate()" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white">
-                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                        </svg>
-                    </button>
-                </div>
-                <form method="POST" action="{{ route('admin.users-management.generate-users') }}" class="space-y-4">
-                    @csrf
-                    <div>
-                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
-                        <select name="role_id" x-model="generateRoleId" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required>
-                            @foreach($roles as $role)
-                                <option value="{{ $role->role_id }}">{{ $role->role_name }}</option>
+                                    <span class="text-xs text-gray-400">
+                                        {{ '@' . $user->username }}@if($user->email) · {{ $user->email }}@endif
+                                    </span>
+                                    @if($user->temporary_password)
+                                        <span class="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Pending onboarding</span>
+                                    @endif
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span class="inline-flex rounded-full bg-gray-100 px-2 py-1 text-xs font-medium capitalize text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                                        {{ $roleName }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    @if($user->status === 'active')
+                                        <span class="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium capitalize text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                            <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>
+                                            Active
+                                        </span>
+                                    @else
+                                        <span class="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium capitalize text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                            <span class="h-1.5 w-1.5 rounded-full bg-gray-400"></span>
+                                            Inactive
+                                        </span>
+                                    @endif
+                                </td>
+                                <td class="px-4 py-3 text-sm">
+                                    {{ optional($user->created_at)->format('M d, Y') ?? '—' }}
+                                </td>
+                                <td class="px-4 py-3 text-right">
+                                    <button 
+                                        type="button" 
+                                        @click="openEdit(@js(['id' => $user->id, 'name' => $fullName, 'role_id' => $user->role_id ?? '', 'status' => $user->status ?? 'active', 'temporary_password' => $user->temporary_password]))" 
+                                        class="rounded-md border px-2.5 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+                                    >
+                                        Edit
+                                    </button>
+                                    @if($user->temporary_password)
+                                        <form method="POST" action="{{ route('admin.users-management.destroy', $user) }}" class="inline" onsubmit="return confirm('Delete this account before onboarding is completed?');">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit" class="ml-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20">
+                                                Delete
+                                            </button>
+                                        </form>
+                                    @endif
+                                </td>
+                                </tr>
                             @endforeach
-                        </select>
-                    </div>
-                    <div>
-                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Count</label>
-                        <input type="number" name="count" x-model="generateCount" min="1" max="20" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required />
-                    </div>
-                    <div class="flex justify-end gap-3">
-                        <button type="button" @click="closeGenerate()" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200">
-                            Cancel
-                        </button>
-                        <x-common.button-spinner text="Generate Users" loadingText="Generating..." />
-                    </div>
-                </form>
+                        @endforeach
+                        @endif
+                    </tbody>
+                </table>
             </div>
-        </div>
 
-        <div x-show="showEditModal" x-transition class="fixed inset-0 z-[1200] flex items-center justify-center" style="display: none;" @click.self="closeEdit()">
-            <div class="w-full max-w-lg rounded-md border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
-                <div class="mb-4 flex items-start justify-between gap-3">
+            {{-- Pagination footer --}}
+            @if ($users->hasPages())
+                <div class="mt-4 flex flex-col items-center justify-between gap-3 border-t border-gray-200 pt-4 sm:flex-row dark:border-gray-700">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                        Showing {{ $users->firstItem() }} to {{ $users->lastItem() }} of {{ $users->total() }} accounts
+                    </p>
                     <div>
-                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Edit User</h3>
-                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Update the selected user account details.</p>
+                        {{ $users->links() }}
                     </div>
-                    <button type="button" @click="closeEdit()" class="rounded-md p-1 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white">
-                        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                        </svg>
-                    </button>
                 </div>
-                <form :action="editFormAction" method="POST" class="space-y-4">
-                    @csrf
-                    @method('PATCH')
+            @endif
+        </x-cards.base-card>
 
+        {{-- Edit User Modal using base-modal component --}}
+        <x-modals.base-modal modalId="edit-user-modal" title="Edit User Account" subtitle="Update account credentials, assigned role, or status." maxWidth="max-w-lg">
+            <form :action="editFormAction" method="POST" class="space-y-4">
+                @csrf
+                @method('PATCH')
+
+                <template x-if="canEditIdentity">
                     <div>
-                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
+                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Full Name</label>
                         <input type="text" name="name" x-model="editName" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required />
                     </div>
+                </template>
 
+                <div class="grid gap-4 sm:grid-cols-2">
                     <div>
                         <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
                         <select name="role_id" x-model="editRoleId" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required>
@@ -320,20 +387,29 @@
                             <option value="inactive">Inactive</option>
                         </select>
                     </div>
+                </div>
 
+                <template x-if="canEditIdentity">
                     <div>
-                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
+                        <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Reset Password</label>
                         <input type="password" name="password" x-model="editPassword" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Leave blank to keep current password" />
                     </div>
+                </template>
 
-                    <div class="flex justify-end gap-3">
-                        <button type="button" @click="closeEdit()" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-500 hover:text-brand-500 dark:border-gray-700 dark:text-gray-200">
-                            Cancel
-                        </button>
-                        <x-common.button-spinner text="Save Changes" loadingText="Saving..." />
+                <template x-if="!canEditIdentity">
+                    <div class="rounded-md border border-amber-900 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+                        Personal name and password updates are handled by the user after onboarding.
                     </div>
-                </form>
-            </div>
-        </div>
+                </template>
+
+                <div class="flex justify-end gap-3 pt-2">
+                    <button type="button" @click="open = false" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200">
+                        Cancel
+                    </button>
+                    <x-common.button-spinner text="Save Changes" loadingText="Saving..." class="text-white" />
+                </div>
+            </form>
+        </x-modals.base-modal>
     </div>
 @endsection
+

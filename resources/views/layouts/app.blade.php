@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="icon" type="image/svg+xml" href="{{ asset('images/logo/dnhs_school_logo.svg') }}">
 
     <title>{{ $title ?? 'Dashboard' }} | Dian-ay Inventory</title>
 
@@ -16,6 +17,8 @@
 
     <!-- Scripts -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 
     <!-- Alpine.js -->
     {{-- <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script> --}}
@@ -115,22 +118,21 @@
     };
     window.addEventListener('resize', checkMobile);">
 
-    @if (session('success') || session('error'))
-        <x-common.toast-stack class="top-4 right-4">
-            @if (session('success'))
-                <x-common.toast type="success" title="Success" :message="session('success')" />
-            @endif
-            @if (session('error'))
-                <x-common.toast type="error" title="Error" :message="session('error')" />
-            @endif
-        </x-common.toast-stack>
-    @endif
+    <x-common.toast-stack class="top-4 right-4">
+        @if (session('success'))
+            <x-common.toast type="success" title="Success" :message="session('success')" />
+        @endif
+        @if (session('error'))
+            <x-common.toast type="error" title="Error" :message="session('error')" />
+        @endif
+        <x-common.toast x-cloak x-on:export-slips-success.window="show = true; setTimeout(() => show = false, 3000)" :visible="false" :autoHide="false" type="success" title="Success" message="User account slips downloaded successfully." />
+    </x-common.toast-stack>
 
     <div class="min-h-screen xl:flex">
         @include('layouts.backdrop')
         @include('layouts.sidebar')
 
-        <div x-cloak class="flex-1 transition-all duration-300 ease-in-out"
+        <div x-cloak class="min-w-0 flex-1 transition-all duration-300 ease-in-out"
             :class="{
                 'xl:ml-[240px]': $store.sidebar.isExpanded || $store.sidebar.isHovered,
                 'xl:ml-[90px]': !$store.sidebar.isExpanded && !$store.sidebar.isHovered,
@@ -163,8 +165,6 @@
         </div>
 
     </div>
-
-    @include('layouts.mobile-nav')
 
 </body>
 

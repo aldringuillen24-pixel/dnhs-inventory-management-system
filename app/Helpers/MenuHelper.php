@@ -112,10 +112,8 @@ class MenuHelper
             'administrator' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/admin/dashboard'],
                 ['icon' => 'users', 'name' => 'User Management', 'path' => '/admin/users-management'],
-                ['icon' => 'inventory', 'name' => 'Inventory Overview', 'path' => '/inventory'],
-                ['icon' => 'transactions', 'name' => 'Transaction Overview', 'path' => '/transactions'],
-                ['icon' => 'reports', 'name' => 'Reports', 'path' => '/reports'],
-                ['icon' => 'settings', 'name' => 'System Settings', 'path' => '/settings'],
+                ['icon' => 'reports', 'name' => 'Reports', 'path' => '/admin/reports'],
+                ['icon' => 'settings', 'name' => 'System Settings', 'path' => '/admin/settings'],
             ],
             'school head' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/school-head/dashboard'],

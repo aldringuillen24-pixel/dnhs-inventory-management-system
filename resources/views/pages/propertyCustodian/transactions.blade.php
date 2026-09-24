@@ -3,50 +3,49 @@
     @section('content')
         <x-common.page-breadcrumb pageTitle="Transactions" />
 
-        {{-- Metric Summary Cards --}}
-        <div class="grid gap-6 xl:grid-cols-12">
-            <div class="col-span-12 md:col-span-6 xl:col-span-3">
-                <x-cards.metric-card
-                    label="Total Assigned Items"
-                    value="{{ $totalAssignedCount }}"
-                    subtitle="Items currently assigned"
-                    icon="<svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5' viewBox='0 0 20 20' fill='currentColor'><path d='M4 3a1 1 0 00-1 1v2a1 1 0 001 1h1v8a1 1 0 001 1h8a1 1 0 001-1V7h1a1 1 0 001-1V4a1 1 0 00-1-1H4z'/><path d='M5 7V5h10V7H5z'/></svg>"
-                >
-                    <span class="text-sm text-gray-500 dark:text-gray-400">Active assignments in circulation</span>
-                </x-cards.metric-card>
-            </div>
-            <div class="col-span-12 md:col-span-6 xl:col-span-3">
-                <x-cards.metric-card
-                    label="Pending Requests"
-                    value="{{ $pendingRequestsCount }}"
-                    subtitle="Awaiting custodian action"
-                    icon="<svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5' viewBox='0 0 20 20' fill='currentColor'><path fill-rule='evenodd' d='M10 18a8 8 0 100-16 8 8 0 000 16zm1-11V5a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0V9h2a1 1 0 100-2h-2z' clip-rule='evenodd'/></svg>"
-                    tone="{{ $pendingRequestsCount > 0 ? 'positive' : 'neutral' }}"
-                >
-                    {{ $pendingRequestsCount > 0 ? 'Requests require your review.' : 'All requests processed.' }}
-                </x-cards.metric-card>
-            </div>
-            <div class="col-span-12 md:col-span-6 xl:col-span-3">
-                <x-cards.metric-card
-                    label="Overdue Returns"
-                    value="{{ $overdueReturnsCount }}"
-                    subtitle="Items past return date"
-                    icon="<svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5' viewBox='0 0 20 20' fill='currentColor'><path d='M10 2a8 8 0 100 16 8 8 0 000-16zm1 9H9V7a1 1 0 112 0v4z'/></svg>"
-                    tone="{{ $overdueReturnsCount > 0 ? 'negative' : 'neutral' }}"
-                >
-                    Follow up with custodians for quick returns.
-                </x-cards.metric-card>
-            </div>
-            <div class="col-span-12 md:col-span-6 xl:col-span-3">
-                <x-cards.metric-card
-                    label="Total Transactions"
-                    value="{{ $totalTransactionsCount }}"
-                    subtitle="Recorded movements"
-                    icon="<svg xmlns='http://www.w3.org/2000/svg' class='h-5 w-5' viewBox='0 0 20 20' fill='currentColor'><path d='M9 2a1 1 0 000 2h2a1 1 0 100-2H9z'/><path fill-rule='evenodd' d='M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z' clip-rule='evenodd'/></svg>"
-                    tone="neutral"
-                >
-                    Full historical audit trail.
-                </x-cards.metric-card>
+        {{-- KPI Summary --}}
+        <div class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs dark:border-gray-800 dark:bg-gray-900">
+            <div class="grid md:grid-cols-4">
+                <div class="flex items-center gap-4 p-4">
+                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
+                        <i data-lucide="user-check" class="h-5 w-5"></i>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Assigned Items</p>
+                        <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($totalAssignedCount) }}</p>
+                        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Items currently assigned</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
+                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg {{ $pendingRequestsCount > 0 ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }}">
+                        <i data-lucide="clipboard-list" class="h-5 w-5"></i>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Pending Requests</p>
+                        <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($pendingRequestsCount) }}</p>
+                        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Awaiting custodian action</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
+                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg {{ $overdueReturnsCount > 0 ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }}">
+                        <i data-lucide="alert-triangle" class="h-5 w-5"></i>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Overdue Returns</p>
+                        <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($overdueReturnsCount) }}</p>
+                        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Items past their return date</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
+                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-brand-600 dark:bg-blue-500/10 dark:text-brand-400">
+                        <i data-lucide="file-text" class="h-5 w-5"></i>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Transactions</p>
+                        <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($totalTransactionsCount) }}</p>
+                        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Recorded inventory movements</p>
+                    </div>
+                </div>
             </div>
         </div>
 

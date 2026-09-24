@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="icon" type="image/svg+xml" href="{{ asset('images/logo/dnhs_school_logo.svg') }}">
 
     <title>{{ $title ?? 'Dashboard' }} | Dian-ay NHS Inventory</title>
 

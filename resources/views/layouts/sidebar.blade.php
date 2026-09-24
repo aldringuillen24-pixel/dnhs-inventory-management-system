@@ -31,6 +31,16 @@
         '-translate-x-full xl:translate-x-0': !$store.sidebar.isMobileOpen
     }">
     <div class="flex-1 overflow-y-auto py-6 no-scrollbar">
+        <div class="mb-6 border-b border-gray-200 pb-4 dark:border-gray-800">
+            <a href="/" class="flex items-center gap-3 transition-all duration-200 hover:opacity-90"
+               :class="$store.sidebar.isExpanded || $store.sidebar.isMobileOpen ? 'justify-start' : 'justify-center'">
+                <img src="{{ asset('images/logo/dnhs_school_logo.svg') }}" alt="DNHS Logo" class="h-8 w-8 shrink-0 object-contain" />
+                <span x-show="$store.sidebar.isExpanded || $store.sidebar.isMobileOpen"
+                      class="text-sm  tracking-wide text-slate-800 dark:text-white">
+                    DNHS Inventory Management System
+                </span>
+            </a>
+        </div>
         <nav aria-label="Main navigation">
             <div class="space-y-7">
                 @foreach ($menuGroups as $groupIndex => $menuGroup)
@@ -74,7 +84,7 @@
                                             </ul>
                                         </div>
                                     @else
-                                        <a href="{{ $item['path'] }}" title="{{ $item['name'] }}" aria-label="{{ $item['name'] }}" class="menu-item group" :class="isActive('{{ $item['path'] }}') ? 'menu-item-active' : 'menu-item-inactive'">
+                                        <a href="{{ $item['path'] }}" @if ($item['path'] === '/property-custodian/inventory') onclick="window.location.replace(this.href); return false;" @endif title="{{ $item['name'] }}" aria-label="{{ $item['name'] }}" class="menu-item group" :class="isActive('{{ $item['path'] }}') ? 'menu-item-active' : 'menu-item-inactive'">
                                             <span :class="isActive('{{ $item['path'] }}') ? 'menu-item-icon-active' : 'menu-item-icon-inactive'">
                                                 {!! MenuHelper::getIconSvg($item['icon']) !!}
                                             </span>

@@ -1,39 +1,43 @@
-## Current Database Design Gaps
+Pagination steps:
 
-1. **No dedicated maintenance records**
-   - No repair details, technician, cost, diagnosis, or completion history.
+1. Decide the page size, such as 25 or 50 inventory groups per page.
 
-2. **No maintenance completion workflow**
-   - Items can enter `under_maintenance`, but there is no proper return-to-available or repair-failed process.
+2. Add server-side filters:
+   - status;
+   - search text;
+   - category;
+   - disposed or non-disposed state.
 
-3. **Request types are implicit**
-   - The `requests` table does not identify whether a record is an assignment, transfer, or return.
+3. Update the inventory query to return paginated results instead of loading everything.
 
-4. **Statuses are free-form strings**
-   - Invalid or inconsistent statuses can be stored because the database has no status constraints.
+4. Keep inventory grouping in the database before pagination so related quantities remain correct.
 
-5. **Assignment data is duplicated**
-   - Assignment information exists across `inventory`, `requests`, and `transactions`, creating synchronization risk.
+5. Update the controller to pass pagination and filter values to the view.
 
-6. **OTP records are linked by email only**
-   - `password_reset_otps` has no foreign key to `users`.
+6. Add pagination controls:
+   - Previous;
+   - Next;
+   - page numbers;
+   - total results.
 
-7. **Audit references are not enforced**
-   - `reference_type` and `reference_id` in `stock_movements` do not guarantee that the referenced record exists.
+7. Preserve filter values when changing pages.
 
-8. **Quantity constraints are incomplete**
-   - Quantities are unsigned but do not have database-level checks requiring values greater than zero.
+8. Update the Alpine.js interface so changing tabs submits or reloads the correct server-side filter.
 
-9. **No maintenance cost or disposal history**
-   - Maintenance and disposal actions are recorded generally, but detailed financial and decision history is missing.
+9. Optimize related records so each paginated item loads only:
+   - latest maintenance record;
+   - latest stock movement;
+   - latest disposal movement.
 
-10. **No dedicated status-history table**
-   - Current state is stored on `inventory`; historical changes rely on `stock_movements`.
+10. Add tests for:
+   - page navigation;
+   - search across pages;
+   - category filtering;
+   - status tabs;
+   - disposed inventory;
+   - empty results;
+   - filter values preserved between pages.
 
-11. **Request and transaction meanings are overloaded**
-   - The same fields have different meanings depending on the workflow, making reporting and maintenance more difficult.
+11. Run the focused inventory tests, then the complete suite.
 
-12. **Documentation and schema naming differ**
-   - Older documentation refers to `assignment_requests`, while the active table is `requests`.
-
-The highest-priority gap is **dedicated maintenance records**, followed by the **maintenance completion workflow**.
+The main design decision is whether changing a tab reloads the page or uses AJAX. A normal page reload is simpler and more reliable for this Laravel Blade application.

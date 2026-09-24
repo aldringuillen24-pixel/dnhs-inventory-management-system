@@ -8,14 +8,28 @@ import flatpickr from 'flatpickr';
 import 'flatpickr/dist/flatpickr.min.css';
 // FullCalendar
 import { Calendar } from '@fullcalendar/core';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
-
+marked.setOptions({
+    gfm: true,
+    breaks: true,
+});
 
 window.Alpine = Alpine;
 window.ApexCharts = ApexCharts;
 window.flatpickr = flatpickr;
 window.FullCalendar = Calendar;
 window.lucide = { createIcons, icons };
+window.renderMarkdown = function (text) {
+    if (!text) return '';
+    try {
+        const rawHtml = marked.parse(text);
+        return DOMPurify.sanitize(rawHtml);
+    } catch (e) {
+        return text;
+    }
+};
 
 Alpine.start();
 
@@ -50,8 +64,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.querySelector('#adminInventoryChart')) {
         import('./components/chart/admin-dashboard').then(module => module.initAdminDashboard());
     }
+    if (document.querySelector('#adminSystemRoleChart, #adminSystemRequestChart, #adminSystemMaintenanceChart')) {
+        import('./components/chart/admin-reports').then(module => module.initAdminReports());
+    }
     if (document.querySelector('#custodianCategoryChart')) {
         import('./components/chart/custodian-dashboard').then(module => module.initCustodianDashboard());
+    }
+    if (document.querySelector('#custodianReportStatusChart, #custodianReportCategoryChart, #custodianReportMovementChart, #custodianReportLifecycleChart')) {
+        import('./components/chart/custodian-reports').then(module => module.initCustodianReports());
     }
     if (document.querySelector('#schoolHeadCategoryChart')) {
         import('./components/chart/school-head-reports').then(module => module.initSchoolHeadReports());

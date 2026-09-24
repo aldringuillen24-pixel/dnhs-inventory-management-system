@@ -159,3 +159,39 @@ test('can bulk-generate non-administrator accounts via generateUsers endpoint', 
 
     expect(User::where('role_id', $endUserRole->role_id)->count())->toBe(3);
 });
+
+test('administrator can delete an account that has not completed onboarding', function () {
+    $pendingUser = User::create([
+        'role_id' => $this->propertyRole->role_id,
+        'first_name' => 'Pending',
+        'last_name' => 'User',
+        'username' => 'pending-user',
+        'password' => 'password',
+        'temporary_password' => 'temporary-password',
+        'status' => 'active',
+    ]);
+
+    $response = $this->actingAs($this->admin)->delete(route('admin.users-management.destroy', $pendingUser));
+
+    $response->assertRedirect(route('admin.users-management'));
+    $response->assertSessionHas('success', 'Pending user account deleted successfully.');
+    expect(User::find($pendingUser->id))->toBeNull();
+});
+
+test('administrator cannot delete an account that completed onboarding', function () {
+    $completedUser = User::create([
+        'role_id' => $this->propertyRole->role_id,
+        'first_name' => 'Completed',
+        'last_name' => 'User',
+        'username' => 'completed-user',
+        'password' => 'password',
+        'temporary_password' => null,
+        'status' => 'active',
+    ]);
+
+    $response = $this->actingAs($this->admin)->delete(route('admin.users-management.destroy', $completedUser));
+
+    $response->assertRedirect();
+    $response->assertSessionHas('error', 'Accounts that completed onboarding cannot be deleted.');
+    expect(User::find($completedUser->id))->not->toBeNull();
+});
