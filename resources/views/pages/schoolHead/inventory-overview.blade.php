@@ -3,13 +3,17 @@
 @section('content')
     <x-common.page-breadcrumb pageTitle="Inventory Overview" />
 
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <x-cards.metric-card title="Total Units" value="{{ number_format($metrics['units']) }}" subtitle="Non-disposed stock" />
-        <x-cards.metric-card title="Available" value="{{ number_format($metrics['available']) }}" subtitle="Ready for assignment" />
-        <x-cards.metric-card title="Assigned" value="{{ number_format($metrics['assigned']) }}" subtitle="Currently in use" />
-        <x-cards.metric-card title="Low Stock Categories" value="{{ number_format($metrics['lowStock']) }}" subtitle="Three units or fewer" />
-        <x-cards.metric-card title="Inventory Value" value="PHP {{ number_format($metrics['value'], 2) }}" subtitle="Recorded value" />
-    </div>
+    @php
+        $kpiMetrics = [
+            ['title' => 'Total Units', 'value' => number_format($metrics['units']), 'subtitle' => 'Non-disposed stock', 'icon' => 'package', 'iconClass' => 'bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400'],
+            ['title' => 'Available', 'value' => number_format($metrics['available']), 'subtitle' => 'Ready for assignment', 'icon' => 'package-check', 'iconClass' => 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400'],
+            ['title' => 'Assigned', 'value' => number_format($metrics['assigned']), 'subtitle' => 'Currently in use', 'icon' => 'user-check', 'iconClass' => 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'],
+            ['title' => 'Low Stock Categories', 'value' => number_format($metrics['lowStock']), 'subtitle' => 'Three units or fewer', 'icon' => 'triangle-alert', 'iconClass' => 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400'],
+            ['title' => 'Inventory Value', 'value' => 'PHP ' . number_format($metrics['value'], 2), 'subtitle' => 'Recorded value', 'icon' => 'coins', 'iconClass' => 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400'],
+        ];
+    @endphp
+
+    <x-cards.kpi-summary :metrics="$kpiMetrics" />
 
     <div class="mt-6">
         <x-cards.base-card title="Stock by Category" subtitle="Compare total, available, and assigned units">

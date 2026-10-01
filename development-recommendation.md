@@ -1,98 +1,103 @@
-# DNHS Inventory Management System - Next Development Recommendations
+<!-- ## Work Breakdown: Reliable Follow-Up Questions
 
-Scope: local development only (no deployment/CI concerns in this phase).
+**Goal:** The assistant keeps track of the current topic, understands common follow-ups, and asks instead of guessing when meaning is unclear.
 
-## Current State
+1. **Agree on supported follow-ups**
+   - Cover clarification choices: “the first one,” category, serial number, or inventory ID.
+   - Cover follow-up questions: “where is it?”, “how many are available?”, “why?”, and “what about paper?”
+   - Define which messages start a new topic.
+   - **Done when:** There’s an agreed list of examples and expected responses.
 
-- **Done (committed):** Auth, role-based dashboards (Administrator, Property Custodian, End User), user management with bulk generation and PDF account slips, inventory stock-in, requests/assignments/transfers, partial AI Assistant.
-- **In progress (uncommitted, working tree):** School Head role, Admin dashboard charts, AI Assistant improvements, inventory edit/update/delete, End User dashboard, mobile nav, `.github/` (agents/prompts/skills), new feature tests.
-- **Two blockers exist** before any new feature work can proceed safely: the test suite is red and multiple security/correctness gaps remain open.
+2. **Define what conversation memory must retain**
+   - Keep the original question’s purpose, selected item or request, filters, and clarification choices.
+   - Keep it scoped to the signed-in user and expire it after a reasonable period.
+   - **Done when:** Each supported follow-up has enough context to continue accurately.
 
-## Phase 0 - Stabilize the Test Suite (do first)
+3. **Handle clarification replies consistently**
+   - Interpret numbered choices and item details against the candidates the assistant actually showed.
+   - If a reply matches one candidate, select it and continue the original question.
+   - If it matches multiple or none, ask again rather than switching questions silently.
+   - **Done when:** A clarification can’t accidentally turn into an unrelated answer. -->
 
-**Blocker:** `database/migrations/2026_08_10_000004_add_inventory_tracking_fields_to_inventory_table.php:38` executes raw MySQL `SHOW INDEX FROM inventory WHERE Key_name = ?`, which fails on the SQLite in-memory test database (`SQLSTATE[HY000]: General error: 1 near "SHOW"`). This breaks every `RefreshDatabase` test. Current run: 15 failed / 9 passed.
+<!-- 4. **Interpret follow-ups against the current topic**
+   - Recognize common short references such as “it,” “those,” “why?”, and “what about paper?”
+   - Apply the new request to the remembered topic and item.
+   - Clear or replace memory when the user clearly changes topics.
+   - **Done when:** Supported follow-ups continue the intended conversation, while new questions start cleanly. -->
 
-Steps:
+5. **Keep answers grounded and role-safe**
+   - Recheck permissions on every message.
+   - Fetch current facts from the database; don’t rely on old answer text.
+   - Ask for clarification if the remembered reference is no longer unique.
+   - **Done when:** Follow-ups never expose unauthorized data or invent missing facts.
 
-1. Replace the raw `SHOW INDEX` guard with driver-safe index detection (`Schema::hasIndex()`, falling back to `PRAGMA index_list` for sqlite / `SHOW INDEX` for mysql) while preserving the `unique()` index creation.
-2. Run `./vendor/bin/pest` and fix the remaining failures.
-3. Add a regression test that runs the full migration set on SQLite so this cannot recur.
+6. **Add focused conversation tests**
+   - Test successful selections, “first one,” unclear selections, common follow-ups, topic changes, expired memory, and role restrictions.
+   - Verify that ambiguous messages prompt clarification instead of returning a different answer.
+   - **Done when:** The tests cover the agreed examples and existing assistant tests still pass.
 
-Note: `pdo_sqlite` is confirmed enabled, so the suite can run locally.
+7. **Roll out gradually**
+   - Start with the most common inventory follow-ups.
+   - Review real usage and add new phrases only when their intended behavior is clear.
+   - **Done when:** New follow-up types are supported by examples and tests before release.
 
-## Phase 1 - Security Hardening
+The main implementation areas are the conversation handling in `AiAssistantController.php`, question interpretation in `InventoryQuestionRouter.php`, and clarification/context logic in `InventoryAnswerService.php`.
 
-The findings in `recommendation.md` were verified against the working tree. A few are already patched in uncommitted code (e.g., End User transfer recipients must be active End Users). Rework against `recommendation.md` and the committed baseline:
 
-| # | Severity | Fix | Files |
-|---|----------|-----|-------|
-| 1 | High | Only allow transfers when the user is the current possessor (`target_user_id` = auth id, status `approved`/`accepted`); remove the requester bypass | `app/Http/Controllers/EndUserController.php:325-334` |
-| 2 | High | Transfer recipient must be an active End User and not the requester; verify existing patch and cover with tests | `app/Http/Controllers/EndUserController.php:342-352`, `tests/Feature/EndUserRequestTest.php` |
-| 3 | High | Availability and count queries must use `status = 'available'` only | `app/Http/Controllers/EndUserController.php:177-186, 326-333` |
-| 4 | Medium | Block self-demotion/deactivation of an Administrator and prevent disabling/demoting the last active Administrator | `app/Http/Controllers/UserController.php:135-159` |
-| 5 | Medium | Explicitly decide and enforce the policy on creating Administrator accounts via store/generate-users; add a regression test documenting intent | `app/Http/Controllers/UserController.php:66-133` |
-| 6 | Medium | Stop loading `$allUsers` wholesale on the users-management page | `app/Http/Controllers/UserController.php:61` |
-| 7 | Low | Use `lockForUpdate()` and re-check the pending status inside a transaction when accepting a transfer | `app/Http/Controllers/EndUserController.php:374-412` |
 
-Tests: expand `tests/Feature/EndUserRequestTest.php` (recipient role validation, ownership of transferred item, unavailable stock) and add `tests/Feature/AdminUserGuardTest.php` (self-demotion, last-admin protection, privileged account creation, export authorization).
 
-## Phase 2 - New Inventory Features
 
-Proposed in dependency order. All follow the CLAUDE.md invariants: database transactions, never-negative stock, auditable transaction history.
 
-1. **Stock movement / audit ledger** - new `stock_movements` table (or a `type` column on `transactions`: `stock_in`, `assigned`, `transferred`, `returned`, `disposed`, `adjustment`). Every stock change writes a row. Replaces the ad-hoc `Inventory::decrement()` calls in `PropertyCustodianController` and `EndUserController`.
-2. **End User returns** - return request from an assigned item, custodian approval, quantity restored to `available`, audited `returned` entry. Mirrors the existing 3-step transfer flow.
-3. **Disposal / write-off** - custodian marks an item as `disposed` with a reason; blocked for `assigned` items; audited. Reconciles statuses already referenced in dashboards.
-4. **Category management** - CRUD UI (name + `requires_serial_number`) for Administrator/Property Custodian; prevent deleting categories that still have inventory.
-5. **Report PDF export** - reuse Dompdf (already used for account slips) to export Property Custodian and School Head reports.
-6. **Low-stock alerts** - surface critical stock items as alerts on dashboards; the underlying queries already exist in dashboards and the AI service.
+Implement work breakdown item 5: keep inventory assistant follow-up answers grounded and role-safe.
 
-Each feature gets Pest tests: request flow, authorization, and stock invariants.
+Files:
+- app/Http/Controllers/AiAssistantController.php
+- app/Services/InventoryAnswerService.php
+- app/Services/AiCapabilityPolicy.php
+- tests/Feature/AiAssistantTest.php
+- tests/Feature/AiAssistantRoleScopeTest.php
+- docs/ai-follow-up-behavior.md
 
-## Phase 3 - Finalize In-Flight Uncommitted Work
+Requirements:
+- Recheck the signed-in user’s permission for every message before protected data is queried or returned.
+- Reload current inventory data from the database for each follow-up; never treat saved context or previous answer text as current facts.
+- If the referenced record is missing, stale, disposed, ambiguous, or no longer authorized, discard the context and ask a short clarification.
+- Never guess or expose unauthorized data. Keep external AI explanations limited to authorized, database-derived facts.
 
-The working tree is 2 commits ahead of `origin/main` (~1,070 lines changed): School Head role, Admin dashboard charts, AI Assistant improvements, inventory edit/delete, End User dashboard, mobile nav, and new tests.
+Notes:
+Build on the existing per-user context and role policy. Keep changes focused. Add tests for changed permissions, stale or ambiguous references, fresh database values, and denial before data access. Run relevant assistant tests and report unrelated failures without fixing them.
 
-- Run `./vendor/bin/pint` and fix violations before continuing.
-- Commit checkpoints after each phase (only when explicitly requested).
+Final response:
+No filler. Give a brief change summary and concise verification tips, including test commands and key scenarios.
 
-## Decisions Needed
 
-- **`.github/` contents:** currently holds opencode-style `agents/`, `prompts/`, and `skills/` directories. Decide whether to keep, move, or remove them from the repo.
-- **Administrator account creation policy (Phase 1, item 5):** explicitly restrict or intentionally allow additional Administrator accounts.
 
-## Execution Order
 
-Phase 0 (tests green) -> Phase 1 (security) -> Phase 2 (features) -> Phase 3 (finalize) with a commit checkpoint after each phase.
 
-## Commands
 
-```bash
-./vendor/bin/pest
-./vendor/bin/pint
-php artisan test
-```
+Implement work breakdown item 6: add focused tests for inventory assistant conversations.
 
-I’ll continue from the failed test run: first verify the End User render regression and the assignment-owner regression after the Blade fix, then address only failures caused by our recent changes.
+Files:
+- tests/Feature/AiAssistantTest.php
+- tests/Feature/AiAssistantRoleScopeTest.php
+- tests/Unit/AiAssistantControllerTest.php, only if controller-specific coverage is needed
 
-Ran terminal command: & 'C:\xampp\php\php.exe' artisan test tests/Feature/EndUserRequestTest.php --filter="end user sees both assigned and requested|custodian-created assignment records"
+Requirements:
+- Test valid clarification choices: “the first one,” category, serial number, and inventory ID.
+- Test invalid or ambiguous choices ask again and never select an unrelated item.
+- Test common follow-ups: “Where is it?”, “How many are available?”, “Why?”, and “What about paper?”
+- Test topic changes, missing/expired context, current database values, per-user isolation, and role restrictions.
+- Assert unauthorized follow-ups are denied before protected inventory data is queried.
+- Use real database state. Confirm factual answers do not call the external AI provider.
 
-Both focused checks pass, including the End User page render and the corrected target-user assignment. I’m doing the final Blade compilation and diagnostics check now; the full End User suite’s remaining redirect failures are outside this fix.
+Notes:
+Add tests for gaps in the existing coverage; avoid duplicating tests that already prove the behavior. Change production code only to fix a defect revealed by a test, and keep that fix narrowly scoped.
 
-Ran terminal command: & 'C:\xampp\php\php.exe' artisan view:cache
+Verification:
+Run:
+- `php artisan test tests/Feature/AiAssistantTest.php --compact`
+- `php artisan test tests/Feature/AiAssistantRoleScopeTest.php --compact`
+- `php artisan test tests/Unit/AiAssistantControllerTest.php --compact`
 
-Checked , , , 4 problems found
-
-Completed inconsistency 1.
-
-- Custodian-created assignments now record the target End User correctly.
-- Normal End User requests still assign to the requesting End User.
-- Added regression coverage in `EndUserRequestTest.php`.
-- Fixed the End User spinner Blade binding issue.
-
-Validation:
-
-- Focused tests: **2 passed**
-- Blade cache: **passed**
-- Controller and view diagnostics: **no errors**
-- Test-file property warnings are existing IDE false positives.
+Final response:
+No filler. Briefly list test coverage added, commands run, and any failures.

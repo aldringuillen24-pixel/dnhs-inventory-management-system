@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AssignmentRequest;
 use App\Models\Category;
 use App\Models\Inventory;
+use App\Models\StockMovement;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserAuditLog;
@@ -58,6 +59,62 @@ class SchoolHeadController extends Controller
             ->where('status', '!=', 'disposed')
             ->get();
 
+        $lowStockCount = $inventory
+            ->where('status', 'available')
+            ->groupBy(fn ($item) => $item->item_name . '|' . $item->category_id)
+            ->filter(fn ($items) => $items->sum('quantity') <= 3)
+            ->count();
+
+        $today = now()->startOfDay();
+        $approachingLifespanCount = $inventory
+            ->filter(fn ($item) => $item->expected_end_date
+                && $item->expected_end_date->gt($today)
+                && $item->expected_end_date->lte($today->copy()->addYear()))
+            ->sum('quantity');
+        $expiredLifespanCount = $inventory
+            ->filter(fn ($item) => $item->expected_end_date && $item->expected_end_date->lte($today))
+            ->sum('quantity');
+
+        $statusData = $inventory
+            ->groupBy('status')
+            ->map(fn ($items, $status) => [
+                'label' => ucfirst(str_replace('_', ' ', (string) $status)),
+                'quantity' => (int) $items->sum('quantity'),
+            ])
+            ->values();
+
+        $conditionData = collect([
+            ['label' => 'Damaged', 'value' => (int) $inventory->where('status', 'damaged')->sum('quantity')],
+            ['label' => 'Under Repair or Maintenance', 'value' => (int) $inventory->whereIn('status', ['under_repair', 'under_maintenance'])->sum('quantity')],
+            ['label' => 'Lost', 'value' => (int) $inventory->where('status', 'lost')->sum('quantity')],
+            ['label' => 'Disposal Review', 'value' => (int) $inventory->whereIn('status', ['ready_to_dispose', 'disposal_review'])->sum('quantity')],
+        ]);
+
+        $custodianIds = User::query()
+            ->whereHas('role', fn ($query) => $query->where('role_name', 'Property Custodian'))
+            ->pluck('id');
+        $pendingRequests = AssignmentRequest::query()
+            ->whereIn('status', [
+                'waiting for approval',
+                'waiting for transfer approval',
+                'waiting for custodian approval',
+            ])
+            ->get(['status', 'target_user_id']);
+        $pendingRequestData = [
+            [
+                'label' => 'Item Requests',
+                'value' => $pendingRequests->filter(fn ($request) => $request->status === 'waiting for approval' && $custodianIds->contains($request->target_user_id))->count(),
+            ],
+            [
+                'label' => 'Transfer Requests',
+                'value' => $pendingRequests->filter(fn ($request) => $request->status === 'waiting for transfer approval' || ($request->status === 'waiting for approval' && ! $custodianIds->contains($request->target_user_id)))->count(),
+            ],
+            [
+                'label' => 'Return Requests',
+                'value' => $pendingRequests->where('status', 'waiting for custodian approval')->count(),
+            ],
+        ];
+
         $categoryData = Category::query()
             ->with(['inventoryItems' => fn ($query) => $query->where('status', '!=', 'disposed')])
             ->get()
@@ -69,12 +126,34 @@ class SchoolHeadController extends Controller
             ->sortByDesc('quantity')
             ->values();
 
-        $recentTransactions = Transaction::query()
-            ->with(['item:item_id,item_name', 'user:id,first_name,last_name'])
-            ->latest('transaction_date')
-            ->latest('id')
-            ->limit(6)
+        $recentActivity = StockMovement::query()
+            ->with([
+                'inventory:item_id,item_name',
+                'user:id,first_name,last_name',
+            ])
+            ->latest()
+            ->limit(8)
             ->get();
+
+        $recentActivity = $recentActivity->map(function ($movement) {
+            $type = match ($movement->movement_type) {
+                'stock_in' => 'Stock In',
+                'stock_out' => 'Stock Out',
+                'assignment' => 'Assignment',
+                'transfer' => 'Transfer',
+                'returned', 'return' => 'Return',
+                default => ucwords(str_replace('_', ' ', $movement->movement_type)),
+            };
+
+            return [
+                'date' => $movement->created_at,
+                'type' => $type,
+                'item' => $movement->inventory?->item_name ?? 'Inventory item',
+                'quantity' => abs((int) $movement->quantity),
+                'user' => $movement->user?->full_name ?? 'System',
+                'remarks' => $movement->notes ?: 'Inventory record updated',
+            ];
+        });
 
         return view('pages.schoolHead.dashboard', [
             'title' => 'School Head Dashboard',
@@ -83,14 +162,17 @@ class SchoolHeadController extends Controller
                 'availableUnits' => (int) $inventory->where('status', 'available')->sum('quantity'),
                 'assignedUnits' => (int) $inventory->where('status', 'assigned')->sum('quantity'),
                 'totalValue' => (float) $inventory->sum(fn ($item) => $item->quantity * $item->unit_cost),
-                'pendingRequests' => AssignmentRequest::whereIn('status', [
-                    'waiting for approval',
-                    'waiting for transfer approval',
-                    'waiting for custodian approval',
-                ])->count(),
+                'lowStockItems' => $lowStockCount,
+                'attentionItems' => (int) $inventory->whereIn('status', ['under_inspection', 'under_maintenance', 'ready_to_dispose'])->sum('quantity'),
+                'approachingLifespan' => (int) $approachingLifespanCount,
+                'expiredLifespan' => (int) $expiredLifespanCount,
+                'pendingRequests' => $pendingRequests->count(),
             ],
             'categoryData' => $categoryData,
-            'recentTransactions' => $recentTransactions,
+            'statusData' => $statusData,
+            'conditionData' => $conditionData,
+            'pendingRequestData' => $pendingRequestData,
+            'recentActivity' => $recentActivity,
         ]);
     }
 

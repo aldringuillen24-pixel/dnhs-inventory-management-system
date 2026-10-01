@@ -20,12 +20,6 @@
 @section('content')
     <div x-data="{
         activeTab: @js($activeWorkspace),
-        allSearch: @js($inventoryFilters['search']),
-        allCategory: @js($inventoryFilters['category']),
-        allStatus: @js($inventoryFilters['status']),
-        allCondition: @js($inventoryFilters['condition']),
-        submittedSearch: @js($inventoryFilters['search']),
-        submittedCategory: @js($inventoryFilters['category']),
         availableSearch: '',
         assignedSearch: '',
         underMaintenanceSearch: '',
@@ -39,6 +33,13 @@
         maintenanceBase: @js(url('/property-custodian/inventory')),
         repairItemId: '',
         repairBase: @js(url('/property-custodian/inventory')),
+        receiveReturnAssignments: [],
+        selectedReceiveReturnTransactionIds: [],
+        openReceiveReturnModal(assignments) {
+            this.receiveReturnAssignments = assignments;
+            this.selectedReceiveReturnTransactionIds = [];
+            this.$dispatch('open-modal', 'receive-return-modal');
+        },
         openMaintenance(itemId) {
             this.maintenanceItemId = String(itemId);
             this.$dispatch('open-modal', 'send-maintenance');
@@ -47,35 +48,16 @@
             this.repairItemId = String(itemId);
             this.$dispatch('open-modal', 'repair-modal');
         },
-        applyFilters() {
-            const params = new URLSearchParams();
-            const search = (this.allSearch || '').trim();
-            this.submittedSearch = search;
-            this.submittedCategory = this.allCategory || '';
-            params.set('workspace', 'all');
-            if (search) params.set('search', search);
-            if (this.allCategory) params.set('category', this.allCategory);
-            if (this.allStatus) params.set('status', this.allStatus);
-            if (this.allCondition) params.set('condition', this.allCondition);
-            window.location.href = `${window.location.pathname}?${params.toString()}`;
-        },
         switchWorkspace(workspace) {
             const params = new URLSearchParams(window.location.search);
             params.set('workspace', workspace);
             params.delete('all_page');
+            params.delete('search');
+            params.delete('category');
             params.delete('status');
             params.delete('condition');
             ['available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose', 'disposed'].forEach((status) => params.delete(`${status}_page`));
             window.location.href = `${window.location.pathname}?${params.toString()}`;
-        },
-        init() {
-            const searchInput = [...this.$root.querySelectorAll('input')].find((input) => input.placeholder && input.placeholder.includes('Search inventory'));
-            searchInput?.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter') {
-                    event.preventDefault();
-                    this.applyFilters();
-                }
-            });
         },
         chooseScanFile(event) {
             const file = event.target.files[0];
@@ -83,14 +65,9 @@
             this.scanFile = file;
             this.extractedName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
         },
-        matches(search, row, filterCategory = 'false') {
-            const queryValue = filterCategory === 'true' ? this.submittedSearch : search;
-            const categoryValue = filterCategory === 'true' ? this.submittedCategory : this.allCategory;
-            const query = (queryValue || '').toLowerCase().trim();
-            return (!query || row.dataset.search.includes(query)) && (filterCategory !== 'true' || !categoryValue || row.dataset.category === categoryValue);
-        },
-        hasMatches(search, panel, filterCategory = 'false') {
-            return [...document.querySelectorAll('[data-inventory-panel]')].filter((row) => row.dataset.inventoryPanel === panel).some((row) => this.matches(search, row, filterCategory));
+        matches(search, row) {
+            const query = (search || '').toLowerCase().trim();
+            return !query || row.dataset.search.includes(query);
         },
         qrScannerMode: 'scan',
         qrResult: null,
@@ -358,57 +335,15 @@
         </div>
 
         {{-- 2. KPI CARD --}}
-        <div class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs dark:border-gray-800 dark:bg-gray-900">
-            <div class="grid md:grid-cols-4">
-            {{-- Total Inventory Units --}}
-            <div class="flex items-center gap-4 p-4">
-                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-brand-600 dark:bg-blue-500/10 dark:text-brand-400">
-                    <i data-lucide="package" class="h-5 w-5"></i>
-                </div>
-                <div class="min-w-0 flex-1">
-                    <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Inventory Units</p>
-                    <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($inventoryMetrics['total']) }}</p>
-                    <p class="truncate text-xs text-gray-500 dark:text-gray-400">Non-disposed inventory</p>
-                </div>
-            </div>
-
-            {{-- Available Units --}}
-            <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
-                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
-                    <i data-lucide="package-check" class="h-5 w-5"></i>
-                </div>
-                <div class="min-w-0 flex-1">
-                    <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Available Units</p>
-                    <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($inventoryMetrics['available']) }}</p>
-                    <p class="truncate text-xs text-gray-500 dark:text-gray-400">Ready for assignment</p>
-                </div>
-            </div>
-
-            {{-- Assigned Units --}}
-            <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
-                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
-                    <i data-lucide="user-check" class="h-5 w-5"></i>
-                </div>
-                <div class="min-w-0 flex-1">
-                    <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Assigned Units</p>
-                    <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($inventoryMetrics['assigned']) }}</p>
-                    <p class="truncate text-xs text-gray-500 dark:text-gray-400">Currently assigned</p>
-                </div>
-            </div>
-
-            {{-- Items Needing Attention --}}
-            <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
-                <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
-                    <i data-lucide="alert-triangle" class="h-5 w-5"></i>
-                </div>
-                <div class="min-w-0 flex-1">
-                    <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Items Needing Attention</p>
-                    <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($inventoryMetrics['attention']) }}</p>
-                    <p class="truncate text-xs text-gray-500 dark:text-gray-400">Inspection or maintenance</p>
-                </div>
-            </div>
-        </div>
-        </div>
+        @php
+            $inventoryKpiMetrics = [
+                ['title' => 'Total Inventory Units', 'value' => number_format($inventoryMetrics['total']), 'subtitle' => 'Non-disposed inventory', 'icon' => 'package', 'iconClass' => 'bg-blue-50 text-brand-600 dark:bg-blue-500/10 dark:text-brand-400', 'accentClass' => 'border-l-brand-500'],
+                ['title' => 'Available Units', 'value' => number_format($inventoryMetrics['available']), 'subtitle' => 'Ready for assignment', 'icon' => 'package-check', 'iconClass' => 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400', 'accentClass' => 'border-l-emerald-500'],
+                ['title' => 'Assigned Units', 'value' => number_format($inventoryMetrics['assigned']), 'subtitle' => 'Currently assigned', 'icon' => 'user-check', 'iconClass' => 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400', 'accentClass' => 'border-l-indigo-500'],
+                ['title' => 'Items Needing Attention', 'value' => number_format($inventoryMetrics['attention']), 'subtitle' => 'Inspection or maintenance', 'icon' => 'alert-triangle', 'iconClass' => 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400', 'accentClass' => 'border-l-amber-500'],
+            ];
+        @endphp
+        <x-cards.kpi-summary :metrics="$inventoryKpiMetrics" />
 
         {{-- 3. STATUS NAVIGATION & 4. FILTER TOOLBAR CARD --}}
         <div class="rounded-xl border border-gray-200 bg-white shadow-xs dark:border-gray-800 dark:bg-gray-900">
@@ -495,68 +430,9 @@
                 </div>
             </div>
 
-            {{-- 4. FILTER TOOLBAR (Single horizontal bar) --}}
-            <div class="p-4 sm:p-5">
-                <div class="flex flex-wrap items-center gap-3">
-                    {{-- Search --}}
-                    <div class="relative min-w-[200px] flex-1 sm:max-w-xs">
-                        <i data-lucide="search" class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"></i>
-                        <input x-model="allSearch" type="search" placeholder="Search inventory..."
-                            @keydown.enter.prevent="applyFilters()"
-                            class="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
-                    </div>
-
-                    {{-- Category --}}
-                    <div class="min-w-[140px]">
-                        <select x-model="allCategory"
-                            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                            <option value="">All Categories</option>
-                            @foreach ($categories as $category)
-                                <option value="{{ $category->category_id }}">{{ $category->category_name }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-
-                    {{-- Status --}}
-                    <div class="min-w-[130px]">
-                        <select x-model="allStatus"
-                            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                            <option value="">All Statuses</option>
-                            <option value="available">Available</option>
-                            <option value="assigned">Assigned</option>
-                            <option value="under_maintenance">Under Maintenance</option>
-                            <option value="under_inspection">Under Inspection</option>
-                            <option value="ready_to_dispose">Ready to Dispose</option>
-                            <option value="disposed">Disposed</option>
-                        </select>
-                    </div>
-
-                    {{-- Condition --}}
-                    <div class="min-w-[130px]">
-                        <select x-model="allCondition"
-                            class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                            <option value="">All Conditions</option>
-                            <option value="good">Good Condition</option>
-                            <option value="fair">Fair Condition</option>
-                            <option value="poor">Needs Repair / Damaged</option>
-                        </select>
-                    </div>
-
-                    {{-- Buttons --}}
-                    <button type="button" @click="applyFilters()"
-                        class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-xs hover:bg-brand-600 focus:outline-none">
-                        <span>Apply</span>
-                    </button>
-                    <button type="button" @click="allSearch = ''; allCategory = ''; allStatus = ''; allCondition = ''; applyFilters()"
-                        class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">
-                        <span>Clear</span>
-                    </button>
-                </div>
-            </div>
-
-            {{-- 5. INVENTORY TABLE (Dominant Section) --}}
+            {{-- 4. INVENTORY TABLE (Dominant Section) --}}
             {{-- ALL WORKSPACE TABLE --}}
-            <div x-show="activeTab === 'all'" x-cloak class="px-4 pb-4 sm:px-5 sm:pb-5">
+            <div x-show="activeTab === 'all'" x-cloak class="px-4 pt-4 pb-4 sm:px-5 sm:pb-5">
                 <section class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
                 <div class="flex items-center justify-between bg-gray-50/70 px-4 py-3 dark:bg-gray-800/40 sm:px-6">
                     <h2 class="text-base font-semibold text-gray-900 dark:text-white">Inventory Records</h2>
@@ -565,12 +441,13 @@
                     </p>
                 </div>
 
-                <div class="max-h-[36rem] overflow-y-auto overflow-x-auto">
+                <div class="max-h-[28rem] overflow-y-auto overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-800 dark:text-gray-200">
                         <thead class="sticky top-0 z-10 bg-gray-50 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                             <tr>
                                 <th class="px-4 py-3">Asset</th>
                                 <th class="px-4 py-3">Category</th>
+                                <th class="px-4 py-3">Serial Number</th>
                                 <th class="px-4 py-3">Qty</th>
                                 <th class="px-4 py-3">Unit / ICS</th>
                                 <th class="px-4 py-3">Status</th>
@@ -587,9 +464,8 @@
                                 @if ($editSerialNumbers->isEmpty() && $source)
                                     @php($editSerialNumbers = collect($editItemDetails->get($source->item_id, [])['serialNumbers'] ?? []))
                                 @endif
-                                @php($searchable = strtolower(implode(' ', [$inventoryItem->item_name, $inventoryItem->unit, $inventoryItem->category?->category_name ?? '', $inventoryItem->ics_no ?? ''])))
-
-                                <tr x-show="matches(allSearch, $el, 'true')" data-inventory-panel="all" data-search="{{ $searchable }}" data-category="{{ $inventoryItem->category_id }}" class="hover:bg-gray-50/80 dark:hover:bg-gray-800/60 transition-colors">
+                                @php($visibleSerialNumbers = $editSerialNumbers->take(2))
+                                <tr class="hover:bg-gray-50/80 dark:hover:bg-gray-800/60 transition-colors">
                                     {{-- Asset --}}
                                     <td class="px-4 py-3">
                                         <div class="font-semibold text-gray-900 dark:text-white">{{ $inventoryItem->item_name }}</div>
@@ -609,8 +485,27 @@
                                     {{-- Category --}}
                                     <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">{{ $inventoryItem->category?->category_name ?? 'Uncategorized' }}</td>
 
+                                    {{-- Serial Number --}}
+                                    <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+                                        @if ($inventoryItem->category?->requires_serial_number && $editSerialNumbers->isNotEmpty())
+                                            <div class="max-w-[12rem] break-all font-mono text-[11px] leading-4" title="{{ $editSerialNumbers->implode(', ') }}" aria-label="Serial numbers: {{ $editSerialNumbers->implode(', ') }}">
+                                                {{ $visibleSerialNumbers->implode(', ') }}
+                                                @if ($editSerialNumbers->count() > 2)
+                                                    <span class="whitespace-nowrap text-gray-500">+{{ $editSerialNumbers->count() - 2 }} more</span>
+                                                @endif
+                                            </div>
+                                        @else
+                                            <span class="text-gray-400">—</span>
+                                        @endif
+                                    </td>
+
                                     {{-- Qty --}}
-                                    <td class="px-4 py-3 font-semibold text-gray-900 dark:text-white tabular-nums">{{ number_format($inventoryItem->quantity) }}</td>
+                                    <td class="px-4 py-3 font-semibold text-gray-900 dark:text-white tabular-nums">
+                                        <div>{{ number_format($inventoryItem->status === 'assigned' ? ($inventoryItem->assigned_quantity ?? 0) : $inventoryItem->quantity) }}</div>
+                                        @if ($inventoryItem->status === 'available' && ($inventoryItem->assigned_quantity ?? 0) > 0)
+                                            <div class="text-[11px] font-normal text-gray-500 dark:text-gray-400">{{ number_format($inventoryItem->assigned_quantity) }} assigned</div>
+                                        @endif
+                                    </td>
 
                                     {{-- Unit / ICS --}}
                                     <td class="px-4 py-3 text-xs text-gray-700 dark:text-gray-300">
@@ -661,6 +556,8 @@
                                                 lifespan_status: @js(str_replace('_', ' ', $inventoryItem->lifespan_status ?? 'healthy')),
                                                 lifespan_percentage: @js($inventoryItem->lifespan_remaining_percentage ?? 100),
                                                 assigned_to: @js($source?->assignedTo?->full_name ?? 'None (In stockroom)'),
+                                                building: @js($inventoryItem->building ?? 'Not recorded'),
+                                                room: @js($inventoryItem->room ?? 'Not recorded'),
                                                 serial_numbers: @js($editSerialNumbers->all()),
                                                 qr_code: @js($source?->qr_code ?? '')
                                             })" class="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-2xs hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
@@ -709,7 +606,6 @@
                                                                     <label for="edit-description-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300 text-start">Item Description</label>
                                                                     <textarea id="edit-description-{{ $source?->item_id }}" name="description" rows="3" placeholder="Enter item description or specifications" class="h-24 w-full resize-none rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">{{ old('description', $inventoryItem->description ?? $source?->description) }}</textarea>
                                                                 </div>
-
                                                                 <div>
                                                                     <label for="edit-lifespan-{{ $source?->item_id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300 text-start">Expected lifespan (years)</label>
                                                                     <input id="edit-lifespan-{{ $source?->item_id }}" name="lifespan_years" value="{{ old('lifespan_years', $inventoryItem->lifespan_years ?? $source?->lifespan_years) }}" type="number" min="1" max="65535" placeholder="Optional category default" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
@@ -797,7 +693,7 @@
                                                         @csrf
                                                         @method('DELETE')
 
-                                                        <div class="rounded-md border border-red-100 bg-red-50/60 p-3 dark:border-red-900/30 dark:bg-red-950/20">
+                                                        <div class="rounded-md border border-red-100 bg-red-50/60 p-3 dark:border-red-900/30 dark:bg-red-950/20 text-start">
                                                             <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ $inventoryItem->item_name }}</p>
                                                             <p class="text-xs text-gray-500 dark:text-gray-400">
                                                                 Category: {{ $inventoryItem->category?->category_name ?? 'Uncategorized' }} · Status: <span class="capitalize">{{ str_replace('_', ' ', $inventoryItem->status) }}</span>
@@ -811,7 +707,7 @@
                                                                     <button type="button" @click="toggleAll()" class="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400" x-text="selectedIds.length === allIds.length ? 'Deselect All' : 'Select All'"></button>
                                                                 </div>
 
-                                                                <div class="max-h-48 space-y-2 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+                                                                <div class="max-h-48 space-y-2 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-2.5 dark:border-gray-700 dark:bg-gray-800/50 text-start">
                                                                     @foreach ($deletableItems as $subItem)
                                                                         <label class="flex items-center gap-2.5 rounded px-2 py-1.5 hover:bg-white dark:hover:bg-gray-700/60">
                                                                             <input type="checkbox" name="selected_item_ids[]" value="{{ $subItem->item_id }}" x-model="selectedIds" class="rounded border-gray-300 text-red-600 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700" />
@@ -831,7 +727,7 @@
                                                             </p>
                                                         @endif
 
-                                                        <p class="text-xs font-medium text-red-600 dark:text-red-400">This action cannot be undone.</p>
+                                                        <p class="text-xs font-medium text-red-600 dark:text-red-40 0 text  ">This action cannot be undone.</p>
 
                                                         <div class="flex justify-end gap-3 pt-2">
                                                             <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button>
@@ -875,7 +771,7 @@
             {{-- SPECIFIC STATUS WORKSPACE TABLES --}}
             @foreach ($statusCollections as $status => $rows)
                 @php($searchModel = match ($status) { 'under_maintenance' => 'underMaintenanceSearch', 'under_inspection' => 'underInspectionSearch', 'ready_to_dispose' => 'readyToDisposeSearch', default => $status . 'Search' })
-                <div x-show="activeTab === '{{ $status }}'" x-cloak class="px-4 pb-4 sm:px-5 sm:pb-5">
+                <div x-show="activeTab === '{{ $status }}'" x-cloak class="px-4 pt-4 pb-4 sm:px-5 sm:pb-5">
                         <section class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
                     <div class="flex items-center justify-between bg-gray-50/70 px-4 py-3 dark:bg-gray-800/40 sm:px-6">
                         <div>
@@ -885,7 +781,7 @@
                         <input x-model="{{ $searchModel }}" type="search" placeholder="Search {{ strtolower($statusLabels[$status]) }}..." class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:w-64" />
                     </div>
 
-                    <div class="max-h-[36rem] overflow-y-auto overflow-x-auto">
+                    <div class="max-h-[28rem] overflow-y-auto overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200 text-left text-sm text-gray-700 dark:divide-gray-800 dark:text-gray-200">
                             <thead class="sticky top-0 z-10 bg-gray-50 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                                 <tr>
@@ -904,6 +800,7 @@
 
                                     <th class="px-4 py-3">Asset</th>
                                     <th class="px-4 py-3">Category</th>
+                                    <th class="px-4 py-3">Serial Number</th>
                                     <th class="px-4 py-3">Qty</th>
                                     <th class="px-4 py-3">Unit / ICS</th>
                                     <th class="px-4 py-3">Unit Cost</th>
@@ -915,11 +812,17 @@
                             <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
                                 @forelse ($rows as $inventoryItem)
                                     @php($source = ($inventoryItem->sourceItems ?? collect())->first() ?: \App\Models\Inventory::find($inventoryItem->source_item_id))
+                                    @php($receiveReturnAssignments = ($inventoryItem->sourceItems ?? collect())->flatMap(fn ($sourceItem) => $sourceItem->receive_return_assignments ?? collect())->values())
+                                    @php($serialNumbers = ($inventoryItem->sourceItems ?? collect())->pluck('serial_number')->filter()->values())
+                                    @if ($serialNumbers->isEmpty() && $source?->serial_number)
+                                        @php($serialNumbers = collect([$source->serial_number]))
+                                    @endif
+                                    @php($visibleSerialNumbers = $serialNumbers->take(2))
                                     @php($searchable = strtolower(implode(' ', [$inventoryItem->item_name, $inventoryItem->unit, $inventoryItem->category?->category_name ?? '', $inventoryItem->ics_no ?? ''])))
 
                                     <tr x-show="matches({{ $searchModel }}, $el)" data-inventory-panel="{{ $status }}" data-search="{{ $searchable }}" class="hover:bg-gray-50/80 dark:hover:bg-gray-800/60 transition-colors">
                                         @if ($status === 'assigned')
-                                            <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">{{ $source?->assignedTo?->full_name ?? 'Recorded assignee' }}</td>
+                                            <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">{{ $source?->active_assignee_summary ?: ($source?->assignedTo?->full_name ?? 'Recorded assignee') }}</td>
                                             <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">{{ $source?->latestAssignment?->transaction_date?->format('M d, Y') ?? 'N/A' }}</td>
                                         @endif
 
@@ -953,8 +856,27 @@
                                         {{-- Category --}}
                                         <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">{{ $inventoryItem->category?->category_name ?? 'Uncategorized' }}</td>
 
+                                        {{-- Serial Number --}}
+                                        <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+                                            @if ($inventoryItem->category?->requires_serial_number && $serialNumbers->isNotEmpty())
+                                                <div class="max-w-[12rem] break-all font-mono text-[11px] leading-4" title="{{ $serialNumbers->implode(', ') }}" aria-label="Serial numbers: {{ $serialNumbers->implode(', ') }}">
+                                                    {{ $visibleSerialNumbers->implode(', ') }}
+                                                    @if ($serialNumbers->count() > 2)
+                                                        <span class="whitespace-nowrap text-gray-500">+{{ $serialNumbers->count() - 2 }} more</span>
+                                                    @endif
+                                                </div>
+                                            @else
+                                                <span class="text-gray-400">—</span>
+                                            @endif
+                                        </td>
+
                                         {{-- Qty --}}
-                                        <td class="px-4 py-3 font-semibold text-gray-900 dark:text-white tabular-nums">{{ number_format($inventoryItem->quantity) }}</td>
+                                        <td class="px-4 py-3 font-semibold text-gray-900 dark:text-white tabular-nums">
+                                            <div>{{ number_format($inventoryItem->status === 'assigned' ? ($inventoryItem->assigned_quantity ?? 0) : $inventoryItem->quantity) }}</div>
+                                            @if ($inventoryItem->status === 'available' && ($inventoryItem->assigned_quantity ?? 0) > 0)
+                                                <div class="text-[11px] font-normal text-gray-500 dark:text-gray-400">{{ number_format($inventoryItem->assigned_quantity) }} assigned</div>
+                                            @endif
+                                        </td>
 
                                         {{-- Unit / ICS --}}
                                         <td class="px-4 py-3 text-xs text-gray-700 dark:text-gray-300">
@@ -991,13 +913,19 @@
                                                     lifespan_status: @js(str_replace('_', ' ', $inventoryItem->lifespan_status ?? 'healthy')),
                                                     lifespan_percentage: @js($inventoryItem->lifespan_remaining_percentage ?? 100),
                                                     assigned_to: @js($source?->assignedTo?->full_name ?? ($status === 'assigned' ? 'Recorded assignee' : 'None (In stockroom)')),
-                                                    serial_numbers: [],
+                                                    serial_numbers: @js($serialNumbers->all()),
                                                     qr_code: @js($source?->qr_code ?? '')
                                                 })" class="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">View</button>
 
                                                 @if ($source?->qr_code)
                                                     <button type="button" @click="openPrintModal({{ $source->item_id }})" title="Print QR Code" class="inline-flex items-center gap-1 rounded-md border border-brand-200 bg-brand-50/50 px-2 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                                                         <i data-lucide="qr-code" class="h-3.5 w-3.5"></i>
+                                                    </button>
+                                                @endif
+
+                                                @if ($receiveReturnAssignments->isNotEmpty())
+                                                    <button type="button" @click="openReceiveReturnModal(@js($receiveReturnAssignments->all()))" class="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700">
+                                                        Receive Return
                                                     </button>
                                                 @endif
 
@@ -1009,10 +937,6 @@
                                                         <button type="button" @click="openMaintenance('{{ $source?->item_id }}')" title="Send this item to maintenance" class="rounded-md bg-orange-500 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-orange-600">Maintenance</button>
                                                     @endif
                                                 @elseif ($status === 'assigned')
-                                                    <form method="POST" action="{{ route('propertyCustodian.inventory.mark-returned', $source?->item_id) }}" class="inline">
-                                                        @csrf
-                                                        <button class="rounded-md bg-green-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-green-700">Receive Return</button>
-                                                    </form>
                                                     <a href="{{ route('propertyCustodian.transactions') }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">Transfer</a>
                                                 @elseif ($status === 'under_maintenance')
                                                     <div x-data="{
@@ -1100,6 +1024,28 @@
             @endforeach
         </div>
 
+        <x-modals.base-modal modalId="receive-return-modal" title="Receive Return" subtitle="Confirm the returned assignment and quantity." maxWidth="max-w-xl">
+            <form method="POST" action="{{ route('propertyCustodian.inventory.receive-return') }}" class="space-y-4">
+                @csrf
+                <div class="space-y-2" role="group" aria-label="Assignments to receive">
+                    <template x-for="assignment in receiveReturnAssignments" :key="assignment.transaction_id">
+                        <label class="flex cursor-pointer items-center justify-between gap-4 rounded-md border border-gray-200 px-3 py-2.5 transition hover:border-brand-400 dark:border-gray-700 dark:hover:border-brand-500">
+                            <span class="min-w-0">
+                                <span class="block truncate text-sm font-medium text-gray-900 dark:text-white" x-text="`${assignment.inventory_item_no || `ID ${assignment.inventory_id}`} · ${assignment.item_name}`"></span>
+                                <span class="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400" x-text="`TX-${String(assignment.transaction_id).padStart(5, '0')}`"></span>
+                            </span>
+                            <input type="checkbox" name="transaction_ids[]" :value="assignment.transaction_id" x-model="selectedReceiveReturnTransactionIds" class="h-4 w-4 shrink-0 rounded border-gray-300 text-brand-600 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800">
+                        </label>
+                    </template>
+                </div>
+
+                <div class="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                    <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button>
+                    <x-common.button-spinner text="Receive Return" loadingText="Recording..." class="text-white" ::disabled="selectedReceiveReturnTransactionIds.length === 0" />
+                </div>
+            </form>
+        </x-modals.base-modal>
+
         {{-- ── IN-PAGE ITEM VIEW MODAL ── --}}
         <x-modals.base-modal modalId="item-view-modal" title="Inventory Item Details" subtitle="Comprehensive asset information and lifecycle overview." maxWidth="max-w-2xl" :closeButton="true">
             <template x-if="viewModalItem">
@@ -1162,6 +1108,14 @@
                                 <div class="flex justify-between">
                                     <span class="text-gray-500">Assigned To:</span>
                                     <span class="font-medium text-gray-900 dark:text-white" x-text="viewModalItem.assigned_to"></span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">Building:</span>
+                                    <span class="font-medium text-gray-900 dark:text-white" x-text="viewModalItem.building"></span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">Room:</span>
+                                    <span class="font-medium text-gray-900 dark:text-white" x-text="viewModalItem.room"></span>
                                 </div>
                                 <div class="flex justify-between">
                                     <span class="text-gray-500">QR Code:</span>
@@ -1446,6 +1400,16 @@
                         <div>
                             <label for="stock-in-description" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Description</label>
                             <textarea id="stock-in-description" name="description" rows="3" placeholder="Enter item description or specifications" class="h-24 w-full resize-none rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">{{ old('description') }}</textarea>
+                        </div>
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label for="stock-in-building" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Building</label>
+                                <input id="stock-in-building" name="building" value="{{ old('building') }}" type="text" maxlength="255" placeholder="Building name" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                            <div>
+                                <label for="stock-in-room" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Room</label>
+                                <input id="stock-in-room" name="room" value="{{ old('room') }}" type="text" maxlength="255" placeholder="Room or storage area" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
                         </div>
                         <div>
                             <label for="stock-in-lifespan" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Expected lifespan (years)</label>

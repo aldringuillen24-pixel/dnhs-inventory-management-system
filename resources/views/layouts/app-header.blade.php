@@ -7,7 +7,7 @@
         }
     }">
     <div class="flex flex-col items-center justify-between grow xl:flex-row xl:px-4">
-        <div class="flex items-center justify-between w-full gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-800 sm:gap-3 xl:justify-normal xl:border-b-0 xl:px-0 xl:py-2.5">
+        <div class="flex items-center justify-between w-full gap-2 px-3 py-3 border-b border-gray-200 dark:border-gray-800 sm:gap-3 xl:justify-normal xl:border-b-0 xl:px-0 xl:py-2.5">
 
             <!-- Desktop Sidebar Toggle Button (visible on xl and up) -->
             <button

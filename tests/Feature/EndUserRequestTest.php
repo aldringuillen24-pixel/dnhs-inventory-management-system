@@ -4,9 +4,12 @@ use App\Models\AssignmentRequest;
 use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Role;
+use App\Models\StockMovement;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\InventoryOperationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Database\QueryException;
 
 uses(RefreshDatabase::class);
 
@@ -57,18 +60,80 @@ test('end user request stores with property custodian target', function () {
     ]);
 
     $response = $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
-        'item_id' => $inventory->item_id,
+        'item_name' => $inventory->item_name,
+        'category_id' => $category->category_id,
+        'unit' => $inventory->unit,
         'quantity' => 2,
+        'notes' => 'For classroom lessons',
     ]);
 
     $response->assertRedirect(route('endUser.my-requests'));
 
     $this->assertDatabaseHas('requests', [
-        'item_id' => $inventory->item_id,
+        'item_id' => null,
+        'requested_item_name' => 'Projector',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
         'user_id' => $this->endUser->id,
         'target_user_id' => $this->propertyCustodian->id,
         'quantity' => 2,
         'status' => 'waiting for approval',
+        'notes' => 'For classroom lessons',
+    ]);
+});
+
+test('end user onboarding saves the account building and room', function () {
+    $this->endUser->update(['temporary_password' => 'temporary-password']);
+
+    $this->actingAs($this->endUser)
+        ->get(route('endUser.onboarding'))
+        ->assertOk()
+        ->assertSee('name="building"', false)
+        ->assertSee('name="room"', false);
+
+    $this->post(route('endUser.onboarding.post'), [
+        'first_name' => $this->endUser->first_name,
+        'last_name' => $this->endUser->last_name,
+        'email' => $this->endUser->email,
+        'building' => 'Main Building',
+        'room' => '203',
+        'password' => 'secure-password',
+        'password_confirmation' => 'secure-password',
+    ])->assertRedirect(route('endUser.dashboard'));
+
+    expect($this->endUser->fresh()->building)->toBe('Main Building')
+        ->and($this->endUser->fresh()->room)->toBe('203')
+        ->and($this->endUser->fresh()->temporary_password)->toBeNull();
+});
+
+test('end user cannot request more than available stock of the selected type', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 3,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.requests.store'), [
+            'item_name' => 'Bond Paper',
+            'category_id' => $category->category_id,
+            'unit' => 'ream',
+            'quantity' => 4,
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Requested quantity exceeds available stock.');
+
+    $this->assertDatabaseMissing('requests', [
+        'user_id' => $this->endUser->id,
+        'requested_item_name' => 'Bond Paper',
     ]);
 });
 
@@ -105,9 +170,582 @@ test('assignment modal receives only available inventory with stock', function (
     $this->actingAs($this->propertyCustodian)
         ->get(route('propertyCustodian.transactions'))
         ->assertOk()
+        ->assertSee('Registered End User')
+        ->assertSee('Manual Issue')
         ->assertViewHas('availableInventoryItems', fn ($items) => $items->count() === 1
             && $items->first()['item_id'] === $available->item_id
             && $items->first()['quantity'] === 2);
+});
+
+test('assignment selector keeps same-name items with different categories and units distinct', function () {
+    $firstCategory = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $secondCategory = Category::create([
+        'category_name' => 'Learning Resources',
+        'requires_serial_number' => false,
+    ]);
+    $firstItem = Inventory::create([
+        'category_id' => $firstCategory->category_id,
+        'unit' => 'box',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'inventory_item_no' => 'INV-000101',
+        'quantity' => 4,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $secondItem = Inventory::create([
+        'category_id' => $secondCategory->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'inventory_item_no' => 'INV-000102',
+        'quantity' => 7,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.transactions'))
+        ->assertOk()
+        ->assertViewHas('availableInventoryItems', fn ($items) => $items->count() === 2
+            && $items->firstWhere('item_id', $firstItem->item_id)['category_name'] === 'Office Supplies'
+            && $items->firstWhere('item_id', $firstItem->item_id)['unit'] === 'box'
+            && $items->firstWhere('item_id', $secondItem->item_id)['category_name'] === 'Learning Resources'
+            && $items->firstWhere('item_id', $secondItem->item_id)['unit'] === 'ream');
+});
+
+test('end user request selector groups availability by item name category and unit', function () {
+    $firstCategory = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $secondCategory = Category::create([
+        'category_name' => 'Learning Resources',
+        'requires_serial_number' => false,
+    ]);
+    $firstItem = Inventory::create([
+        'category_id' => $firstCategory->category_id,
+        'unit' => 'box',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 4,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $secondItem = Inventory::create([
+        'category_id' => $secondCategory->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 7,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->get(route('endUser.requests'))
+        ->assertOk()
+        ->assertViewHas('availableItems', fn ($items) => $items->count() === 2
+            && $items->firstWhere('category_id', $firstCategory->category_id)['quantity'] === 4
+            && $items->firstWhere('category_id', $secondCategory->category_id)['quantity'] === 7)
+        ->assertSee('Bond Paper · Office Supplies · 4 boxes available', false)
+        ->assertSee('Bond Paper · Learning Resources · 7 reams available', false);
+});
+
+test('custodian assigns exact matching stock records and records each allocation', function () {
+    $this->endUser->update(['building' => 'Main Building', 'room' => '203']);
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $otherCategory = Category::create([
+        'category_name' => 'Classroom Materials',
+        'requires_serial_number' => false,
+    ]);
+    $firstLot = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 2,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $secondLot = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 4,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $differentType = Inventory::create([
+        'category_id' => $otherCategory->category_id,
+        'unit' => 'box',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 9,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $request = AssignmentRequest::create([
+        'requested_item_name' => 'Bond Paper',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'ream',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 3,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.transactions'))
+        ->assertOk()
+        ->assertSee('Open Request')
+        ->assertSee('Review Item Request')
+        ->assertSee('Request details')
+        ->assertSee('Select inventory')
+        ->assertSee('name="inventory_ids[]"', false)
+        ->assertDontSee('name="allocations[', false)
+        ->assertViewHas('incomingRequests', fn ($requests) => $requests->first()->total_available_stock === 6
+            && $requests->first()->matching_inventory_items->pluck('item_id')->all() === [$firstLot->item_id, $secondLot->item_id]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id), [
+            'inventory_ids' => [$firstLot->item_id, $secondLot->item_id],
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect($firstLot->fresh()->quantity)->toBe(0)
+        ->and($firstLot->fresh()->status)->toBe('assigned')
+        ->and($firstLot->fresh()->building)->toBe('Main Building')
+        ->and($firstLot->fresh()->room)->toBe('203')
+        ->and($secondLot->fresh()->quantity)->toBe(3)
+        ->and($secondLot->fresh()->building)->toBe('Main Building')
+        ->and($secondLot->fresh()->room)->toBe('203')
+        ->and($differentType->fresh()->quantity)->toBe(9)
+        ->and($request->fresh()->status)->toBe('approved')
+        ->and($request->fulfillmentRequests()->count())->toBe(2);
+
+    expect(Transaction::whereIn('item_id', [$firstLot->item_id, $secondLot->item_id])->count())->toBe(2)
+        ->and(StockMovement::where('reference_id', $request->id)->count())->toBe(2)
+        ->and(StockMovement::where('reference_id', $request->id)->where('to_building', 'Main Building')->where('to_room', '203')->count())->toBe(2)
+        ->and(StockMovement::where('reference_id', $request->id)->pluck('inventory_id')->all())
+            ->toEqualCanonicalizing([$firstLot->item_id, $secondLot->item_id]);
+});
+
+test('custodian assigns selected serialized assets and leaves other matching names untouched', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => true,
+    ]);
+    $otherCategory = Category::create([
+        'category_name' => 'Classroom Equipment',
+        'requires_serial_number' => true,
+    ]);
+    $assetOne = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Projector',
+        'serial_number' => 'PJ-001',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $assetTwo = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Projector',
+        'serial_number' => 'PJ-002',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $reservedAsset = Inventory::create([
+        'category_id' => $otherCategory->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Projector',
+        'serial_number' => 'PJ-003',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $request = AssignmentRequest::create([
+        'requested_item_name' => 'Projector',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 2,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id), [
+            'inventory_ids' => [$assetOne->item_id],
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Selected items do not match the requested quantity. Update your selection and try again.');
+
+    expect($assetOne->fresh()->status)->toBe('available')
+        ->and($assetTwo->fresh()->status)->toBe('available')
+        ->and($request->fresh()->status)->toBe('waiting for approval')
+        ->and(Transaction::count())->toBe(0)
+        ->and(StockMovement::count())->toBe(0);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id), [
+            'inventory_ids' => [$assetOne->item_id, $assetTwo->item_id],
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect($assetOne->fresh()->status)->toBe('assigned')
+        ->and($assetTwo->fresh()->status)->toBe('assigned')
+        ->and($reservedAsset->fresh()->status)->toBe('available')
+        ->and($reservedAsset->fresh()->quantity)->toBe(1)
+        ->and(Transaction::whereIn('item_id', [$assetOne->item_id, $assetTwo->item_id])->count())->toBe(2);
+});
+
+test('custodian cannot assign a mismatched or stale allocation', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $otherCategory = Category::create([
+        'category_name' => 'Classroom Materials',
+        'requires_serial_number' => false,
+    ]);
+    $requestedItem = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 4,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $mismatchedItem = Inventory::create([
+        'category_id' => $otherCategory->category_id,
+        'unit' => 'box',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 8,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $request = AssignmentRequest::create([
+        'requested_item_name' => 'Bond Paper',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'ream',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 3,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $response = $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id), [
+            'inventory_ids' => [$mismatchedItem->item_id],
+        ]);
+
+    $response->assertRedirect()->assertSessionHas('error');
+    expect($request->fresh()->status)->toBe('waiting for approval')
+        ->and($requestedItem->fresh()->quantity)->toBe(4)
+        ->and($mismatchedItem->fresh()->quantity)->toBe(8)
+        ->and(Transaction::count())->toBe(0)
+        ->and(StockMovement::count())->toBe(0);
+
+    $requestedItem->update(['quantity' => 1]);
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id), [
+            'inventory_ids' => [$requestedItem->item_id],
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('error');
+
+    expect($request->fresh()->status)->toBe('waiting for approval')
+        ->and($requestedItem->fresh()->quantity)->toBe(1)
+        ->and(Transaction::count())->toBe(0)
+        ->and(StockMovement::count())->toBe(0);
+});
+
+test('custodian cannot select more stock records than the requested quantity needs', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $firstRecord = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 5,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $extraRecord = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 8,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $request = AssignmentRequest::create([
+        'requested_item_name' => 'Bond Paper',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'ream',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id), [
+            'inventory_ids' => [$firstRecord->item_id, $extraRecord->item_id],
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Selected items do not match the requested quantity. Update your selection and try again.');
+
+    expect($firstRecord->fresh()->quantity)->toBe(5)
+        ->and($extraRecord->fresh()->quantity)->toBe(8)
+        ->and($request->fresh()->status)->toBe('waiting for approval')
+        ->and(Transaction::count())->toBe(0)
+        ->and(StockMovement::count())->toBe(0);
+});
+
+test('custodian cancellation stores its reason without changing stock or history', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => true,
+    ]);
+    $asset = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Projector',
+        'serial_number' => 'PJ-CANCEL-001',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $request = AssignmentRequest::create([
+        'requested_item_name' => 'Projector',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.cancel', $request->id), [])
+        ->assertSessionHasErrors('cancellation_reason');
+
+    expect($request->fresh()->status)->toBe('waiting for approval')
+        ->and($asset->fresh()->quantity)->toBe(1);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.cancel', $request->id), [
+            'cancellation_reason' => 'Reserved for an urgent school event.',
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    $this->assertDatabaseHas('requests', [
+        'id' => $request->id,
+        'status' => 'cancelled',
+        'cancellation_reason' => 'Reserved for an urgent school event.',
+    ]);
+    expect($asset->fresh()->quantity)->toBe(1)
+        ->and($asset->fresh()->status)->toBe('available')
+        ->and($asset->fresh()->assigned_to_user_id)->toBeNull()
+        ->and(Transaction::count())->toBe(0)
+        ->and(StockMovement::count())->toBe(0);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.transactions'))
+        ->assertOk()
+        ->assertDontSee('Open Request')
+        ->assertDontSee('Cancel Request');
+
+    $this->actingAs($this->endUser)
+        ->get(route('endUser.requests'))
+        ->assertOk()
+        ->assertSee('Note')
+        ->assertSee('Reserved for an urgent school event.');
+});
+
+test('exact fulfillment records remain individually returnable', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => true,
+    ]);
+    $asset = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Projector',
+        'serial_number' => 'PJ-RETURN-001',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $request = AssignmentRequest::create([
+        'requested_item_name' => 'Projector',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id), [
+            'inventory_ids' => [$asset->item_id],
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.request-return', $asset->item_id))
+        ->assertRedirect(route('endUser.my-requests'));
+    $returnRequest = AssignmentRequest::where('item_id', $asset->item_id)
+        ->where('status', 'waiting for custodian approval')
+        ->firstOrFail();
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.returns.approve', $returnRequest->id))
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect($asset->fresh()->quantity)->toBe(1)
+        ->and($asset->fresh()->status)->toBe('available')
+        ->and($request->fulfillmentRequests()->sole()->fresh()->status)->toBe('returned')
+        ->and(StockMovement::where('inventory_id', $asset->item_id)->where('movement_type', 'returned')->exists())->toBeTrue();
+});
+
+test('my assigned items shows fulfilled records without their empty parent request row', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Laptop',
+        'quantity' => 2,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $parentRequest = AssignmentRequest::create([
+        'requested_item_name' => 'Laptop',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $parentRequest->id), [
+            'inventory_ids' => [$inventory->item_id],
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    $this->actingAs($this->endUser)
+        ->get(route('endUser.my-assigned-items'))
+        ->assertOk()
+        ->assertViewHas('activityRows', fn ($rows) => $rows->count() === 1
+            && $rows->first()['type'] === 'Assigned'
+            && $rows->first()['item_name'] === 'Laptop');
+});
+
+test('same-named assigned inventory records remain separate in the end-user list', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $firstInventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Dell Laptop',
+        'quantity' => 0,
+        'status' => 'assigned',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $secondInventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Dell Laptop',
+        'quantity' => 0,
+        'status' => 'assigned',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    foreach ([$firstInventory, $secondInventory] as $inventory) {
+        AssignmentRequest::create([
+            'item_id' => $inventory->item_id,
+            'user_id' => $this->propertyCustodian->id,
+            'target_user_id' => $this->endUser->id,
+            'quantity' => 1,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
+        ]);
+    }
+
+    $this->actingAs($this->endUser)
+        ->get(route('endUser.my-assigned-items'))
+        ->assertOk()
+        ->assertViewHas('activityRows', fn ($rows) => $rows->count() === 2
+            && $rows->pluck('item_id')->sort()->values()->all() === collect([$firstInventory->item_id, $secondInventory->item_id])->sort()->values()->all()
+            && $rows->every(fn ($row) => $row['type'] === 'Assigned'
+                && $row['item_name'] === 'Dell Laptop'
+                && $row['quantity'] === 1));
+});
+
+test('only property custodians can assign or cancel incoming item requests', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $request = AssignmentRequest::create([
+        'requested_item_name' => 'Bond Paper',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'ream',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('propertyCustodian.requests.approve', $request->id), ['inventory_ids' => [1]])
+        ->assertForbidden();
+    $this->actingAs($this->endUser)
+        ->post(route('propertyCustodian.requests.cancel', $request->id), ['cancellation_reason' => 'Not allowed'])
+        ->assertForbidden();
 });
 
 test('custodian-created assignment records the target end user as assignee', function () {
@@ -152,6 +790,605 @@ test('custodian-created assignment records the target end user as assignee', fun
         'quantity' => 1,
         'status' => 'assigned',
     ]);
+
+    $movement = StockMovement::where('inventory_id', $inventory->item_id)->sole();
+    expect($movement->movement_type)->toBe('assignment')
+        ->and($movement->quantity)->toBe(1)
+        ->and($movement->quantity_before)->toBe(1)
+        ->and($movement->quantity_after)->toBe(0)
+        ->and($movement->user_id)->toBe($this->propertyCustodian->id)
+        ->and($movement->reference_type)->toBe('assignment_request')
+        ->and($movement->reference_id)->toBe($request->id)
+        ->and($movement->notes)->toContain("user #{$this->propertyCustodian->id}", "user #{$this->endUser->id}");
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.inventory'))
+        ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['total'] === 1
+            && $metrics['available'] === 0
+            && $metrics['assigned'] === 1)
+        ->assertSee('End User (1)', false);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.transactions'))
+        ->assertViewHas('totalAssignedCount', 1)
+        ->assertViewHas('transactions', fn ($transactions) => $transactions->sum('quantity') === 1);
+});
+
+test('registered direct assignments retain the workflow and reject non-end-user recipients', function () {
+    $this->endUser->update(['building' => 'Main Building', 'room' => 'Room 204']);
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Monitor',
+        'quantity' => 3,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), [
+            'assignment_type' => 'registered',
+            'item_id' => $inventory->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 1,
+            'transaction_date' => '2026-09-27',
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    $this->assertDatabaseHas('requests', [
+        'item_id' => $inventory->item_id,
+        'target_user_id' => $this->endUser->id,
+        'building' => 'Main Building',
+        'room' => 'Room 204',
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.transactions'))
+        ->assertOk()
+        ->assertDontSee('registered-building', false)
+        ->assertDontSee('registered-room', false)
+        ->assertSee('manual-building', false)
+        ->assertSee('manual-room', false);
+
+    $administratorRole = Role::create(['role_name' => 'Administrator']);
+    $schoolHeadRole = Role::create(['role_name' => 'School Head']);
+    foreach ([$administratorRole, $schoolHeadRole, $this->propertyCustodianRole] as $role) {
+        $recipient = User::factory()->create(['role_id' => $role->role_id]);
+        $this->actingAs($this->propertyCustodian)
+            ->post(route('propertyCustodian.transactions.assignItem'), [
+                'assignment_type' => 'registered',
+                'item_id' => $inventory->item_id,
+                'user_id' => $recipient->id,
+                'quantity' => 1,
+                'transaction_date' => '2026-09-27',
+            ])
+            ->assertSessionHasErrors('user_id')
+            ->assertSessionHas('errors', fn ($errors) => $errors->first('user_id') === 'Items can only be assigned to an End User.');
+    }
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), [
+            'assignment_type' => 'registered',
+            'item_id' => $inventory->item_id,
+            'user_id' => 999999,
+            'quantity' => 1,
+            'transaction_date' => '2026-09-27',
+        ])
+        ->assertSessionHasErrors('user_id');
+
+    expect($inventory->fresh()->quantity)->toBe(3)
+        ->and($inventory->fresh()->status)->toBe('available')
+        ->and($inventory->fresh()->assigned_to_user_id)->toBeNull()
+        ->and(AssignmentRequest::where('item_id', $inventory->item_id)->count())->toBe(1)
+        ->and(Transaction::where('item_id', $inventory->item_id)->count())->toBe(0)
+        ->and(StockMovement::where('inventory_id', $inventory->item_id)->count())->toBe(0);
+
+    $this->actingAs($this->endUser)
+        ->post(route('propertyCustodian.transactions.assignItem'), [
+            'assignment_type' => 'manual',
+        ])
+        ->assertForbidden();
+});
+
+test('competing assignment acceptances cannot issue the final available unit twice', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Webcam',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $otherEndUser = User::factory()->create(['role_id' => $this->endUserRole->role_id]);
+    $firstRequest = AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+    $secondRequest = AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $otherEndUser->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $operations = app(InventoryOperationService::class);
+    expect($operations->acceptAssignment($firstRequest->id, $this->endUser->id))->toBe('accepted')
+        ->and($operations->acceptAssignment($secondRequest->id, $otherEndUser->id))->toBe('insufficient')
+        ->and($inventory->fresh()->quantity)->toBe(0)
+        ->and($inventory->fresh()->status)->toBe('assigned')
+        ->and($inventory->fresh()->assigned_to_user_id)->toBe($this->endUser->id)
+        ->and($firstRequest->fresh()->status)->toBe('approved')
+        ->and($secondRequest->fresh()->status)->toBe('waiting for approval')
+        ->and(Transaction::where('item_id', $inventory->item_id)->count())->toBe(1)
+        ->and(StockMovement::where('inventory_id', $inventory->item_id)->count())->toBe(1);
+});
+
+test('manual issue rolls back its stock deduction when transaction creation fails', function () {
+    $category = Category::create([
+        'category_name' => 'Office Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Projector',
+        'quantity' => 5,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    expect(fn () => app(InventoryOperationService::class)->issueManual([
+        'item_id' => $inventory->item_id,
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'quantity' => 2,
+        'manual_recipient_name' => 'Alex Rivera',
+        'manual_department' => 'Science Department',
+        'transaction_date' => '2026-09-27',
+    ], 999999))->toThrow(QueryException::class);
+
+    expect($inventory->fresh()->quantity)->toBe(5)
+        ->and($inventory->fresh()->status)->toBe('available')
+        ->and(Transaction::where('item_id', $inventory->item_id)->count())->toBe(0)
+        ->and(StockMovement::where('inventory_id', $inventory->item_id)->count())->toBe(0);
+});
+
+test('manual issue stores recipient snapshot and custodian can return the exact transaction', function () {
+    $category = Category::create([
+        'category_name' => 'Office Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Projector',
+        'quantity' => 5,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $manualIssueData = [
+        'assignment_type' => 'manual',
+        'item_id' => $inventory->item_id,
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'quantity' => 3,
+        'manual_recipient_name' => 'Alex Rivera',
+        'manual_department' => 'Science Department',
+        'manual_recipient_type' => 'Staff',
+        'manual_contact' => 'EXT-204',
+        'manual_notes' => 'Science fair presentation',
+        'transaction_date' => '2026-09-27',
+        'expected_return_date' => '2026-10-10',
+    ];
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), [
+            ...$manualIssueData,
+            'manual_recipient_name' => '',
+            'manual_department' => '',
+        ])
+        ->assertSessionHasErrors(['manual_recipient_name', 'manual_department']);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), $manualIssueData)
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    $transaction = Transaction::whereNull('user_id')->sole();
+    expect($inventory->fresh()->quantity)->toBe(2)
+        ->and($inventory->fresh()->status)->toBe('available')
+        ->and($inventory->fresh()->assigned_to_user_id)->toBeNull()
+        ->and($transaction->item_id)->toBe($inventory->item_id)
+        ->and($transaction->from_user_id)->toBe($this->propertyCustodian->id)
+        ->and($transaction->manual_recipient_name)->toBe('Alex Rivera')
+        ->and($transaction->manual_department)->toBe('Science Department')
+        ->and($transaction->manual_recipient_type)->toBe('Staff')
+        ->and($transaction->manual_contact)->toBe('EXT-204')
+        ->and($transaction->manual_notes)->toBe('Science fair presentation')
+        ->and($transaction->expected_return_date->toDateString())->toBe('2026-10-10');
+
+    $movement = StockMovement::sole();
+    expect($movement->inventory_id)->toBe($inventory->item_id)
+        ->and($movement->movement_type)->toBe('assignment')
+        ->and($movement->reference_type)->toBe('transaction')
+        ->and($movement->reference_id)->toBe($transaction->id)
+        ->and($movement->quantity_before)->toBe(5)
+        ->and($movement->quantity_after)->toBe(2);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.transactions'))
+        ->assertOk()
+        ->assertSee('Alex Rivera')
+        ->assertSee('Science Department')
+        ->assertSee('2026-10-10')
+        ->assertSee('Record Return');
+    $this->actingAs($this->endUser)
+        ->post(route('propertyCustodian.transactions.manual-return', $transaction->id))
+        ->assertForbidden();
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.manual-return', $transaction->id), [
+            'notes' => 'Received in good condition',
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect($inventory->fresh()->quantity)->toBe(5)
+        ->and($inventory->fresh()->status)->toBe('available')
+        ->and($transaction->fresh()->status)->toBe('returned')
+        ->and($transaction->fresh()->return_date->toDateString())->toBe(now()->toDateString())
+        ->and(StockMovement::count())->toBe(2)
+        ->and(StockMovement::where('movement_type', 'returned')->where('reference_id', $transaction->id)->exists())->toBeTrue();
+});
+
+test('assigned inventory shows the manual issue recipient name', function () {
+    $category = Category::create([
+        'category_name' => 'Office Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Conference Projector',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), [
+            'assignment_type' => 'manual',
+            'item_id' => $inventory->item_id,
+            'category_id' => $category->category_id,
+            'unit' => 'piece',
+            'quantity' => 1,
+            'manual_recipient_name' => 'Alex Rivera',
+            'manual_department' => 'Science Department',
+            'transaction_date' => '2026-09-29',
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.inventory', ['workspace' => 'assigned']))
+        ->assertOk()
+        ->assertSee('Alex Rivera (1)')
+        ->assertDontSee('Recorded assignee');
+});
+
+test('manual issue enforces serialized quantity and does not allow returns without a due date', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => true,
+    ]);
+    $asset = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Laptop',
+        'serial_number' => 'SN-MANUAL-001',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $manualIssueData = [
+        'assignment_type' => 'manual',
+        'item_id' => $asset->item_id,
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'quantity' => 2,
+        'manual_recipient_name' => 'Jordan Lee',
+        'manual_department' => 'Library',
+        'transaction_date' => '2026-09-27',
+    ];
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), $manualIssueData)
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Serialized inventory must be issued as its exact individual asset with quantity 1.');
+
+    expect($asset->fresh()->quantity)->toBe(1)
+        ->and($asset->fresh()->status)->toBe('available')
+        ->and(Transaction::count())->toBe(0)
+        ->and(StockMovement::count())->toBe(0);
+
+    $manualIssueData['quantity'] = 1;
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), $manualIssueData)
+        ->assertRedirect(route('propertyCustodian.transactions'));
+    $transaction = Transaction::whereNull('user_id')->sole();
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.manual-return', $transaction->id))
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Only active manual issues with an expected return date can be returned.');
+
+    expect($asset->fresh()->quantity)->toBe(0)
+        ->and($asset->fresh()->status)->toBe('assigned')
+        ->and($transaction->fresh()->status)->toBe('assigned')
+        ->and(StockMovement::count())->toBe(1);
+});
+
+test('manual issue rejects mismatched unavailable and insufficient inventory without side effects', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $otherCategory = Category::create([
+        'category_name' => 'Classroom Materials',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 2,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $manualIssueData = [
+        'assignment_type' => 'manual',
+        'item_id' => $inventory->item_id,
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'quantity' => 1,
+        'manual_recipient_name' => 'Casey Morgan',
+        'manual_department' => 'Science Department',
+        'transaction_date' => '2026-09-27',
+    ];
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), [
+            ...$manualIssueData,
+            'category_id' => $otherCategory->category_id,
+            'unit' => 'box',
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('error');
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), [
+            ...$manualIssueData,
+            'quantity' => 3,
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('error');
+
+    $inventory->update(['status' => 'under_maintenance']);
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transactions.assignItem'), $manualIssueData)
+        ->assertRedirect()
+        ->assertSessionHas('error');
+
+    expect($inventory->fresh()->quantity)->toBe(2)
+        ->and($inventory->fresh()->status)->toBe('under_maintenance')
+        ->and(Transaction::count())->toBe(0)
+        ->and(StockMovement::count())->toBe(0);
+});
+
+test('assignment approval deducts only the selected inventory record with a duplicate name', function () {
+    $firstCategory = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $selectedCategory = Category::create([
+        'category_name' => 'Learning Resources',
+        'requires_serial_number' => false,
+    ]);
+
+    $otherItem = Inventory::create([
+        'category_id' => $firstCategory->category_id,
+        'unit' => 'box',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 8,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $selectedItem = Inventory::create([
+        'category_id' => $selectedCategory->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 3,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $assignment = AssignmentRequest::create([
+        'item_id' => $selectedItem->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 2,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $assignment->id))
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect($otherItem->fresh()->quantity)->toBe(8)
+        ->and($otherItem->fresh()->status)->toBe('available')
+        ->and($selectedItem->fresh()->quantity)->toBe(1)
+        ->and($assignment->fresh()->item_id)->toBe($selectedItem->item_id);
+
+    $transaction = Transaction::sole();
+    $movement = StockMovement::sole();
+    expect($transaction->item_id)->toBe($selectedItem->item_id)
+        ->and($movement->inventory_id)->toBe($selectedItem->item_id)
+        ->and($movement->quantity_before)->toBe(3)
+        ->and($movement->quantity_after)->toBe(1);
+});
+
+test('assignment approval uses the selected serial-numbered inventory record', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => true,
+    ]);
+    $otherAsset = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Laptop',
+        'serial_number' => 'SN-LAPTOP-001',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $selectedAsset = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Laptop',
+        'serial_number' => 'SN-LAPTOP-002',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $assignment = AssignmentRequest::create([
+        'item_id' => $selectedAsset->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $assignment->id))
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect($otherAsset->fresh()->status)->toBe('available')
+        ->and($otherAsset->fresh()->quantity)->toBe(1)
+        ->and($selectedAsset->fresh()->status)->toBe('assigned')
+        ->and($selectedAsset->fresh()->quantity)->toBe(0)
+        ->and(Transaction::sole()->item_id)->toBe($selectedAsset->item_id)
+        ->and(StockMovement::sole()->inventory_id)->toBe($selectedAsset->item_id);
+});
+
+test('end user request cannot use same-name stock from another category or unit', function () {
+    $selectedCategory = Category::create([
+        'category_name' => 'Learning Resources',
+        'requires_serial_number' => false,
+    ]);
+    $otherCategory = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $selectedItem = Inventory::create([
+        'category_id' => $selectedCategory->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    Inventory::create([
+        'category_id' => $otherCategory->category_id,
+        'unit' => 'box',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 10,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.requests.store'), [
+            'item_name' => $selectedItem->item_name,
+            'category_id' => $selectedCategory->category_id,
+            'unit' => $selectedItem->unit,
+            'quantity' => 2,
+        ])
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Requested quantity exceeds available stock.');
+
+    $this->assertDatabaseMissing('requests', [
+        'requested_item_name' => $selectedItem->item_name,
+        'user_id' => $this->endUser->id,
+    ]);
+});
+
+test('end user acceptance creates an assignment movement linked to its transaction', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Monitor',
+        'quantity' => 4,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $assignment = AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 2,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.requests.respond', $assignment->id), ['action' => 'accept'])
+        ->assertRedirect(route('endUser.requests'));
+
+    $assignment->refresh();
+    $movement = StockMovement::where('inventory_id', $inventory->item_id)->sole();
+    expect($inventory->fresh()->quantity)->toBe(2)
+        ->and($assignment->status)->toBe('approved')
+        ->and($movement->movement_type)->toBe('assignment')
+        ->and($movement->quantity)->toBe(2)
+        ->and($movement->quantity_before)->toBe(4)
+        ->and($movement->quantity_after)->toBe(2)
+        ->and($movement->user_id)->toBe($this->endUser->id)
+        ->and($movement->reference_type)->toBe('transaction')
+        ->and($movement->reference_id)->toBe($assignment->transaction_id)
+        ->and($movement->notes)->toContain("request #{$assignment->id}");
 });
 
 test('end user cannot request assigned inventory as available stock', function () {
@@ -171,14 +1408,16 @@ test('end user cannot request assigned inventory as available stock', function (
     ]);
 
     $response = $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
-        'item_id' => $inventory->item_id,
+        'item_name' => $inventory->item_name,
+        'category_id' => $category->category_id,
+        'unit' => $inventory->unit,
         'quantity' => 1,
     ]);
 
     $response->assertRedirect();
     $response->assertSessionHas('error', 'Requested quantity exceeds available stock.');
     $this->assertDatabaseMissing('requests', [
-        'item_id' => $inventory->item_id,
+        'requested_item_name' => $inventory->item_name,
         'user_id' => $this->endUser->id,
     ]);
 });
@@ -235,6 +1474,123 @@ test('end user sees both assigned and requested items in their activity table', 
     $response->assertSee('Requested');
     $response->assertSee('Laptop');
     $response->assertSee('Monitor');
+});
+
+test('requests page labels approved transfers as transfers for sender and recipient', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Dell Laptop',
+        'quantity' => 0,
+        'status' => 'assigned',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $recipient = User::factory()->create(['role_id' => $this->endUserRole->role_id]);
+    $transaction = Transaction::create([
+        'user_id' => $recipient->id,
+        'from_user_id' => $this->endUser->id,
+        'item_id' => $inventory->item_id,
+        'quantity' => 1,
+        'transaction_date' => '2026-09-27',
+        'status' => 'assigned',
+    ]);
+    AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $recipient->id,
+        'transaction_id' => $transaction->id,
+        'quantity' => 1,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $this->actingAs($recipient)
+        ->get(route('endUser.requests'))
+        ->assertOk()
+        ->assertSee('Transfer Request');
+
+    $this->actingAs($this->endUser)
+        ->get(route('endUser.requests'))
+        ->assertOk()
+        ->assertSee('Transfer');
+});
+
+test('my requests page shows every inventory and transaction in a fulfilled requisition', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $firstInventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Dell Laptop',
+        'inventory_item_no' => 'INV-000034',
+        'quantity' => 0,
+        'status' => 'assigned',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $secondInventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Dell Laptop',
+        'inventory_item_no' => 'INV-000031',
+        'quantity' => 0,
+        'status' => 'assigned',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $parentRequest = AssignmentRequest::create([
+        'requested_item_name' => 'Dell Laptop',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 2,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    foreach ([$firstInventory, $secondInventory] as $inventory) {
+        $transaction = Transaction::create([
+            'user_id' => $this->endUser->id,
+            'from_user_id' => $this->propertyCustodian->id,
+            'item_id' => $inventory->item_id,
+            'quantity' => 1,
+            'transaction_date' => '2026-09-27',
+            'status' => 'assigned',
+        ]);
+        AssignmentRequest::create([
+            'item_id' => $inventory->item_id,
+            'user_id' => $this->propertyCustodian->id,
+            'target_user_id' => $this->endUser->id,
+            'transaction_id' => $transaction->id,
+            'parent_request_id' => $parentRequest->id,
+            'quantity' => 1,
+            'status' => 'approved',
+            'requested_at' => $parentRequest->requested_at,
+            'responded_at' => now(),
+        ]);
+    }
+
+    $this->actingAs($this->endUser)
+        ->get(route('endUser.requests'))
+        ->assertOk()
+        ->assertViewHas('incomingRequests', fn ($requests) => $requests->isEmpty())
+        ->assertSee('Fulfilled Records')
+        ->assertSee('INV-000034')
+        ->assertSee('INV-000031')
+        ->assertDontSee('Requisition Fulfillment')
+        ->assertDontSee('Fulfills requisition #' . $parentRequest->id)
+        ->assertSee('#TX-00001')
+        ->assertSee('#TX-00002');
 });
 
 test('end user cannot transfer a different item than the original assignment', function () {
@@ -528,6 +1884,8 @@ test('custodian approval transfers inventory ownership to the recipient', functi
         'unit' => 'piece',
         'user_id' => $this->propertyCustodian->id,
         'assigned_to_user_id' => $this->endUser->id,
+        'building' => 'Main Building',
+        'room' => 'Storage A',
         'item_name' => 'Transfer Laptop',
         'quantity' => 1,
         'status' => 'assigned',
@@ -542,6 +1900,8 @@ test('custodian approval transfers inventory ownership to the recipient', functi
         'email' => 'approved-recipient@example.com',
         'password' => 'password',
         'status' => 'active',
+        'building' => 'Science Building',
+        'room' => '203',
     ]);
 
     AssignmentRequest::create([
@@ -557,6 +1917,8 @@ test('custodian approval transfers inventory ownership to the recipient', functi
         'item_id' => $inventory->item_id,
         'user_id' => $this->endUser->id,
         'target_user_id' => $recipient->id,
+        'building' => 'Old Request Building',
+        'room' => 'Old Request Room',
         'quantity' => 1,
         'status' => 'waiting for custodian approval',
         'requested_at' => now(),
@@ -570,6 +1932,8 @@ test('custodian approval transfers inventory ownership to the recipient', functi
         'item_id' => $inventory->item_id,
         'assigned_to_user_id' => $recipient->id,
         'status' => 'assigned',
+        'building' => 'Science Building',
+        'room' => '203',
     ]);
 
     $this->assertDatabaseHas('transactions', [
@@ -578,7 +1942,108 @@ test('custodian approval transfers inventory ownership to the recipient', functi
         'user_id' => $recipient->id,
         'quantity' => 1,
         'status' => 'assigned',
+        'from_building' => 'Main Building',
+        'from_room' => 'Storage A',
+        'building' => 'Science Building',
+        'room' => '203',
     ]);
+
+    $movement = StockMovement::where('inventory_id', $inventory->item_id)->sole();
+    expect($movement->movement_type)->toBe('transfer')
+        ->and($movement->quantity)->toBe(1)
+        ->and($movement->user_id)->toBe($this->propertyCustodian->id)
+        ->and($movement->reference_type)->toBe('assignment_request')
+        ->and($movement->reference_id)->toBe($transferRequest->id)
+        ->and($movement->from_building)->toBe('Main Building')
+        ->and($movement->from_room)->toBe('Storage A')
+        ->and($movement->to_building)->toBe('Science Building')
+        ->and($movement->to_room)->toBe('203')
+        ->and($movement->notes)->toContain("user #{$this->endUser->id}", "user #{$recipient->id}");
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transfers.approve', $transferRequest->id))
+        ->assertRedirect();
+    expect(StockMovement::where('inventory_id', $inventory->item_id)->count())->toBe(1);
+});
+
+test('partial transfer keeps assigned totals aligned on inventory and transaction pages', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'assigned_to_user_id' => $this->endUser->id,
+        'item_name' => 'Shared Laptop',
+        'quantity' => 0,
+        'status' => 'assigned',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $originTransaction = Transaction::create([
+        'item_id' => $inventory->item_id,
+        'from_user_id' => $this->propertyCustodian->id,
+        'user_id' => $this->endUser->id,
+        'quantity' => 4,
+        'transaction_date' => now(),
+        'status' => 'assigned',
+    ]);
+    $originalAssignment = AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'transaction_id' => $originTransaction->id,
+        'quantity' => 4,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+    $recipient = User::create([
+        'role_id' => $this->endUserRole->role_id,
+        'first_name' => 'Transfer',
+        'last_name' => 'Recipient',
+        'username' => 'partial-transfer-recipient',
+        'email' => 'partial-recipient@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.assigned-items.transfer'), [
+            'request_id' => $originalAssignment->id,
+            'transfer_user_id' => $recipient->id,
+            'item_id' => $inventory->item_id,
+            'quantity' => 2,
+        ])
+        ->assertRedirect(route('endUser.my-assigned-items'));
+    $transferRequest = AssignmentRequest::where('user_id', $this->endUser->id)
+        ->where('target_user_id', $recipient->id)
+        ->where('status', 'waiting for transfer approval')
+        ->firstOrFail();
+
+    $this->actingAs($recipient)
+        ->post(route('endUser.requests.respond', $transferRequest->id), ['action' => 'accept'])
+        ->assertRedirect(route('endUser.requests'));
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.transfers.approve', $transferRequest->id))
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect($originTransaction->fresh()->quantity)->toBe(2)
+        ->and(Transaction::where('status', 'assigned')->sum('quantity'))->toBe(4)
+        ->and($inventory->fresh()->assigned_to_user_id)->toBe($this->endUser->id);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.inventory'))
+        ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['total'] === 4
+            && $metrics['assigned'] === 4)
+        ->assertSee('End User (2)', false)
+        ->assertSee('Transfer Recipient (2)', false);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.transactions'))
+        ->assertViewHas('totalAssignedCount', 4)
+        ->assertViewHas('transactions', fn ($transactions) => $transactions->where('status', 'assigned')->sum('quantity') === 4);
 });
 
 test('transfer acceptance is protected against race conditions with lockForUpdate', function () {

@@ -38,6 +38,13 @@ return [
             'report' => false,
         ],
 
+        'forecast' => [
+            'driver' => 'local',
+            'root' => storage_path('app'),
+            'throw' => true,
+            'report' => true,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AssignmentRequest;
+use App\Models\AssignmentReturn;
 use App\Models\Inventory;
 use App\Models\Category;
 use App\Models\User;
@@ -205,14 +206,18 @@ class InventoryReturnsTest extends TestCase
 
     public function test_approving_a_partial_return_reduces_the_related_transaction_quantity()
     {
+        $this->assignedItem->update(['building' => 'Classroom Building', 'room' => '203']);
         $transaction = Transaction::create([
             'item_id' => $this->assignedItem->item_id,
             'user_id' => $this->endUser->id,
+            'from_building' => 'Main Building',
+            'from_room' => 'Storage A',
+            'building' => 'Classroom Building',
+            'room' => '203',
             'quantity' => 5,
             'transaction_date' => now(),
             'status' => 'assigned',
         ]);
-
         $assignment = AssignmentRequest::create([
             'item_id' => $this->assignedItem->item_id,
             'user_id' => $this->custodian->id,
@@ -243,6 +248,22 @@ class InventoryReturnsTest extends TestCase
             'status' => 'assigned',
             'return_date' => null,
         ]);
+        $movement = StockMovement::where('inventory_id', $this->assignedItem->item_id)
+            ->where('reference_type', 'assignment_return')
+            ->sole();
+        $returnRecord = AssignmentReturn::where('return_request_id', $returnRequest->id)->sole();
+        $this->assertSame($returnRecord->id, $movement->reference_id);
+        $this->assertSame(2, $movement->quantity);
+        $this->assertSame(1, $movement->quantity_before);
+        $this->assertSame(3, $movement->quantity_after);
+        expect($this->assignedItem->fresh()->building)->toBe('Main Building')
+            ->and($this->assignedItem->fresh()->room)->toBe('Storage A')
+            ->and($movement->from_building)->toBe('Classroom Building')
+            ->and($movement->from_room)->toBe('203')
+            ->and($movement->to_building)->toBe('Main Building')
+            ->and($movement->to_room)->toBe('Storage A')
+            ->and($returnRecord->building)->toBe('Main Building')
+            ->and($returnRecord->room)->toBe('Storage A');
         $this->assertDatabaseHas('requests', [
             'id' => $assignment->id,
             'quantity' => 3,
@@ -335,10 +356,11 @@ class InventoryReturnsTest extends TestCase
 
     public function test_approving_a_full_return_closes_the_related_transaction()
     {
+        $this->assignedItem->update(['quantity' => 0]);
         $transaction = Transaction::create([
             'item_id' => $this->assignedItem->item_id,
             'user_id' => $this->endUser->id,
-            'quantity' => $this->assignedItem->quantity,
+            'quantity' => 1,
             'transaction_date' => now(),
             'status' => 'assigned',
         ]);
@@ -348,7 +370,7 @@ class InventoryReturnsTest extends TestCase
             'user_id' => $this->custodian->id,
             'target_user_id' => $this->endUser->id,
             'transaction_id' => $transaction->id,
-            'quantity' => $this->assignedItem->quantity,
+            'quantity' => 1,
             'status' => 'approved',
             'requested_at' => now(),
             'responded_at' => now(),
@@ -358,7 +380,7 @@ class InventoryReturnsTest extends TestCase
             'item_id' => $this->assignedItem->item_id,
             'user_id' => $this->endUser->id,
             'target_user_id' => $this->custodian->id,
-            'quantity' => $this->assignedItem->quantity,
+            'quantity' => 1,
             'status' => 'waiting for custodian approval',
             'requested_at' => now(),
         ]);
@@ -372,6 +394,21 @@ class InventoryReturnsTest extends TestCase
             'status' => 'returned',
         ]);
         $this->assertNotNull(Transaction::find($transaction->id)->return_date);
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.inventory'))
+            ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['total'] === 1
+                && $metrics['available'] === 1
+                && $metrics['assigned'] === 0);
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.transactions'))
+            ->assertViewHas('totalAssignedCount', 0)
+            ->assertViewHas('availableInventoryItems', fn ($items) => $items->first()['quantity'] === 1)
+            ->assertViewHas('transactions', fn ($transactions) => $transactions->first()->status === 'returned');
+        $movement = StockMovement::where('inventory_id', $this->assignedItem->item_id)
+            ->where('movement_type', 'returned')
+            ->sole();
+        $this->assertStringContainsString("user #{$this->endUser->id}", $movement->notes);
+        $this->assertStringContainsString("user #{$this->custodian->id}", $movement->notes);
     }
 
     /**
@@ -401,11 +438,12 @@ class InventoryReturnsTest extends TestCase
      */
     public function test_audit_row_created_on_return_approval()
     {
+        $this->assignedItem->update(['quantity' => 0]);
         $returnRequest = AssignmentRequest::create([
             'item_id' => $this->assignedItem->item_id,
             'user_id' => $this->endUser->id,
             'target_user_id' => $this->custodian->id,
-            'quantity' => $this->assignedItem->quantity,
+            'quantity' => 1,
             'status' => 'waiting for custodian approval',
             'requested_at' => now(),
         ]);
@@ -416,76 +454,411 @@ class InventoryReturnsTest extends TestCase
         // Verify audit row
         $movement = StockMovement::where('inventory_id', $this->assignedItem->item_id)
             ->where('movement_type', 'returned')
-            ->where('reference_type', 'assignment_request')
-            ->where('reference_id', $returnRequest->id)
+            ->where('reference_type', 'assignment_return')
             ->first();
 
         $this->assertNotNull($movement);
+        $this->assertDatabaseHas('assignment_returns', [
+            'id' => $movement->reference_id,
+            'return_request_id' => $returnRequest->id,
+        ]);
         $this->assertEquals($this->custodian->id, $movement->user_id);
-        $this->assertEquals($this->assignedItem->quantity, $movement->quantity);
+        $this->assertSame(1, $movement->quantity);
+        $this->assertDatabaseHas('inventory', [
+            'item_id' => $this->assignedItem->item_id,
+            'quantity' => 1,
+            'status' => 'available',
+        ]);
         $this->assertStringContainsString('returned', strtolower($movement->notes));
     }
 
-    /**
-     * Test: Custodian can mark assigned item as returned directly
-     */
-    public function test_custodian_can_mark_assigned_item_as_returned_directly()
+    public function test_receive_return_modal_lists_the_exact_active_assignment()
     {
+        $this->assignedItem->update([
+            'quantity' => 0,
+            'inventory_item_no' => 'INV-RETURN-001',
+        ]);
         $transaction = Transaction::create([
             'item_id' => $this->assignedItem->item_id,
             'user_id' => $this->endUser->id,
-            'quantity' => $this->assignedItem->quantity,
+            'quantity' => 2,
+            'issued_quantity' => 2,
             'transaction_date' => now(),
             'status' => 'assigned',
         ]);
-
-        $this->actingAs($this->custodian);
-
-        $response = $this->post(route('propertyCustodian.inventory.mark-returned', $this->assignedItem->item_id), [
-            'notes' => 'Item received in warehouse',
+        AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->custodian->id,
+            'target_user_id' => $this->endUser->id,
+            'transaction_id' => $transaction->id,
+            'quantity' => 2,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
         ]);
 
-        $response->assertRedirect(route('propertyCustodian.inventory'));
-        $response->assertSessionHas('success', 'Item marked as returned and now available.');
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.inventory'))
+            ->assertOk()
+            ->assertSee('Receive Return')
+            ->assertSee('INV-RETURN-001')
+            ->assertSee('Item Assigned')
+            ->assertSee($this->endUser->full_name)
+            ->assertSee('type="checkbox"', false);
+    }
 
-        // Verify item status changed
+    public function test_custodian_can_receive_multiple_partial_returns_for_one_assignment()
+    {
+        $this->assignedItem->update(['quantity' => 0]);
+        $transaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 5,
+            'issued_quantity' => 5,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+        $assignment = AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->custodian->id,
+            'target_user_id' => $this->endUser->id,
+            'transaction_id' => $transaction->id,
+            'quantity' => 5,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
+        ]);
+        $returnRequest = AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'target_user_id' => $this->custodian->id,
+            'transaction_id' => $transaction->id,
+            'quantity' => 5,
+            'status' => 'waiting for custodian approval',
+            'requested_at' => now(),
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $transaction->id,
+                'return_request_id' => $returnRequest->id,
+                'return_quantity' => 2,
+                'notes' => 'Two units received in good condition',
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'))
+            ->assertSessionHas('success');
+
         $this->assertDatabaseHas('inventory', [
             'item_id' => $this->assignedItem->item_id,
+            'quantity' => 2,
             'status' => 'available',
             'assigned_to_user_id' => null,
         ]);
         $this->assertDatabaseHas('transactions', [
             'id' => $transaction->id,
-            'status' => 'returned',
+            'quantity' => 3,
+            'issued_quantity' => 5,
+            'status' => 'assigned',
         ]);
-        $this->assertNotNull(Transaction::find($transaction->id)->return_date);
+        $this->assertDatabaseHas('requests', [
+            'id' => $assignment->id,
+            'quantity' => 3,
+            'status' => 'approved',
+        ]);
+        expect($returnRequest->fresh()->quantity)->toBe(3)
+            ->and($returnRequest->fresh()->status)->toBe('waiting for custodian approval');
+        $this->assertDatabaseHas('assignment_returns', [
+            'transaction_id' => $transaction->id,
+            'assignment_request_id' => $assignment->id,
+            'recipient_id' => $this->endUser->id,
+            'received_by' => $this->custodian->id,
+            'quantity' => 2,
+            'notes' => 'Two units received in good condition',
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $transaction->id,
+                'return_request_id' => $returnRequest->id,
+                'return_quantity' => 1,
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'));
+
+        expect($transaction->fresh()->quantity)->toBe(2)
+            ->and($assignment->fresh()->quantity)->toBe(2)
+            ->and(AssignmentReturn::where('transaction_id', $transaction->id)->sum('quantity'))->toBe(3)
+            ->and($this->assignedItem->fresh()->quantity)->toBe(3)
+            ->and(StockMovement::where('reference_type', 'assignment_return')->where('inventory_id', $this->assignedItem->item_id)->count())->toBe(2);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $transaction->id,
+                'return_request_id' => $returnRequest->id,
+                'return_quantity' => 2,
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'));
+
+        expect($transaction->fresh()->quantity)->toBe(0)
+            ->and($transaction->fresh()->status)->toBe('returned')
+            ->and($assignment->fresh()->quantity)->toBe(0)
+            ->and($assignment->fresh()->status)->toBe('returned')
+            ->and($returnRequest->fresh()->quantity)->toBe(0)
+            ->and($returnRequest->fresh()->status)->toBe('approved')
+            ->and(AssignmentReturn::where('transaction_id', $transaction->id)->sum('quantity'))->toBe(5)
+            ->and($this->assignedItem->fresh()->quantity)->toBe(5)
+            ->and(StockMovement::where('reference_type', 'assignment_return')->where('inventory_id', $this->assignedItem->item_id)->count())->toBe(3);
     }
 
-    /**
-     * Test: Cannot mark available items as returned
-     */
-    public function test_cannot_mark_available_item_as_returned()
+    public function test_partial_return_changes_only_the_selected_assignment_for_shared_inventory()
     {
-        $availableItem = Inventory::create([
-            'category_id' => $this->category->category_id,
-            'item_name' => 'Available Test Item',
-            'description' => 'Test',
+        $this->assignedItem->update(['quantity' => 0]);
+        $otherUser = User::factory()->create(['role_id' => $this->endUser->role_id]);
+        $firstTransaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 2,
+            'issued_quantity' => 2,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+        $secondTransaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $otherUser->id,
+            'quantity' => 3,
+            'issued_quantity' => 3,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+        $firstAssignment = AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->custodian->id,
+            'target_user_id' => $this->endUser->id,
+            'transaction_id' => $firstTransaction->id,
+            'quantity' => 2,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
+        ]);
+        $secondAssignment = AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->custodian->id,
+            'target_user_id' => $otherUser->id,
+            'transaction_id' => $secondTransaction->id,
+            'quantity' => 3,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $firstTransaction->id,
+                'return_quantity' => 1,
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'));
+
+        expect($firstTransaction->fresh()->quantity)->toBe(1)
+            ->and($firstAssignment->fresh()->quantity)->toBe(1)
+            ->and($secondTransaction->fresh()->quantity)->toBe(3)
+            ->and($secondAssignment->fresh()->quantity)->toBe(3)
+            ->and($this->assignedItem->fresh()->quantity)->toBe(1)
+            ->and($this->assignedItem->fresh()->assigned_to_user_id)->toBeNull()
+            ->and(AssignmentReturn::where('transaction_id', $firstTransaction->id)->sum('quantity'))->toBe(1)
+            ->and(AssignmentReturn::where('transaction_id', $secondTransaction->id)->count())->toBe(0);
+    }
+
+    public function test_custodian_can_select_multiple_assignments_and_only_selected_rows_are_returned()
+    {
+        $this->assignedItem->update(['quantity' => 0]);
+        $recipientTwo = User::factory()->create(['role_id' => $this->endUser->role_id]);
+        $recipientThree = User::factory()->create(['role_id' => $this->endUser->role_id]);
+        $recipients = [$this->endUser, $recipientTwo, $recipientThree];
+        $transactions = [];
+        $assignments = [];
+
+        foreach ($recipients as $recipient) {
+            $transaction = Transaction::create([
+                'item_id' => $this->assignedItem->item_id,
+                'user_id' => $recipient->id,
+                'quantity' => 1,
+                'issued_quantity' => 1,
+                'transaction_date' => now(),
+                'status' => 'assigned',
+            ]);
+            $transactions[] = $transaction;
+            $assignments[] = AssignmentRequest::create([
+                'item_id' => $this->assignedItem->item_id,
+                'user_id' => $this->custodian->id,
+                'target_user_id' => $recipient->id,
+                'transaction_id' => $transaction->id,
+                'quantity' => 1,
+                'status' => 'approved',
+                'requested_at' => now(),
+                'responded_at' => now(),
+            ]);
+        }
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_ids' => [$transactions[0]->id, $transactions[1]->id],
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'))
+            ->assertSessionHas('success', '2 assignment return(s) received and recorded.');
+
+        expect($this->assignedItem->fresh()->quantity)->toBe(2)
+            ->and($this->assignedItem->fresh()->status)->toBe('available')
+            ->and($transactions[0]->fresh()->status)->toBe('returned')
+            ->and($transactions[1]->fresh()->status)->toBe('returned')
+            ->and($assignments[0]->fresh()->status)->toBe('returned')
+            ->and($assignments[1]->fresh()->status)->toBe('returned')
+            ->and($transactions[2]->fresh()->status)->toBe('assigned')
+            ->and($assignments[2]->fresh()->status)->toBe('approved')
+            ->and(AssignmentReturn::count())->toBe(2)
+            ->and(StockMovement::where('movement_type', 'returned')->count())->toBe(2);
+    }
+
+    public function test_returns_greater_than_remaining_and_inactive_assignments_do_not_change_records()
+    {
+        $this->assignedItem->update(['quantity' => 0]);
+        $transaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
             'quantity' => 1,
-            'unit' => 'pcs',
+            'issued_quantity' => 1,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+        $assignment = AssignmentRequest::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->custodian->id,
+            'target_user_id' => $this->endUser->id,
+            'transaction_id' => $transaction->id,
+            'quantity' => 1,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
+        ]);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $transaction->id,
+                'return_quantity' => 2,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasErrors('return_quantity');
+
+        expect($this->assignedItem->fresh()->quantity)->toBe(0)
+            ->and($transaction->fresh()->quantity)->toBe(1)
+            ->and($transaction->fresh()->status)->toBe('assigned')
+            ->and($assignment->fresh()->quantity)->toBe(1)
+            ->and(AssignmentReturn::count())->toBe(0)
+            ->and(StockMovement::where('movement_type', 'returned')->count())->toBe(0);
+
+        $transaction->update(['quantity' => 0, 'status' => 'returned']);
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $transaction->id,
+                'return_quantity' => 1,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasErrors('return_quantity');
+
+        expect($this->assignedItem->fresh()->quantity)->toBe(0)
+            ->and($assignment->fresh()->quantity)->toBe(1)
+            ->and(AssignmentReturn::count())->toBe(0)
+            ->and(StockMovement::where('movement_type', 'returned')->count())->toBe(0);
+    }
+
+    public function test_serialized_return_requires_the_exact_assigned_asset_and_quantity_one()
+    {
+        $serializedCategory = Category::create([
+            'category_name' => 'Serialized Equipment',
+            'requires_serial_number' => true,
+        ]);
+        $asset = Inventory::create([
+            'category_id' => $serializedCategory->category_id,
+            'item_name' => 'Laptop',
+            'serial_number' => 'SN-RETURN-100',
+            'inventory_item_no' => 'INV-RETURN-100',
+            'description' => 'Serialized asset',
+            'quantity' => 0,
+            'unit' => 'piece',
             'date_acquired' => now()->toDateString(),
-            'status' => 'available',
-            'assigned_to_user_id' => null,
+            'status' => 'assigned',
+            'assigned_to_user_id' => $this->endUser->id,
             'user_id' => $this->custodian->id,
         ]);
-
-        $this->actingAs($this->custodian);
-
-        $response = $this->post(route('propertyCustodian.inventory.mark-returned', $availableItem->item_id), [
-            'notes' => 'Test',
+        $transaction = Transaction::create([
+            'item_id' => $asset->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 1,
+            'issued_quantity' => 1,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+        $assignment = AssignmentRequest::create([
+            'item_id' => $asset->item_id,
+            'user_id' => $this->custodian->id,
+            'target_user_id' => $this->endUser->id,
+            'transaction_id' => $transaction->id,
+            'quantity' => 1,
+            'status' => 'approved',
+            'requested_at' => now(),
+            'responded_at' => now(),
         ]);
 
-        $response->assertRedirect();
-        $response->assertSessionHas('error');
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $transaction->id,
+                'return_quantity' => 2,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasErrors('return_quantity');
+
+        expect($asset->fresh()->quantity)->toBe(0)
+            ->and($asset->fresh()->status)->toBe('assigned')
+            ->and($asset->fresh()->assigned_to_user_id)->toBe($this->endUser->id)
+            ->and($transaction->fresh()->quantity)->toBe(1)
+            ->and($assignment->fresh()->quantity)->toBe(1)
+            ->and(AssignmentReturn::where('transaction_id', $transaction->id)->count())->toBe(0);
+
+        $this->actingAs($this->custodian)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $transaction->id,
+                'return_quantity' => 1,
+            ])
+            ->assertRedirect(route('propertyCustodian.inventory'));
+
+        expect($asset->fresh()->quantity)->toBe(1)
+            ->and($asset->fresh()->status)->toBe('available')
+            ->and($transaction->fresh()->status)->toBe('returned')
+            ->and($assignment->fresh()->status)->toBe('returned')
+            ->and(AssignmentReturn::where('transaction_id', $transaction->id)->sum('quantity'))->toBe(1);
+    }
+
+    public function test_only_property_custodians_can_receive_an_assignment_return()
+    {
+        $this->assignedItem->update(['quantity' => 0]);
+        $transaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 1,
+            'issued_quantity' => 1,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+
+        $this->actingAs($this->endUser)
+            ->post(route('propertyCustodian.inventory.receive-return'), [
+                'transaction_id' => $transaction->id,
+                'return_quantity' => 1,
+            ])
+            ->assertForbidden();
+
+        expect($this->assignedItem->fresh()->quantity)->toBe(0)
+            ->and($transaction->fresh()->status)->toBe('assigned')
+            ->and(AssignmentReturn::count())->toBe(0)
+            ->and(StockMovement::where('movement_type', 'returned')->count())->toBe(0);
     }
 
     public function test_custodian_can_send_an_available_item_to_maintenance_and_audit_it()
@@ -515,8 +888,16 @@ class InventoryReturnsTest extends TestCase
         $this->assertDatabaseHas('stock_movements', [
             'inventory_id' => $this->assignedItem->item_id,
             'movement_type' => 'maintenance',
+            'reference_type' => 'maintenance_record',
             'notes' => 'Needs repair',
         ]);
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.inventory'))
+            ->assertViewHas('inventoryStatusCounts', fn ($counts) => $counts['under_maintenance'] === 1)
+            ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['attention'] === 1);
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.transactions'))
+            ->assertViewHas('availableInventoryItems', fn ($items) => $items->isEmpty());
     }
 
     public function test_ineligible_category_disables_send_to_maintenance_in_available_inventory()
@@ -659,6 +1040,13 @@ class InventoryReturnsTest extends TestCase
             'movement_type' => 'maintenance_completed',
             'notes' => 'Power cable replaced.',
         ]);
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.inventory'))
+            ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['available'] === 1)
+            ->assertViewHas('inventoryStatusCounts', fn ($counts) => $counts['available'] === 1);
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.transactions'))
+            ->assertViewHas('availableInventoryItems', fn ($items) => $items->first()['quantity'] === 1);
     }
 
     public function test_custodian_can_dispose_an_available_item_and_audit_it()
@@ -684,6 +1072,13 @@ class InventoryReturnsTest extends TestCase
             'quantity_after' => 0,
             'notes' => 'Beyond repair',
         ]);
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.inventory'))
+            ->assertViewHas('inventoryStatusCounts', fn ($counts) => $counts['disposed'] === 1)
+            ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['total'] === 0);
+        $this->actingAs($this->custodian)
+            ->get(route('propertyCustodian.transactions'))
+            ->assertViewHas('availableInventoryItems', fn ($items) => $items->isEmpty());
     }
 
     /**
@@ -691,21 +1086,43 @@ class InventoryReturnsTest extends TestCase
      */
     public function test_audit_row_created_on_direct_return()
     {
+        $this->assignedItem->update(['quantity' => 0]);
+        $transaction = Transaction::create([
+            'item_id' => $this->assignedItem->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 1,
+            'issued_quantity' => 1,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
+
         $this->actingAs($this->custodian);
 
-        $this->post(route('propertyCustodian.inventory.mark-returned', $this->assignedItem->item_id), [
+        $this->post(route('propertyCustodian.inventory.receive-return'), [
+            'transaction_id' => $transaction->id,
+            'return_quantity' => 1,
             'notes' => 'Item received from warehouse',
         ]);
 
         // Verify audit row
         $movement = StockMovement::where('inventory_id', $this->assignedItem->item_id)
             ->where('movement_type', 'returned')
-            ->where('reference_type', 'inventory')
+            ->where('reference_type', 'assignment_return')
             ->first();
 
         $this->assertNotNull($movement);
+        $this->assertDatabaseHas('assignment_returns', [
+            'id' => $movement->reference_id,
+            'transaction_id' => $transaction->id,
+            'inventory_id' => $this->assignedItem->item_id,
+        ]);
         $this->assertEquals($this->custodian->id, $movement->user_id);
-        $this->assertEquals($this->assignedItem->quantity, $movement->quantity);
+        $this->assertSame(1, $movement->quantity);
+        $this->assertDatabaseHas('inventory', [
+            'item_id' => $this->assignedItem->item_id,
+            'quantity' => 1,
+            'status' => 'available',
+        ]);
     }
 
     /**
@@ -763,20 +1180,30 @@ class InventoryReturnsTest extends TestCase
         $this->actingAs($this->custodian);
         $this->post(route('propertyCustodian.returns.approve', $returnRequest->id));
 
-        // Assign another item for direct return (Flow B)
+        // Assign another item for direct receipt (Flow B)
         $secondItem = Inventory::create([
             'category_id' => $this->category->category_id,
             'item_name' => 'Second Item',
             'description' => 'Test',
-            'quantity' => 1,
+            'quantity' => 0,
             'unit' => 'pcs',
             'date_acquired' => now()->toDateString(),
             'status' => 'assigned',
             'assigned_to_user_id' => $this->endUser->id,
             'user_id' => $this->custodian->id,
         ]);
+        $secondTransaction = Transaction::create([
+            'item_id' => $secondItem->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 1,
+            'issued_quantity' => 1,
+            'transaction_date' => now(),
+            'status' => 'assigned',
+        ]);
 
-        $this->post(route('propertyCustodian.inventory.mark-returned', $secondItem->item_id), [
+        $this->post(route('propertyCustodian.inventory.receive-return'), [
+            'transaction_id' => $secondTransaction->id,
+            'return_quantity' => 1,
             'notes' => 'Direct return',
         ]);
 
@@ -786,13 +1213,14 @@ class InventoryReturnsTest extends TestCase
         $this->assertGreaterThanOrEqual(2, $movements->count());
 
         // Verify Flow A (request-based)
-        $requestBased = $movements->where('reference_type', 'assignment_request')->first();
+        $requestBased = $movements->where('reference_type', 'assignment_return')->first();
         $this->assertNotNull($requestBased);
         $this->assertEquals($this->assignedItem->item_id, $requestBased->inventory_id);
 
         // Verify Flow B (direct)
-        $directBased = $movements->where('reference_type', 'inventory')->first();
+        $directBased = $movements->where('reference_type', 'assignment_return')->firstWhere('inventory_id', $secondItem->item_id);
         $this->assertNotNull($directBased);
+        $this->assertSame('assignment_return', $directBased->reference_type);
         $this->assertEquals($secondItem->item_id, $directBased->inventory_id);
     }
 

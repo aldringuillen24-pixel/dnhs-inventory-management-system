@@ -47,75 +47,15 @@
         </div>
     </div>
 
-    {{-- Unified 4-Card System Metrics Strip --}}
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <x-cards.metric-card 
-            title="Active Users" 
-            value="{{ number_format($metrics['activeUsers']) }}" 
-            subtitle="Currently enabled accounts" 
-            class="border-l-4 border-l-indigo-500"
-            iconClass="bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-        >
-            <x-slot:icon>
-                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                    <circle cx="9" cy="7" r="4"/>
-                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                </svg>
-            </x-slot:icon>
-        </x-cards.metric-card>
-
-        <x-cards.metric-card 
-            title="Pending Setup" 
-            value="{{ number_format($metrics['pendingOnboarding']) }}" 
-            subtitle="Awaiting onboarding setup" 
-            class="border-l-4 border-l-amber-500"
-            iconClass="bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400"
-        >
-            <x-slot:icon>
-                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                    <circle cx="9" cy="7" r="4"/>
-                    <line x1="19" y1="8" x2="19" y2="14"/>
-                    <line x1="22" y1="11" x2="16" y2="11"/>
-                </svg>
-            </x-slot:icon>
-        </x-cards.metric-card>
-
-        <x-cards.metric-card 
-            title="Pending Requests" 
-            value="{{ number_format($metrics['pendingRequests']) }}" 
-            subtitle="Awaiting custodian review" 
-            class="border-l-4 border-l-sky-500"
-            iconClass="bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400"
-        >
-            <x-slot:icon>
-                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                    <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/>
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-                    <path d="M12 11h4"/>
-                    <path d="M12 16h4"/>
-                    <path d="M8 11h.01"/>
-                    <path d="M8 16h.01"/>
-                </svg>
-            </x-slot:icon>
-        </x-cards.metric-card>
-
-        <x-cards.metric-card 
-            title="Active Maintenance" 
-            value="{{ number_format($metrics['openMaintenance']) }}" 
-            subtitle="Units needing repair or inspection" 
-            class="border-l-4 border-l-rose-500"
-            iconClass="bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400"
-        >
-            <x-slot:icon>
-                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-                </svg>
-            </x-slot:icon>
-        </x-cards.metric-card>
-    </div>
+    @php
+        $kpiMetrics = [
+            ['title' => 'Active Users', 'value' => number_format($metrics['activeUsers']), 'subtitle' => 'Currently enabled accounts', 'icon' => 'users', 'iconClass' => 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400', 'accentClass' => 'border-l-indigo-500'],
+            ['title' => 'Pending Setup', 'value' => number_format($metrics['pendingOnboarding']), 'subtitle' => 'Awaiting onboarding setup', 'icon' => 'user-plus', 'iconClass' => 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400', 'accentClass' => 'border-l-amber-500'],
+            ['title' => 'Pending Requests', 'value' => number_format($metrics['pendingRequests']), 'subtitle' => 'Awaiting custodian review', 'icon' => 'clipboard-list', 'iconClass' => 'bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400', 'accentClass' => 'border-l-sky-500'],
+            ['title' => 'Active Maintenance', 'value' => number_format($metrics['openMaintenance']), 'subtitle' => 'Units needing repair or inspection', 'icon' => 'wrench', 'iconClass' => 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400', 'accentClass' => 'border-l-rose-500'],
+        ];
+    @endphp
+    <x-cards.kpi-summary :metrics="$kpiMetrics" />
 
     {{-- Roles and workflow analytics --}}
     <div class="mt-8">

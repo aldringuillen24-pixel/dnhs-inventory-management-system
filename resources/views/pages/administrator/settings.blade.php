@@ -306,13 +306,13 @@
                             }
                         }">
                         <div class="flex items-center gap-3">
-                            <div class="flex h-10 w-10 items-center justify-center rounded-full {{ $systemDiagnostics['openRouterKeySet'] ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' }}">
+                            <div class="flex h-10 w-10 items-center justify-center rounded-full {{ $systemDiagnostics['geminiKeySet'] ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' }}">
                                 <i data-lucide="bot" class="h-5 w-5"></i>
                             </div>
                             <div>
-                                <p class="font-medium text-gray-900 dark:text-white">Provider Status: {{ $systemDiagnostics['openRouterKeySet'] ? 'OpenRouter Connected' : 'Grounded Local Intelligence (Fallback Active)' }}</p>
+                                <p class="font-medium text-gray-900 dark:text-white">Provider Status: {{ $systemDiagnostics['geminiKeySet'] ? 'Google Gemini configured' : 'Grounded Local Intelligence (Fallback Active)' }}</p>
                                 <p class="text-xs text-gray-500 dark:text-gray-400">
-                                    {{ $systemDiagnostics['openRouterKeySet'] ? 'Live OpenRouter API key detected in environment.' : 'No API key set. Assistant gracefully responds using local database rules.' }}
+                                    {{ $systemDiagnostics['geminiKeySet'] ? 'Gemini API key detected in environment; use Test Connection to verify access.' : 'No Gemini API key set. The assistant uses grounded local responses.' }}
                                 </p>
                                 {{-- Ping result --}}
                                 <p x-show="pingResult !== null" class="mt-1 text-xs font-medium"
@@ -321,9 +321,9 @@
                             </div>
                         </div>
                         <div class="flex items-center gap-3">
-                            <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium {{ $systemDiagnostics['openRouterKeySet'] ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' }}">
-                                <span class="h-1.5 w-1.5 rounded-full {{ $systemDiagnostics['openRouterKeySet'] ? 'bg-emerald-500' : 'bg-amber-500' }}"></span>
-                                {{ $systemDiagnostics['openRouterKeySet'] ? 'Active Online' : 'Local Fallback' }}
+                            <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium {{ $systemDiagnostics['geminiKeySet'] ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' }}">
+                                <span class="h-1.5 w-1.5 rounded-full {{ $systemDiagnostics['geminiKeySet'] ? 'bg-emerald-500' : 'bg-amber-500' }}"></span>
+                                {{ $systemDiagnostics['geminiKeySet'] ? 'Key Configured' : 'Local Fallback' }}
                             </span>
                             <button type="button" @click="testConnection"
                                 :disabled="pinging"
@@ -350,12 +350,12 @@
                                     <i data-lucide="copy" class="h-4 w-4"></i>
                                 </button>
                             </div>
-                            <p class="mt-1 text-xs text-gray-500">Default: <code class="font-mono">meta-llama/llama-3.3-70b-instruct:free</code></p>
+                            <p class="mt-1 text-xs text-gray-500">Active model: <code class="font-mono">{{ $systemDiagnostics['activeAiModel'] }}</code></p>
                         </div>
 
                         {{-- Fallback Model --}}
                         <div>
-                            <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Secondary Fallback Model</label>
+                            <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Fallback Response</label>
                             <div class="relative">
                                 <input type="text" name="fallback_model"
                                     value="{{ old('fallback_model', $aiConfig['fallback_model']) }}"
@@ -367,7 +367,7 @@
                                     <i data-lucide="copy" class="h-4 w-4"></i>
                                 </button>
                             </div>
-                            <p class="mt-1 text-xs text-gray-500">Backup model used when primary rate limits occur.</p>
+                            <p class="mt-1 text-xs text-gray-500">Grounded local facts are used when Gemini is unavailable or its response fails validation.</p>
                         </div>
 
                         {{-- Chat History Window --}}

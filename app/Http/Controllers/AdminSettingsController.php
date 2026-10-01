@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Inventory;
 use App\Models\User;
 use App\Models\UserAuditLog;
-use App\Services\AiInventoryService;
+use App\Services\GeminiApiService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Artisan;
@@ -38,8 +38,8 @@ class AdminSettingsController extends Controller
             'cacheDriver'       => config('cache.default'),
             'sessionLifetime'   => config('session.lifetime'),
             'queueDriver'       => config('queue.default'),
-            'openRouterKeySet'  => !empty(config('services.openrouter.api_key')),
-            'activeAiModel'     => config('services.openrouter.model', 'meta-llama/llama-3.3-70b-instruct:free'),
+            'geminiKeySet'      => !empty(config('services.gemini.api_key')),
+            'activeAiModel'     => config('services.gemini.model', 'gemini-3.1-flash-lite'),
             'totalAuditLogs'    => UserAuditLog::count(),
             'totalUsers'        => User::count(),
             'totalInventory'    => Inventory::count(),
@@ -62,9 +62,9 @@ class AdminSettingsController extends Controller
         ]);
 
         $aiConfig = session('admin_settings_ai', [
-            'provider'             => 'OpenRouter (Fallback: Grounded Local)',
-            'primary_model'        => 'meta-llama/llama-3.3-70b-instruct:free',
-            'fallback_model'       => 'deepseek/deepseek-r1:free',
+            'provider'             => 'Google AI Studio (Gemini, local fallback)',
+            'primary_model'        => config('services.gemini.model', 'gemini-3.1-flash-lite'),
+            'fallback_model'       => 'Grounded local response',
             'role_scoped_context'  => '1',
             'max_history_messages' => 6,
         ]);
@@ -119,7 +119,7 @@ class AdminSettingsController extends Controller
                 'max_history_messages' => ['required', 'integer', 'min:2', 'max:20'],
             ]);
 
-            $validated['provider']            = 'OpenRouter (Fallback: Grounded Local)';
+            $validated['provider']            = 'Google AI Studio (Gemini, local fallback)';
             $validated['role_scoped_context'] = $request->has('role_scoped_context') ? '1' : '0';
 
             session(['admin_settings_ai' => $validated]);
@@ -164,21 +164,20 @@ class AdminSettingsController extends Controller
     /**
      * Ping the AI provider to verify connectivity.
      */
-    public function pingAi(Request $request, AiInventoryService $aiService): JsonResponse
+    public function pingAi(Request $request, GeminiApiService $geminiApi): JsonResponse
     {
         try {
-            $user = $request->user();
-            $response = $aiService->ask(
-                user: $user,
-                question: 'Reply with exactly: ok',
-                history: []
+            $response = $geminiApi->generate(
+                'Return only the requested short text.',
+                'Reply with exactly: ok',
+                ['maxOutputTokens' => 8]
             );
 
             $ok = !empty($response);
 
             return response()->json([
                 'ok'      => $ok,
-                'message' => $ok ? 'AI provider responded successfully.' : 'Provider returned an empty response.',
+                'message' => $ok ? 'Gemini API responded successfully.' : 'Gemini API returned no response. Check its key, quota, and model access.',
             ]);
         } catch (\Throwable $e) {
             return response()->json([

@@ -1,0 +1,113 @@
+inventory_id,item_name,category_id,category,unit,quantity_issued,stock_out_date,history_start_month,history_end_month,history_complete,movement_type,status
+1001,Teacher Desk,1,Furniture and Fixtures,pieces,2,2026-06-15,2026-06,2026-09,true,stock_out,approved
+1001,Teacher Desk,1,Furniture and Fixtures,pieces,3,2026-07-15,2026-06,2026-09,true,stock_out,approved
+1001,Teacher Desk,1,Furniture and Fixtures,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+2001,Teacher Desk,8,Other Equipment,pieces,1,2026-06-15,2026-06,2026-09,true,stock_out,approved
+2001,Teacher Desk,8,Other Equipment,pieces,2,2026-07-15,2026-06,2026-09,true,stock_out,approved
+2001,Teacher Desk,8,Other Equipment,pieces,3,2026-08-15,2026-06,2026-09,true,stock_out,approved
+2001,Teacher Desk,8,Other Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+3001,Bond Paper,5,Learning Resources,reams,12,2026-06-10,2026-06,2026-09,true,stock_out,approved
+3001,Bond Paper,5,Learning Resources,reams,15,2026-08-10,2026-06,2026-09,true,stock_out,approved
+3001,Bond Paper,5,Learning Resources,reams,18,2026-09-10,2026-06,2026-09,true,stock_out,approved
+4001,Limited Test Kits,4,Laboratory Equipment,boxes,3,2026-06-20,2026-06,2026-09,false,stock_out,approved
+4001,Limited Test Kits,4,Laboratory Equipment,boxes,4,2026-08-20,2026-06,2026-09,false,stock_out,approved
+5001,Classroom Chair,1,Furniture and Fixtures,pieces,5,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5002,Principal Desk,1,Furniture and Fixtures,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5003,Conference Chair,1,Furniture and Fixtures,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5004,Library Table,1,Furniture and Fixtures,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5005,Storage Rack,1,Furniture and Fixtures,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5006,Steel Cabinet,1,Furniture and Fixtures,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5007,Reading Table,1,Furniture and Fixtures,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5008,Computer Workstation Table,1,Furniture and Fixtures,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5009,Whiteboard,1,Furniture and Fixtures,pieces,6,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5010,Bulletin Board,1,Furniture and Fixtures,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5011,Student Locker,1,Furniture and Fixtures,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5012,Teacher Podium,1,Furniture and Fixtures,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5013,Folding Table,1,Furniture and Fixtures,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5014,Laptop Computer,2,ICT Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5015,Desktop Computer,2,ICT Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5016,LCD Monitor,2,ICT Equipment,pieces,5,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5017,Network Switch,2,ICT Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5018,Wireless Router,2,ICT Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5019,Laser Printer,2,ICT Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5020,Projector,2,ICT Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5021,Web Camera,2,ICT Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5022,Document Camera,2,ICT Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5023,Tablet Computer,2,ICT Equipment,pieces,5,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5024,UPS Unit,2,ICT Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5025,External SSD,2,ICT Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5026,IP Phone,2,ICT Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5027,Photocopier,3,Office Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5028,Paper Shredder,3,Office Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5029,Laminator,3,Office Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5030,Binding Machine,3,Office Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5031,Paper Cutter,3,Office Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5032,Digital Duplicator,3,Office Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5033,Document Scanner,3,Office Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5034,Fax Machine,3,Office Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5035,Electric Typewriter,3,Office Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5036,Time Attendance Terminal,3,Office Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5037,Cash Counting Machine,3,Office Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5038,Label Printer,3,Office Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5039,Office Safe,3,Office Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5040,Compound Microscope,4,Laboratory Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5041,Digital Laboratory Balance,4,Laboratory Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5042,Laboratory Centrifuge,4,Laboratory Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5043,Digital PH Meter,4,Laboratory Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5044,Hot Plate,4,Laboratory Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5045,Digital Thermometer,4,Laboratory Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5046,Bunsen Burner Set,4,Laboratory Equipment,sets,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5047,Lab Glassware Kit,4,Laboratory Equipment,kits,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5048,Spectrophotometer,4,Laboratory Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5049,Autoclave,4,Laboratory Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5050,Dissecting Microscope,4,Laboratory Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5051,Precision Pipette Set,4,Laboratory Equipment,sets,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5052,Test Tube Rack,4,Laboratory Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5053,Science Textbook,5,Learning Resources,copies,8,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5054,Math Workbook,5,Learning Resources,copies,10,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5055,World Atlas,5,Learning Resources,copies,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5056,Dictionary Set,5,Learning Resources,sets,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5057,Storybook Collection,5,Learning Resources,sets,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5058,Reference Encyclopedia,5,Learning Resources,sets,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5059,Classroom Map Set,5,Learning Resources,sets,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5060,Reading Cards,5,Learning Resources,boxes,5,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5061,Flashcard Set,5,Learning Resources,sets,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5062,Learning Manipulatives Kit,5,Learning Resources,kits,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5063,Geometry Kit,5,Learning Resources,kits,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5064,Classroom Globe,5,Learning Resources,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5065,Teacher Manual,5,Learning Resources,copies,6,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5066,Basketball,6,Sports Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5067,Volleyball,6,Sports Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5068,Soccer Ball,6,Sports Equipment,pieces,5,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5069,Badminton Racket Set,6,Sports Equipment,sets,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5070,Table Tennis Set,6,Sports Equipment,sets,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5071,Chess Set,6,Sports Equipment,sets,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5072,Jump Rope Set,6,Sports Equipment,sets,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5073,Softball Glove,6,Sports Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5074,Athletic Hurdle,6,Sports Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5075,Shot Put Ball,6,Sports Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5076,Fitness Mat,6,Sports Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5077,Training Cone Set,6,Sports Equipment,sets,5,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5078,Electric Drill,7,Tools and Maintenance Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5079,Tool Box Set,7,Tools and Maintenance Equipment,sets,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5080,Adjustable Wrench Set,7,Tools and Maintenance Equipment,sets,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5081,Screwdriver Set,7,Tools and Maintenance Equipment,sets,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5082,Extension Ladder,7,Tools and Maintenance Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5083,Hand Saw,7,Tools and Maintenance Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5084,Digital Multimeter,7,Tools and Maintenance Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5085,Wire Stripper,7,Tools and Maintenance Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5086,Soldering Station,7,Tools and Maintenance Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5087,Pipe Wrench,7,Tools and Maintenance Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5088,Portable Generator,7,Tools and Maintenance Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5089,Safety Helmet Set,7,Tools and Maintenance Equipment,sets,5,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5090,Water Dispenser,8,Other Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5091,Wall Clock,8,Other Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5092,Fire Extinguisher,8,Other Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5093,First Aid Kit,8,Other Equipment,kits,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5094,Public Address Speaker,8,Other Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5095,Megaphone,8,Other Equipment,pieces,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5096,Rechargeable Flashlight,8,Other Equipment,pieces,5,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5097,Portable Fan,8,Other Equipment,pieces,3,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5098,Waste Bin Set,8,Other Equipment,sets,2,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5099,Heavy Duty Extension Cord,8,Other Equipment,pieces,4,2026-09-15,2026-06,2026-09,true,stock_out,approved
+5100,Folding Tent,8,Other Equipment,pieces,1,2026-09-15,2026-06,2026-09,true,stock_out,approved

@@ -35,14 +35,11 @@ return [
         ],
     ],
 
-    'openrouter' => [
-        'api_key' => env('OPENROUTER_API_KEY'),
-        'model' => env('OPENROUTER_MODEL', 'meta-llama/llama-3.3-70b-instruct:free'),
-        'max_attempts' => env('OPENROUTER_MAX_ATTEMPTS', 2),
-        'connect_timeout' => env('OPENROUTER_CONNECT_TIMEOUT', 5),
-        'timeout' => env('OPENROUTER_TIMEOUT', 12),
-        'site_url' => env('APP_URL', 'http://localhost'),
-        'site_name' => env('APP_NAME', 'DNHS Inventory Management System'),
+    'gemini' => [
+        'api_key' => env('GEMINI_API_KEY'),
+        'model' => env('GEMINI_MODEL', 'gemini-3.1-flash-lite'),
+        'connect_timeout' => env('GEMINI_CONNECT_TIMEOUT', 5),
+        'timeout' => env('GEMINI_TIMEOUT', 12),
     ],
 
 ];

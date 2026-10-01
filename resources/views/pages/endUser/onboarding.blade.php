@@ -23,7 +23,7 @@
                     </ul>
                 </div>
             @endif
-            <x-onboarding-form action="{{ route('endUser.onboarding.post') }}" />
+            <x-onboarding-form action="{{ route('endUser.onboarding.post') }}" :show-location="true" />
         </div>
     </div>
 

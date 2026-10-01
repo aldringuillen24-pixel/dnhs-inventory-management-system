@@ -26,6 +26,8 @@ class User extends Authenticatable
         'password',
         'temporary_password',
         'status',
+        'building',
+        'room',
     ];
 
     /**

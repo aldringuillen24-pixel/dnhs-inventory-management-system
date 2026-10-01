@@ -2,11 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Category;
 use App\Models\AssignmentRequest;
-use App\Models\Inventory;
 use App\Models\MaintenanceRecord;
-use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserAuditLog;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -16,33 +13,33 @@ class AdminDashboardController extends Controller
 {
     public function index(): View
     {
-        $categoryData = Category::query()
-            ->with(['inventoryItems' => fn ($query) => $query->where('status', '!=', 'disposed')])
-            ->get()
-            ->map(fn ($category) => [
-                'label' => $category->category_name,
-                'value' => (int) $category->inventoryItems->sum('quantity'),
-            ])
-            ->filter(fn ($category) => $category['value'] > 0)
-            ->values();
+        $users = User::query()->with('role')->get();
 
-        $recentTransactions = Transaction::query()
-            ->with(['item:item_id,item_name', 'user:id,first_name,last_name'])
-            ->latest('transaction_date')
-            ->latest('id')
-            ->limit(5)
-            ->get();
+        $roleData = $users
+            ->groupBy(fn ($user) => $user->role?->role_name ?? 'No role assigned')
+            ->map(fn ($roleUsers, $role) => ['label' => $role, 'value' => $roleUsers->count()])
+            ->values();
+        $accountStatusData = $users
+            ->groupBy('status')
+            ->map(fn ($statusUsers, $status) => ['label' => ucfirst((string) $status), 'value' => $statusUsers->count()])
+            ->values();
+        $auditData = UserAuditLog::query()
+            ->latest()
+            ->limit(8)
+            ->get()
+            ->groupBy('action')
+            ->map(fn ($logs, $action) => ['label' => ucwords(str_replace('_', ' ', (string) $action)), 'value' => $logs->count()])
+            ->values();
 
         return view('pages.administrator.dashboard', [
             'title' => 'Admin Dashboard',
             'metrics' => [
-                'inventory' => Inventory::where('status', '!=', 'disposed')->sum('quantity'),
-                'available' => Inventory::where('status', 'available')->sum('quantity'),
-                'transactions' => Transaction::whereDate('transaction_date', today())->count(),
-                'users' => User::where('status', 'active')->count(),
+                'activeUsers' => $users->where('status', 'active')->count(),
+                'pendingOnboarding' => $users->whereNotNull('temporary_password')->count(),
             ],
-            'categoryData' => $categoryData,
-            'recentTransactions' => $recentTransactions,
+            'roleData' => $roleData,
+            'accountStatusData' => $accountStatusData,
+            'auditData' => $auditData,
         ]);
     }
 

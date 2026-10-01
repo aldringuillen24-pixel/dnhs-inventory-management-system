@@ -108,8 +108,11 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::get('/transactions', [PropertyCustodianController::class, 'transactions'])->name('transactions');
 
     Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assignItem'); 
+    Route::post('/transactions/{transactionId}/manual-return', [PropertyCustodianController::class, 'returnManualIssue'])->name('transactions.manual-return');
 
     Route::post('/requests/{id}/approve', [PropertyCustodianController::class, 'approveRequest'])->name('requests.approve');
+
+    Route::post('/requests/{id}/cancel', [PropertyCustodianController::class, 'cancelItemRequest'])->name('requests.cancel');
 
     Route::post('/requests/{id}/decline', [PropertyCustodianController::class, 'declineRequest'])->name('requests.decline');
 
@@ -121,7 +124,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/returns/{id}/decline', [PropertyCustodianController::class, 'declineReturn'])->name('returns.decline');
 
-    Route::post('/inventory/{itemId}/mark-returned', [PropertyCustodianController::class, 'markReturned'])->name('inventory.mark-returned');
+    Route::post('/inventory/receive-return', [PropertyCustodianController::class, 'receiveReturn'])->name('inventory.receive-return');
 
     Route::post('/inventory/{itemId}/send-to-maintenance', [PropertyCustodianController::class, 'sendToMaintenance'])->name('inventory.send-to-maintenance');
 
@@ -138,6 +141,9 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::get('/inventory/{inventory}/qr-labels', [PropertyCustodianController::class, 'printQr'])->name('inventory.qr.labels');
 
     Route::get('/reports', [PropertyCustodianController::class, 'reports'])->name('reports');
+    Route::get('/reports/forecast/recommendations', [PropertyCustodianController::class, 'forecastRecommendations'])->name('reports.forecast.recommendations');
+    Route::post('/reports/forecast', [PropertyCustodianController::class, 'runForecast'])->name('reports.forecast');
+    Route::post('/reports/forecast/explanation', [PropertyCustodianController::class, 'explainForecast'])->name('reports.forecast.explanation');
 
     Route::get('/profile', function () {
         return view('pages.propertyCustodian.profile', ['title' => 'Profile']);
@@ -217,3 +223,7 @@ Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.
 
 // Authenticated AI Assistant endpoint (accessible by all roles with role-scoped responses)
 Route::middleware('auth')->post('/api/ai/chat', [AiAssistantController::class, 'chat'])->name('ai.chat');
+Route::middleware('auth')->post('/api/ai/chat/reset', [AiAssistantController::class, 'reset'])->name('ai.chat.reset');
+Route::middleware(['auth', 'role:Property Custodian'])
+    ->post('/api/ai/comparison', [AiAssistantController::class, 'compare'])
+    ->name('ai.comparison');

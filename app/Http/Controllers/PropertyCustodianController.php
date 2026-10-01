@@ -7,16 +7,26 @@ use App\Models\Category;
 use App\Models\User;
 use App\Models\Transaction;
 use App\Models\Inventory;
-use App\Models\MaintenanceRecord;
 use App\Models\StockMovement;
+use App\Services\ForecastExplanationService;
+use App\Services\InventoryOperationService;
+use App\Services\StoredDemandForecastService;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
 
 class PropertyCustodianController extends Controller
 {
+    public function __construct(
+        protected ForecastExplanationService $forecastExplanationService,
+        protected StoredDemandForecastService $storedForecastService,
+        protected InventoryOperationService $inventoryOperations
+    )
+    {
+    }
+
     public function onboarding()
     {
         $user = request()->user();
@@ -43,7 +53,6 @@ class PropertyCustodianController extends Controller
             'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
-        $user->first_name = $validated['first_name'];
         $user->last_name = $validated['last_name'] ?? '';
         $user->email = $validated['email'];
         $user->password = $validated['password'];
@@ -139,6 +148,110 @@ class PropertyCustodianController extends Controller
             'categoryData' => $categoryData,
             'requestStatusData' => $requestStatusData,
             'recentActivity' => $recentActivity,
+        ]);
+    }
+
+    public function runForecast()
+    {
+        return redirect()->route('propertyCustodian.reports')->with('forecastResult', $this->storedForecastService->read(request()->user()));
+    }
+
+    public function explainForecast(Request $request)
+    {
+        $validated = $request->validate([
+            'item_name' => ['nullable', 'required_without:inventory_id', 'string', 'max:255'],
+            'inventory_id' => ['nullable', 'required_without:item_name', 'integer', 'min:1'],
+        ]);
+        $user = $request->user();
+        $forecastResult = $this->storedForecastService->read($user);
+
+        if (($forecastResult['status'] ?? null) === 'forbidden') {
+            return redirect()->route('propertyCustodian.reports')->with('error', 'That information is not available for your role.');
+        }
+
+        $matchingRows = collect($forecastResult['rows'] ?? [])->filter(function (array $forecastRow) use ($validated): bool {
+            return isset($validated['inventory_id'])
+                ? (int) ($forecastRow['inventory_id'] ?? 0) === (int) $validated['inventory_id']
+                : strtolower(trim($forecastRow['item_name'] ?? '')) === strtolower(trim($validated['item_name'] ?? ''));
+        })->values();
+
+        if ($matchingRows->count() > 1) {
+            $identities = $matchingRows->pluck('inventory_id')->map(fn (int $id): string => (string) $id)->implode(', ');
+
+            return redirect()->route('propertyCustodian.reports')
+                ->with('error', "That item name matches multiple forecast records. Specify an inventory ID: {$identities}.");
+        }
+
+        $row = $matchingRows->first();
+
+        if ($row === null) {
+            return redirect()->route('propertyCustodian.reports')->with('error', 'No forecast result is available for that item.');
+        }
+
+        $explanation = $this->forecastExplanationService->explain($user, $row);
+
+        if (($explanation['status'] ?? null) === 'forbidden') {
+            return redirect()->route('propertyCustodian.reports')->with('error', $explanation['message']);
+        }
+
+        return redirect()->route('propertyCustodian.reports')
+            ->with('forecastExplanation', $explanation['explanation'])
+            ->with('forecastExplanationItem', $row['item_name']);
+    }
+
+    public function forecastRecommendations(Request $request)
+    {
+        $demoMode = $request->query('source') === 'demo';
+        $forecastResult = $demoMode
+            ? $this->storedForecastService->readDemo($request->user())
+            : $this->storedForecastService->read($request->user());
+        $filters = $request->validate([
+            'source' => ['nullable', Rule::in(['live', 'demo'])],
+            'search' => ['nullable', 'string', 'max:100'],
+            'category' => ['nullable', 'string', 'max:255'],
+            'priority' => ['nullable', Rule::in(['Urgent', 'High', 'Medium', 'Normal'])],
+            'confidence' => ['nullable', Rule::in(['High', 'Medium', 'Low'])],
+            'sort' => ['nullable', Rule::in(['suggested', 'demand', 'available', 'name'])],
+        ]);
+
+        $allRows = collect($forecastResult['rows'] ?? []);
+        $search = strtolower(trim($filters['search'] ?? ''));
+        $rows = $allRows
+            ->filter(fn (array $row): bool => $search === '' || str_contains(strtolower($row['item_name']), $search))
+            ->when(isset($filters['category']), fn ($items) => $items->where('category', $filters['category']))
+            ->when(isset($filters['priority']), fn ($items) => $items->where('priority', $filters['priority']))
+            ->when(isset($filters['confidence']), fn ($items) => $items->where('confidence', $filters['confidence']));
+
+        $rows = $demoMode
+            ? $rows->sortBy('inventory_id')
+            : match ($filters['sort'] ?? 'suggested') {
+                'demand' => $rows->sortByDesc('forecast_demand'),
+                'available' => $rows->sortBy('available_stock'),
+                'name' => $rows->sortBy(fn (array $row): string => $row['item_name'], SORT_NATURAL | SORT_FLAG_CASE),
+                default => $rows->sortBy([
+                    ['suggested_procurement', 'desc'],
+                    ['priority_rank', 'desc'],
+                ]),
+            };
+
+        $perPage = 15;
+        $page = LengthAwarePaginator::resolveCurrentPage();
+        $recommendations = new LengthAwarePaginator(
+            $rows->forPage($page, $perPage)->values(),
+            $rows->count(),
+            $perPage,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()],
+        );
+
+        return view('pages.propertyCustodian.forecast-details', [
+            'title' => 'Demand Forecast Recommendations',
+            'forecastResult' => $forecastResult,
+            'demoMode' => $demoMode,
+            'isDemoForecast' => $demoMode,
+            'recommendations' => $recommendations,
+            'categories' => $allRows->pluck('category')->filter()->unique()->sort()->values(),
+            'filters' => $filters,
         ]);
     }
 
@@ -248,6 +361,9 @@ class PropertyCustodianController extends Controller
             ->limit(10)
             ->get();
 
+        $liveForecastResult = $this->storedForecastService->read($request->user());
+        $demoForecastResult = $this->storedForecastService->readDemo($request->user());
+
         return view('pages.propertyCustodian.reports', [
             'title' => 'Property Custodian Reports',
             'metrics' => [
@@ -268,6 +384,8 @@ class PropertyCustodianController extends Controller
             'lowStockData' => $lowStockData,
             'attentionData' => $attentionData,
             'recentTransactions' => $recentTransactions,
+            'liveForecastResult' => $liveForecastResult,
+            'demoForecastResult' => $demoForecastResult,
             'reportFilters' => ['date_from' => $dateFrom->toDateString(), 'date_to' => $dateTo->toDateString()],
         ]);
     }
@@ -281,35 +399,23 @@ class PropertyCustodianController extends Controller
             ->orderBy('first_name')
             ->orderBy('last_name')
             ->get();
+        $assignedQuantity = (int) Transaction::where('status', 'assigned')->sum('quantity');
         $inventoryMetrics = [
-            'total' => (int) Inventory::where('status', '!=', 'disposed')->sum('quantity'),
+            'total' => (int) Inventory::where('status', '!=', 'disposed')->sum('quantity') + $assignedQuantity,
             'available' => (int) Inventory::where('status', 'available')->sum('quantity'),
-            'assigned' => (int) Inventory::where('status', 'assigned')->sum('quantity'),
+            'assigned' => $assignedQuantity,
             'attention' => (int) Inventory::whereIn('status', ['under_inspection', 'under_maintenance'])->sum('quantity'),
         ];
-        $search = trim((string) $request->query('search', ''));
-        $categoryId = $request->integer('category');
         $statuses = ['available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose', 'disposed'];
-        $statusFilter = $request->query('status', '');
-        $statusFilter = in_array($statusFilter, $statuses, true) ? $statusFilter : '';
-        // Item condition is represented by its current inventory workflow status.
-        $conditionStatuses = [
-            'good' => ['available', 'assigned'],
-            'fair' => ['under_inspection'],
-            'poor' => ['under_maintenance', 'ready_to_dispose', 'disposed'],
-        ];
-        $conditionFilter = $request->query('condition', '');
-        $conditionFilter = array_key_exists($conditionFilter, $conditionStatuses) ? $conditionFilter : '';
         $activeWorkspace = in_array($request->query('workspace', 'all'), ['all', 'available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose', 'disposed'], true)
             ? $request->query('workspace', 'all')
             : 'all';
-        $buildInventoryQuery = function (bool $applyAllFilters = true) use ($search, $categoryId, $statusFilter, $conditionFilter, $conditionStatuses) {
+        $buildInventoryQuery = function () {
             return Inventory::query()
-                ->with('category:category_id,category_name,is_maintenance_eligible')
-                ->select('item_name', 'category_id', 'status')
+                ->with('category:category_id,category_name,is_maintenance_eligible,requires_serial_number')
+                ->select('item_name', 'category_id', 'unit', 'status')
                 ->selectRaw('MIN(item_id) as item_id')
                 ->selectRaw('MIN(item_id) as source_item_id')
-                ->selectRaw('MAX(unit) as unit')
                 ->selectRaw('MAX(ics_no) as ics_no')
                 ->selectRaw('MAX(description) as description')
                 ->selectRaw('SUM(quantity) as quantity')
@@ -318,19 +424,7 @@ class PropertyCustodianController extends Controller
                 ->selectRaw('MAX(date_acquired) as date_acquired')
                 ->selectRaw('MAX(lifespan_years) as lifespan_years')
                 ->selectRaw('MAX(expected_end_date) as expected_end_date')
-                ->when($search !== '', function ($query) use ($search): void {
-                    $query->where(function ($searchQuery) use ($search): void {
-                        $searchQuery
-                            ->where('item_name', 'like', '%' . $search . '%')
-                            ->orWhere('unit', 'like', '%' . $search . '%')
-                            ->orWhere('ics_no', 'like', '%' . $search . '%')
-                            ->orWhereHas('category', fn ($categoryQuery) => $categoryQuery->where('category_name', 'like', '%' . $search . '%'));
-                    });
-                })
-                ->when($categoryId > 0, fn ($query) => $query->where('category_id', $categoryId))
-                ->when($applyAllFilters && $statusFilter !== '', fn ($query) => $query->where('status', $statusFilter))
-                ->when($applyAllFilters && $conditionFilter !== '', fn ($query) => $query->whereIn('status', $conditionStatuses[$conditionFilter]))
-                ->groupBy('item_name', 'category_id', 'status')
+                ->groupBy('item_name', 'category_id', 'unit', 'status')
                 ->orderBy('item_name');
         };
         $paginateInventory = function ($query, string $pageName) {
@@ -338,29 +432,26 @@ class PropertyCustodianController extends Controller
         };
         $allInventoryPage = $paginateInventory($buildInventoryQuery(), 'all_page');
         $inventoryPages = collect($statuses)
-            ->mapWithKeys(fn (string $status) => [$status => $paginateInventory($buildInventoryQuery(false)->where('status', $status), $status . '_page')]);
+            ->mapWithKeys(fn (string $status) => [$status => $paginateInventory($buildInventoryQuery()->where('status', $status), $status . '_page')]);
         $inventoryItems = $allInventoryPage->getCollection()
             ->toBase()
             ->merge($inventoryPages->flatMap(fn ($page) => $page->getCollection()->toBase()))
-            ->unique(fn ($item): string => $item->item_name . '|' . $item->category_id . '|' . $item->status)
+            ->unique(fn ($item): string => $item->item_name . '|' . $item->category_id . '|' . $item->unit . '|' . $item->status)
             ->values();
         $inventoryByStatus = $inventoryItems->groupBy('status');
-        $inventoryStatusCounts = collect($statuses)->mapWithKeys(function (string $status) use ($buildInventoryQuery): array {
-            return [$status => (int) $buildInventoryQuery(false)->where('status', $status)->get()->sum('quantity')];
-        });
-        $inventoryFilters = [
-            'search' => $search,
-            'category' => $categoryId > 0 ? (string) $categoryId : '',
-            'status' => $statusFilter,
-            'condition' => $conditionFilter,
-        ];
+        $inventoryStatusCounts = collect($statuses)->mapWithKeys(function (string $status) use ($buildInventoryQuery, $assignedQuantity): array {
+            $quantity = $status === 'assigned'
+                ? $assignedQuantity
+                : (int) $buildInventoryQuery()->where('status', $status)->get()->sum('quantity');
 
+            return [$status => $quantity];
+        });
         $sourceItemsByGroup = Inventory::query()
-            ->with(['category:category_id,category_name,is_maintenance_eligible', 'assignedTo', 'latestMaintenance', 'latestStockMovement', 'latestDisposalMovement'])
+            ->with(['category:category_id,category_name,is_maintenance_eligible,requires_serial_number', 'assignedTo', 'latestMaintenance', 'latestStockMovement', 'latestDisposalMovement'])
             ->orderBy('item_name')
             ->orderBy('item_id')
             ->get()
-            ->groupBy(fn (Inventory $item) => $item->item_name . '|' . $item->category_id . '|' . ($item->status ?? ''));
+            ->groupBy(fn (Inventory $item) => $item->item_name . '|' . $item->category_id . '|' . $item->unit . '|' . ($item->status ?? ''));
 
         $maintenanceItems = $sourceItemsByGroup
             ->filter(function ($sourceItems): bool {
@@ -371,19 +462,23 @@ class PropertyCustodianController extends Controller
             })
             ->values();
 
-        $latestAssignments = Transaction::query()
-            ->with('user:id,first_name,last_name,username')
+        $activeAssignments = Transaction::query()
+            ->with([
+                'user:id,first_name,last_name,username',
+                'assignmentRequests:id,transaction_id,item_id,user_id,target_user_id,quantity,status',
+                'assignmentReturns:id,transaction_id,quantity',
+            ])
             ->where('status', 'assigned')
+            ->where('quantity', '>', 0)
             ->latest('transaction_date')
             ->latest('id')
             ->get()
-            ->unique('item_id')
-            ->keyBy('item_id');
+            ->groupBy('item_id');
 
-        $attachGroupDetails = function ($collection) use ($sourceItemsByGroup, $latestAssignments): void {
-            $collection->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup, $latestAssignments): void {
+        $attachGroupDetails = function ($collection) use ($sourceItemsByGroup, $activeAssignments): void {
+            $collection->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup, $activeAssignments): void {
                 $matchedSourceItems = $sourceItemsByGroup->get(
-                    $inventoryItem->item_name . '|' . $inventoryItem->category_id . '|' . ($inventoryItem->status ?? ''),
+                    $inventoryItem->item_name . '|' . $inventoryItem->category_id . '|' . $inventoryItem->unit . '|' . ($inventoryItem->status ?? ''),
                     collect(),
                 );
 
@@ -394,13 +489,58 @@ class PropertyCustodianController extends Controller
                     $matchedSourceItems = $fallbackSource ? collect([$fallbackSource]) : collect();
                 }
 
-                $matchedSourceItems->each(function (Inventory $sourceItem) use ($latestAssignments): void {
-                    $sourceItem->latestAssignment = $latestAssignments->get($sourceItem->item_id);
+                $matchedSourceItems->each(function (Inventory $sourceItem) use ($activeAssignments): void {
+                    $itemAssignments = $activeAssignments->get($sourceItem->item_id, collect());
+                    $sourceItem->latestAssignment = $itemAssignments->first();
+                    $sourceItem->assigned_quantity = (int) $itemAssignments->sum('quantity');
+                    $sourceItem->receive_return_assignments = $itemAssignments
+                        ->filter(fn (Transaction $transaction) => $transaction->user_id && (int) $transaction->quantity > 0)
+                        ->map(function (Transaction $transaction) use ($sourceItem) {
+                            $assignmentRequest = $transaction->assignmentRequests->first(fn (AssignmentRequest $assignment) =>
+                                (int) $assignment->item_id === (int) $sourceItem->item_id
+                                && (int) $assignment->target_user_id === (int) $transaction->user_id
+                                && in_array($assignment->status, ['approved', 'accepted'], true)
+                            );
+                            $pendingReturnRequest = $transaction->assignmentRequests->first(fn (AssignmentRequest $assignment) =>
+                                (int) $assignment->item_id === (int) $sourceItem->item_id
+                                && (int) $assignment->user_id === (int) $transaction->user_id
+                                && (int) $assignment->target_user_id === (int) auth()->id()
+                                && in_array($assignment->status, ['waiting for custodian approval'], true)
+                            );
+                            $returnedQuantity = (int) $transaction->assignmentReturns->sum('quantity');
+
+                            return [
+                                'transaction_id' => $transaction->id,
+                                'assignment_request_id' => $assignmentRequest?->id,
+                                'return_request_id' => $pendingReturnRequest?->id,
+                                'return_request_quantity' => (int) ($pendingReturnRequest?->quantity ?? 0),
+                                'inventory_id' => $sourceItem->item_id,
+                                'inventory_item_no' => $sourceItem->inventory_item_no,
+                                'item_name' => $sourceItem->item_name,
+                                'category' => $sourceItem->category?->category_name ?? 'Uncategorized',
+                                'unit' => $sourceItem->unit,
+                                'serial_number' => $sourceItem->serial_number,
+                                'recipient' => $transaction->user?->full_name ?? $transaction->user?->username ?? 'Unknown recipient',
+                                'issued_quantity' => max((int) $transaction->issued_quantity, (int) $transaction->quantity + $returnedQuantity),
+                                'returned_quantity' => $returnedQuantity,
+                                'remaining_quantity' => (int) $transaction->quantity,
+                                'is_serialized' => (bool) $sourceItem->category?->requires_serial_number,
+                            ];
+                        })
+                        ->values();
+                    $sourceItem->active_assignee_summary = $itemAssignments
+                        ->groupBy(fn (Transaction $transaction) => $transaction->user?->full_name
+                            ?? $transaction->user?->username
+                            ?? $transaction->manual_recipient_name
+                            ?? 'Recorded assignee')
+                        ->map(fn ($transactions, $name) => $name . ' (' . (int) $transactions->sum('quantity') . ')')
+                        ->implode(', ');
                     $sourceItem->latestMovement = $sourceItem->latestStockMovement;
                     $sourceItem->disposalMovement = $sourceItem->latestDisposalMovement;
                 });
 
                 $inventoryItem->sourceItems = $matchedSourceItems;
+                $inventoryItem->assigned_quantity = (int) $matchedSourceItems->sum('assigned_quantity');
             });
         };
 
@@ -430,7 +570,6 @@ class PropertyCustodianController extends Controller
             'inventoryPages',
             'inventoryStatusCounts',
             'inventoryMetrics',
-            'inventoryFilters',
             'activeWorkspace',
             'maintenanceItems',
             'sourceItemsByGroup',
@@ -508,17 +647,17 @@ class PropertyCustodianController extends Controller
             ->orderBy('item_name')
             ->get();
 
-        $groupedInventory = $inventoryItems->groupBy(function (Inventory $item) {
-            return $item->item_name . '|available';
-        })->map(function ($group) {
-            $first = $group->first();
+        $groupedInventory = $inventoryItems->map(function (Inventory $item) {
             return [
-                'item_id' => $first->item_id,
-                'item_name' => $first->item_name,
-                'status' => $first->status,
-                'category_name' => $first->category?->category_name,
-                'quantity' => $group->sum('quantity'),
-                'inventory_item_no' => $first->inventory_item_no,
+                'item_id' => $item->item_id,
+                'item_name' => $item->item_name,
+                'status' => $item->status,
+                'category_id' => $item->category_id,
+                'category_name' => $item->category?->category_name,
+                'quantity' => (int) $item->quantity,
+                'unit' => $item->unit,
+                'inventory_item_no' => $item->inventory_item_no,
+                'serial_number' => $item->serial_number,
             ];
         })->sortBy('item_name')->values();
 
@@ -536,15 +675,38 @@ class PropertyCustodianController extends Controller
         // Incoming requests from End Users requiring Custodian action
         $incomingRequests = AssignmentRequest::query()
             ->with([
-                'user:id,first_name,last_name,username',
-                'item:item_id,inventory_item_no,item_name,quantity,category_id,status',
+                'user:id,first_name,last_name,username,email',
+                'item:item_id,inventory_item_no,item_name,quantity,category_id,status,unit,serial_number',
                 'item.category:category_id,category_name',
+                'requestedCategory:category_id,category_name,requires_serial_number',
             ])
             ->where('status', 'waiting for approval')
             ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
             ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'))
             ->orderBy('requested_at', 'desc')
             ->get();
+
+        $incomingRequests->each(function (AssignmentRequest $request): void {
+            if ($request->requested_item_name) {
+                $matchingItems = Inventory::query()
+                    ->where('item_name', $request->requested_item_name)
+                    ->where('category_id', $request->requested_category_id)
+                    ->where('unit', $request->requested_unit)
+                    ->where('status', 'available')
+                    ->where('quantity', '>', 0)
+                    ->orderBy('item_id')
+                    ->get();
+                $request->matching_inventory_items = $matchingItems;
+                $request->total_available_stock = (int) $matchingItems->sum('quantity');
+                return;
+            }
+
+            $item = $request->item;
+            $request->matching_inventory_items = $item && $item->status === 'available'
+                ? collect([$item])
+                : collect();
+            $request->total_available_stock = (int) ($item?->status === 'available' ? $item->quantity : 0);
+        });
 
         // Assignments created by this Property Custodian for End Users
         $custodianId = request()->user()?->id;
@@ -574,21 +736,6 @@ class PropertyCustodianController extends Controller
             ->orderBy('requested_at', 'desc')
             ->get();
 
-        // Calculate total available stock across the warehouse for each requested item name
-        $itemNames = $incomingRequests->pluck('item.item_name')->filter()->unique();
-
-        $availableStockByItemName = Inventory::query()
-            ->whereIn('item_name', $itemNames)
-            ->where('status', 'available')
-            ->groupBy('item_name')
-            ->selectRaw('item_name, SUM(quantity) as total_available_stock')
-            ->pluck('total_available_stock', 'item_name');
-
-        $incomingRequests->each(function ($req) use ($availableStockByItemName) {
-            $itemName = optional($req->item)->item_name;
-            $req->total_available_stock = (int) ($availableStockByItemName->get($itemName, 0));
-        });
-
         // Completed / official transactions
         $transactions = Transaction::query()
             ->with([
@@ -605,8 +752,15 @@ class PropertyCustodianController extends Controller
         $totalAssignedCount   = Transaction::where('status', 'assigned')->sum('quantity');
         $pendingRequestsCount = $incomingRequests->count() + $pendingTransfers->count();
         $totalTransactionsCount = $transactions->count();
-        $overdueReturnsCount  = Transaction::whereNotNull('return_date')
-            ->where('return_date', '<', now())
+        $today = now()->toDateString();
+        $overdueReturnsCount  = Transaction::query()
+            ->where(function ($query) use ($today): void {
+                $query->where(function ($query) use ($today): void {
+                    $query->whereNotNull('return_date')->where('return_date', '<', $today);
+                })->orWhere(function ($query) use ($today): void {
+                    $query->whereNotNull('expected_return_date')->where('expected_return_date', '<', $today);
+                });
+            })
             ->where('status', '!=', 'returned')
             ->count();
 
@@ -654,98 +808,64 @@ class PropertyCustodianController extends Controller
             return redirect()->back()->with('error', 'This request has already been processed.');
         }
 
-        $approvalResult = DB::transaction(function () use ($assignmentRequest): string {
-            $assignmentRequest = AssignmentRequest::whereKey($assignmentRequest->getKey())
-                ->lockForUpdate()
-                ->firstOrFail();
+        $validated = $assignmentRequest->requested_item_name
+            ? $request->validate([
+                'inventory_ids' => ['required', 'array', 'min:1'],
+                'inventory_ids.*' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
+            ])
+            : [];
 
-            if ($assignmentRequest->status !== 'waiting for approval') {
-                return 'processed';
-            }
-
-            $inventoryItem = Inventory::whereKey($assignmentRequest->item_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $availableItems = Inventory::where('item_name', $inventoryItem->item_name)
-                ->where('status', 'available')
-                ->where('quantity', '>', 0)
-                ->orderBy('item_id')
-                ->lockForUpdate()
-                ->get();
-            $totalAvailableStock = $availableItems->sum('quantity');
-
-            if ($assignmentRequest->quantity > $totalAvailableStock) {
-                return 'insufficient';
-            }
-
-            $assignmentRequest->loadMissing(['targetUser.role']);
-            $assigneeId = strtolower((string) $assignmentRequest->targetUser?->role?->role_name) === 'end user'
-                ? $assignmentRequest->target_user_id
-                : $assignmentRequest->user_id;
-            $neededQty = $assignmentRequest->quantity;
-
-            // 1. Allocate from the referenced item if it has available quantity
-            if ($inventoryItem->status === 'available' && $inventoryItem->quantity > 0) {
-                $deduct = min($neededQty, $inventoryItem->quantity);
-                $inventoryItem->decrement('quantity', $deduct);
-                if ($inventoryItem->quantity <= 0) {
-                    $inventoryItem->status = 'assigned';
-                    $inventoryItem->assigned_to_user_id = $assigneeId;
-                    $inventoryItem->save();
-                }
-                $neededQty -= $deduct;
-            }
-
-            // 2. If more units are needed (e.g. multiple serialized rows), allocate from other matching available items
-            if ($neededQty > 0) {
-                $otherItems = $availableItems
-                    ->where('status', 'available')
-                    ->where('item_id', '!=', $inventoryItem->item_id)
-                    ->where('quantity', '>', 0)
-                    ->sortBy('item_id');
-
-                foreach ($otherItems as $otherItem) {
-                    if ($neededQty <= 0) {
-                        break;
-                    }
-                    $deduct = min($neededQty, $otherItem->quantity);
-                    $otherItem->decrement('quantity', $deduct);
-                    if ($otherItem->quantity <= 0) {
-                        $otherItem->status = 'assigned';
-                        $otherItem->assigned_to_user_id = $assigneeId;
-                        $otherItem->save();
-                    }
-                    $neededQty -= $deduct;
-                }
-            }
-
-            $transaction = Transaction::create([
-                'item_id' => $assignmentRequest->item_id,
-                'from_user_id' => $assignmentRequest->user_id,
-                'user_id' => $assigneeId,
-                'quantity' => $assignmentRequest->quantity,
-                'transaction_date' => now(),
-                'status' => 'assigned',
-            ]);
-
-            $assignmentRequest->update([
-                'transaction_id' => $transaction->id,
-                'status' => 'approved',
-                'responded_at' => now(),
-            ]);
-
-            return 'approved';
-        });
+        $approvalResult = $this->inventoryOperations->approveAssignment(
+            $assignmentRequest->id,
+            (int) $request->user()->id,
+            $validated['inventory_ids'] ?? [],
+        );
 
         if ($approvalResult === 'processed') {
             return redirect()->back()->with('error', 'This request has already been processed.');
         }
 
         if ($approvalResult === 'insufficient') {
-            return redirect()->back()->with('error', 'Insufficient stock to approve this request.');
+            return redirect()->back()->with('error', 'One or more selected inventory records are no longer available in the requested quantity.');
+        }
+
+        if ($approvalResult === 'invalid_allocation') {
+            return redirect()->back()->with('error', 'Selected items do not match the requested quantity. Update your selection and try again.');
         }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Request approved successfully. Item has been assigned.');
+    }
+
+    public function cancelItemRequest(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'cancellation_reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $cancelled = DB::transaction(function () use ($id, $validated): bool {
+            $assignmentRequest = AssignmentRequest::query()->lockForUpdate()->findOrFail($id);
+            if (
+                $assignmentRequest->status !== 'waiting for approval'
+                || ! $assignmentRequest->requested_item_name
+                || $assignmentRequest->item_id
+            ) {
+                return false;
+            }
+
+            $assignmentRequest->update([
+                'status' => 'cancelled',
+                'cancellation_reason' => $validated['cancellation_reason'],
+                'responded_at' => now(),
+            ]);
+
+            return true;
+        });
+
+        if (! $cancelled) {
+            return redirect()->back()->with('error', 'This item request has already been processed.');
+        }
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Item request cancelled.');
     }
 
     public function declineRequest(Request $request, $id)
@@ -776,73 +896,20 @@ class PropertyCustodianController extends Controller
     public function approveTransfer(Request $request, $id)
     {
         // $id = the transfer AssignmentRequest (status: 'waiting for custodian approval')
-        $transferRequest = AssignmentRequest::with(['item'])->findOrFail($id);
+        $transferRequest = AssignmentRequest::findOrFail($id);
 
         if ($transferRequest->status !== 'waiting for custodian approval') {
             return redirect()->back()->with('error', 'This transfer request has already been processed.');
         }
 
-        DB::transaction(function () use ($transferRequest) {
-            $senderId      = $transferRequest->user_id;
-            $recipientId   = $transferRequest->target_user_id;
-            $itemId        = $transferRequest->item_id;
-            $transferQty   = $transferRequest->quantity;
+        $approved = $this->inventoryOperations->approveTransfer(
+            $transferRequest->id,
+            (int) $request->user()->id,
+        );
 
-            $inventory = Inventory::whereKey($itemId)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            // 1. Find and update the sender's original assignment
-            $originalAssignment = AssignmentRequest::where('item_id', $itemId)
-                ->where(function ($q) use ($senderId) {
-                    $q->where('user_id', $senderId)
-                      ->orWhere('target_user_id', $senderId);
-                })
-                ->where('status', 'transfer pending')
-                ->first();
-
-            if ($originalAssignment) {
-                // Update the original transaction record if it exists
-                if ($originalAssignment->transaction_id) {
-                    $originTx = Transaction::find($originalAssignment->transaction_id);
-                    if ($originTx) {
-                        if ($originTx->quantity <= $transferQty) {
-                            $originTx->quantity = 0;
-                            $originTx->status   = 'transferred';
-                            $originTx->save();
-                        } else {
-                            $originTx->decrement('quantity', $transferQty);
-                        }
-                    }
-                }
-
-                // Mark the original assignment as transferred
-                $originalAssignment->status       = 'transferred';
-                $originalAssignment->responded_at = now();
-                $originalAssignment->save();
-
-                // A full transfer moves custody of this inventory record to the recipient.
-                $inventory->assigned_to_user_id = $recipientId;
-                $inventory->status = 'assigned';
-                $inventory->save();
-            }
-
-            // 2. Create a new transaction for the recipient
-            $newTransaction = Transaction::create([
-                'item_id'          => $itemId,
-                'from_user_id'     => $senderId,
-                'user_id'          => $recipientId,
-                'quantity'         => $transferQty,
-                'transaction_date' => now(),
-                'status'           => 'assigned',
-            ]);
-
-            // 3. Mark transfer request as approved and link it to the new transaction
-            $transferRequest->status         = 'approved';
-            $transferRequest->transaction_id = $newTransaction->id;
-            $transferRequest->responded_at   = now();
-            $transferRequest->save();
-        });
+        if (! $approved) {
+            return redirect()->back()->with('error', 'This transfer request has already been processed.');
+        }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Transfer approved. Item has been transferred to the recipient.');
     }
@@ -863,41 +930,46 @@ class PropertyCustodianController extends Controller
             return redirect()->back()->with('error', 'This transfer request has already been processed.');
         }
 
-        DB::transaction(function () use ($transferRequest, $validated) {
-            $senderId = $transferRequest->user_id;
-            $itemId   = $transferRequest->item_id;
-
-            $originalAssignment = AssignmentRequest::query()
-                ->where('item_id', $itemId)
-                ->where(function ($query) use ($senderId) {
-                    $query->where('target_user_id', $senderId)
-                        ->orWhere(function ($query) use ($senderId) {
-                            $query->where('user_id', $senderId)
-                                ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
-                        });
-                })
-                ->whereIn('status', ['approved', 'transfer pending'])
-                ->lockForUpdate()
-                ->first();
-
-            if ($originalAssignment?->status === 'transfer pending') {
-                $originalAssignment->update(['status' => 'approved']);
-            } elseif ($originalAssignment) {
-                $originalAssignment->increment('quantity', $transferRequest->quantity);
-            }
-
-            // Decline the transfer request
-            $transferRequest->status       = 'declined';
-            $transferRequest->notes        = $validated['notes'] ?? $transferRequest->notes;
-            $transferRequest->responded_at = now();
-            $transferRequest->save();
-        });
+        if (! $this->inventoryOperations->declineTransferRequest($transferRequest->id, $validated['notes'] ?? null)) {
+            return redirect()->back()->with('error', 'This transfer request has already been processed.');
+        }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Transfer request declined. Sender\'s item restored.');
     }
 
     public function assignItem(Request $request)
     {
+        $assignmentType = $request->input('assignment_type', 'registered');
+
+        if ($assignmentType === 'manual') {
+            $validated = $request->validate([
+                'item_id' => ['required', 'exists:inventory,item_id'],
+                'category_id' => ['required', 'exists:categories,category_id'],
+                'unit' => ['required', 'string', 'max:255'],
+                'quantity' => ['required', 'integer', 'min:1'],
+                'manual_recipient_name' => ['required', 'string', 'max:255'],
+                'manual_department' => ['required', 'string', 'max:255'],
+                'building' => ['nullable', 'string', 'max:255'],
+                'room' => ['nullable', 'string', 'max:255'],
+                'manual_recipient_type' => ['nullable', 'string', 'max:100'],
+                'manual_contact' => ['nullable', 'string', 'max:255'],
+                'manual_notes' => ['nullable', 'string', 'max:1000'],
+                'transaction_date' => ['required', 'date'],
+                'expected_return_date' => ['nullable', 'date', 'after_or_equal:transaction_date'],
+            ]);
+
+            $result = $this->inventoryOperations->issueManual(
+                $validated,
+                (int) $request->user()->id,
+            );
+
+            if (is_string($result)) {
+                return redirect()->back()->withInput()->with('error', $result);
+            }
+
+            return redirect()->route('propertyCustodian.transactions')->with('success', 'Item issued manually and recorded in transaction history.');
+        }
+
         $validated = $request->validate([
             'item_id' => ['required', 'exists:inventory,item_id'],
             'user_id' => ['required', 'exists:users,id'],
@@ -905,30 +977,48 @@ class PropertyCustodianController extends Controller
             'transaction_date' => ['nullable', 'date'],
         ]);
 
-        $inventoryItem = Inventory::findOrFail($validated['item_id']);
-        $endUser = User::findOrFail($validated['user_id']);
+        $endUser = User::with('role')->findOrFail($validated['user_id']);
         $userId = $request->user()?->getAuthIdentifier();
 
-        if ($inventoryItem->status !== 'available') {
-            return redirect()->back()->withErrors(['item_id' => 'The selected item is not available for assignment.']);
+        if (strtolower((string) $endUser->role?->role_name) !== 'end user') {
+            return redirect()->back()->withErrors(['user_id' => 'Items can only be assigned to an End User.'])->withInput();
         }
 
-        if ($validated['quantity'] > $inventoryItem->quantity) {
-            return redirect()->back()->withErrors(['quantity' => 'The requested quantity exceeds the available stock.']);
-        }
+        $assignmentResult = $this->inventoryOperations->submitRegisteredAssignment(
+            (int) $validated['item_id'],
+            (int) $userId,
+            (int) $endUser->id,
+            (int) $validated['quantity'],
+            $validated['transaction_date'] ?? null,
+        );
 
-        DB::transaction(function () use ($inventoryItem, $endUser, $validated, $userId): void {
-            AssignmentRequest::create([
-                'item_id' => $inventoryItem->item_id,
-            'user_id' => $userId,
-                'target_user_id' => $endUser->id,
-                'quantity' => $validated['quantity'],
-                'status' => 'waiting for approval',
-                'requested_at' => $validated['transaction_date'] ? Carbon::parse($validated['transaction_date']) : now(),
-            ]);
-        });
+        if ($assignmentResult === 'unavailable') {
+            return redirect()->back()->withErrors(['item_id' => 'The selected item is not available for assignment.'])->withInput();
+        }
+        if ($assignmentResult === 'insufficient') {
+            return redirect()->back()->withErrors(['quantity' => 'The requested quantity exceeds the available stock.'])->withInput();
+        }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Assignment request submitted for approval.');
+    }
+
+    public function returnManualIssue(Request $request, int $transactionId)
+    {
+        $validated = $request->validate([
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $error = $this->inventoryOperations->returnManualIssue(
+            $transactionId,
+            (int) $request->user()->id,
+            $validated['notes'] ?? null,
+        );
+
+        if ($error !== null) {
+            return redirect()->back()->with('error', $error);
+        }
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Manual issue returned and inventory restored.');
     }
 
     public function updateProfile(Request $request)
@@ -970,6 +1060,8 @@ class PropertyCustodianController extends Controller
             'date_acquired' => ['required', 'date'],
             'lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
             'quantity' => ['required', 'integer', 'min:1', 'max:100'],
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
         ]);
 
         $category = Category::findOrFail($validated['category_id']);
@@ -997,6 +1089,8 @@ class PropertyCustodianController extends Controller
                 'user_id' => $userId,
                 'item_name' => $validated['item_name'],
                 'description' => $validated['description'] ?? null,
+                'building' => $validated['building'] ?? null,
+                'room' => $validated['room'] ?? null,
                 'ics_no' => $validated['ics_no'] ?? null,
                 'unit_cost' => $validated['unit_cost'],
                 'date_acquired' => $validated['date_acquired'],
@@ -1006,7 +1100,7 @@ class PropertyCustodianController extends Controller
 
             if ($category->requires_serial_number) {
                 foreach ($serialNumbers as $serialNumber) {
-                    $this->createInventoryItem([
+                    $this->inventoryOperations->stockIn([
                         ...$itemAttributes,
                         'quantity' => 1,
                         'serial_number' => $serialNumber,
@@ -1016,7 +1110,7 @@ class PropertyCustodianController extends Controller
                 return;
             }
 
-            $this->createInventoryItem([
+            $this->inventoryOperations->stockIn([
                 ...$itemAttributes,
                 'quantity' => $validated['quantity'],
                 'serial_number' => null,
@@ -1051,6 +1145,8 @@ class PropertyCustodianController extends Controller
             'date_acquired' => ['required', 'date'],
             'lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
             'quantity' => ['required', 'integer', 'min:1', 'max:100'],
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
         ]);
 
         $inventory->loadMissing('category');
@@ -1060,6 +1156,7 @@ class PropertyCustodianController extends Controller
             ? Inventory::query()
                 ->where('item_name', $inventory->item_name)
                 ->where('category_id', $inventory->category_id)
+                ->where('unit', $inventory->unit)
                 ->where('status', $inventory->status)
                 ->get()
             : collect([$inventory]);
@@ -1093,16 +1190,23 @@ class PropertyCustodianController extends Controller
             'lifespan_years' => $lifespanYears,
             'expected_end_date' => $expectedEndDate,
         ];
+        foreach (['building', 'room'] as $locationField) {
+            if (array_key_exists($locationField, $validated)) {
+                $updateAttributes[$locationField] = $validated[$locationField];
+            }
+        }
 
-        if ($isSerialized) {
-            Inventory::query()
-                ->whereIn('item_id', $groupItems->pluck('item_id'))
-                ->update($updateAttributes);
-        } else {
-            $inventory->update([
-                ...$updateAttributes,
-                'quantity' => $validated['quantity'],
-            ]);
+        $error = $this->inventoryOperations->updateAvailableInventory(
+            $inventory->item_id,
+            $updateAttributes,
+            (int) $validated['quantity'],
+            $isSerialized,
+            $groupItems->pluck('item_id')->all(),
+            (int) $request->user()->id,
+        );
+
+        if ($error !== null) {
+            return redirect()->back()->with('error', $error)->withInput();
         }
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Inventory item updated successfully.');
@@ -1149,97 +1253,25 @@ class PropertyCustodianController extends Controller
 
     public function approveReturn(Request $request, $id)
     {
+        $validated = $request->validate([
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
+        ]);
         $returnRequest = AssignmentRequest::findOrFail($id);
 
         if ($returnRequest->status !== 'waiting for custodian approval') {
             return redirect()->back()->with('error', 'This return request has already been processed.');
         }
 
-        DB::transaction(function () use ($returnRequest, $request) {
-            $inventory = Inventory::whereKey($returnRequest->item_id)
-                ->lockForUpdate()
-                ->firstOrFail();
+        $approved = $this->inventoryOperations->approveReturn(
+            $returnRequest->id,
+            (int) $request->user()->id,
+            $validated,
+        );
 
-            // Assignment records are the source of truth for who owns a quantity.
-            // This supports partial transfers, where several users may hold portions
-            // of one inventory row.
-            $assignment = AssignmentRequest::query()
-                ->where('item_id', $inventory->item_id)
-                ->where('target_user_id', $returnRequest->user_id)
-                ->where('status', 'approved')
-                ->where('quantity', '>=', $returnRequest->quantity)
-                ->lockForUpdate()
-                ->first();
-
-            $isLegacySingleOwner = (int) $inventory->assigned_to_user_id === (int) $returnRequest->user_id;
-
-            if (! $assignment && ! $isLegacySingleOwner) {
-                throw new \Exception('Item is not assigned to the requester.');
-            }
-
-            $quantityBefore = $inventory->quantity;
-            $quantityAfter = $quantityBefore + $returnRequest->quantity;
-
-            $inventory->update([
-                'assigned_to_user_id' => null,
-                'status' => 'available',
-                'quantity' => $quantityAfter,
-            ]);
-
-            if ($assignment) {
-                $assignment->decrement('quantity', $returnRequest->quantity);
-
-                if ($assignment->fresh()->quantity === 0) {
-                    $assignment->update([
-                        'status' => 'returned',
-                        'responded_at' => now(),
-                    ]);
-                }
-            }
-
-            $transaction = $assignment?->transaction_id
-                ? Transaction::whereKey($assignment->transaction_id)->lockForUpdate()->first()
-                : null;
-
-            if (! $transaction) {
-                $transaction = Transaction::query()
-                    ->where('item_id', $returnRequest->item_id)
-                    ->where('user_id', $returnRequest->user_id)
-                    ->where('status', 'assigned')
-                    ->where('quantity', '>=', $returnRequest->quantity)
-                    ->latest('transaction_date')
-                    ->lockForUpdate()
-                    ->first();
-            }
-
-            if ($transaction) {
-                if ($transaction->quantity <= $returnRequest->quantity) {
-                    $transaction->update([
-                        'status' => 'returned',
-                        'return_date' => now(),
-                    ]);
-                } else {
-                    $transaction->decrement('quantity', $returnRequest->quantity);
-                }
-            }
-
-            StockMovement::create([
-                'inventory_id' => $inventory->item_id,
-                'user_id' => $request->user()?->id,
-                'movement_type' => 'returned',
-                'quantity' => $quantityBefore,
-                'quantity_before' => $quantityBefore,
-                'quantity_after' => $quantityAfter,
-                'reference_type' => 'assignment_request',
-                'reference_id' => $returnRequest->id,
-                'notes' => 'Item returned by end user',
-            ]);
-
-            $returnRequest->update([
-                'status' => 'approved',
-                'responded_at' => now(),
-            ]);
-        });
+        if (! $approved) {
+            return redirect()->back()->with('error', 'This return request has already been processed.');
+        }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Return request approved. Item is now available.');
     }
@@ -1265,63 +1297,44 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Return request declined.');
     }
 
-    public function markReturned(Request $request, $itemId)
+    public function receiveReturn(Request $request)
     {
         $validated = $request->validate([
-            'notes' => ['nullable', 'string', 'max:500'],
+            'transaction_ids' => ['required_without:transaction_id', 'array', 'min:1'],
+            'transaction_ids.*' => ['required', 'integer', 'distinct', 'exists:transactions,id'],
+            'transaction_id' => ['required_without:transaction_ids', 'integer', 'exists:transactions,id'],
+            'return_request_id' => ['nullable', 'integer', 'exists:requests,id'],
+            'return_quantity' => ['required_with:transaction_id', 'integer', 'min:1'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $inventory = Inventory::findOrFail($itemId);
-
-        if ($inventory->status !== 'assigned' || !$inventory->assigned_to_user_id) {
-            return redirect()->back()->with('error', 'Only assigned items can be marked as returned.');
+        if (isset($validated['transaction_ids'])) {
+            $results = $this->inventoryOperations->receiveAssignmentReturns(
+                $validated['transaction_ids'],
+                (int) $request->user()->id,
+            );
+        } else {
+            $results = $this->inventoryOperations->receiveAssignmentReturn(
+                (int) $validated['transaction_id'],
+                (int) $validated['return_quantity'],
+                (int) $request->user()->id,
+                $validated['notes'] ?? null,
+                isset($validated['return_request_id']) ? (int) $validated['return_request_id'] : null,
+                ['building' => $validated['building'] ?? null, 'room' => $validated['room'] ?? null],
+            );
         }
 
-        DB::transaction(function () use ($inventory, $validated, $request) {
-            $inventory = Inventory::whereKey($inventory->item_id)
-                ->lockForUpdate()
-                ->firstOrFail();
+        if (is_string($results)) {
+            $errorField = isset($validated['transaction_ids']) ? 'transaction_ids' : 'return_quantity';
 
-            if ($inventory->status !== 'assigned') {
-                throw new \Exception('Item is not currently assigned.');
-            }
+            return redirect()->back()->withErrors([$errorField => $results])->withInput();
+        }
 
-            $quantityBefore = $inventory->quantity;
-            $quantityAfter = $inventory->quantity;
+        $receivedCount = is_array($results) ? count($results) : 1;
 
-            $transaction = Transaction::query()
-                ->where('item_id', $inventory->item_id)
-                ->where('user_id', $inventory->assigned_to_user_id)
-                ->where('status', 'assigned')
-                ->latest('transaction_date')
-                ->lockForUpdate()
-                ->first();
-
-            $inventory->assigned_to_user_id = null;
-            $inventory->status = 'available';
-            $inventory->save();
-
-            if ($transaction) {
-                $transaction->update([
-                    'status' => 'returned',
-                    'return_date' => now(),
-                ]);
-            }
-
-            StockMovement::create([
-                'inventory_id' => $inventory->item_id,
-                'user_id' => $request->user()?->id,
-                'movement_type' => 'returned',
-                'quantity' => $quantityBefore,
-                'quantity_before' => $quantityBefore,
-                'quantity_after' => $quantityAfter,
-                'reference_type' => 'inventory',
-                'reference_id' => $inventory->item_id,
-                'notes' => $validated['notes'] ?? 'Item received in warehouse',
-            ]);
-        });
-
-        return redirect()->route('propertyCustodian.inventory')->with('success', 'Item marked as returned and now available.');
+        return redirect()->route('propertyCustodian.inventory')->with('success', $receivedCount . ' assignment return(s) received and recorded.');
     }
 
     public function sendToMaintenance(Request $request, $itemId)
@@ -1332,49 +1345,16 @@ class PropertyCustodianController extends Controller
         ]);
 
         $inventory = Inventory::findOrFail($itemId);
-        $inventory->loadMissing('category');
+        $error = $this->inventoryOperations->sendToMaintenance(
+            $inventory->item_id,
+            (int) $request->user()->id,
+            $validated['issue_description'],
+            $validated['notes'] ?? null,
+        );
 
-        if ($inventory->status !== 'available') {
-            return redirect()->back()->with('error', 'Only available items can be sent to maintenance.');
+        if ($error !== null) {
+            return redirect()->back()->with('error', $error);
         }
-
-        if ($inventory->category?->is_maintenance_eligible === false) {
-            return redirect()->back()->with('error', 'Items in this category are not eligible for maintenance.');
-        }
-
-        DB::transaction(function () use ($inventory, $validated, $request) {
-            $inventory = Inventory::whereKey($inventory->item_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if ($inventory->status !== 'available') {
-                throw new \Exception('Item is not currently available.');
-            }
-
-            $quantity = $inventory->quantity;
-
-            $inventory->update(['status' => 'under_maintenance']);
-
-            MaintenanceRecord::create([
-                'inventory_id' => $inventory->item_id,
-                'reported_by' => $request->user()->id,
-                'status' => 'reported',
-                'issue_description' => $validated['issue_description'],
-                'started_at' => now(),
-            ]);
-
-            StockMovement::create([
-                'inventory_id' => $inventory->item_id,
-                'user_id' => $request->user()?->id,
-                'movement_type' => 'maintenance',
-                'quantity' => $quantity,
-                'quantity_before' => $quantity,
-                'quantity_after' => $quantity,
-                'reference_type' => 'inventory',
-                'reference_id' => $inventory->item_id,
-                'notes' => $validated['notes'] ?? 'Item sent to maintenance',
-            ]);
-        });
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Item sent to maintenance.');
     }
@@ -1386,52 +1366,12 @@ class PropertyCustodianController extends Controller
             'maintenance_cost' => ['nullable', 'numeric', 'min:0'],
         ]);
 
-        $error = DB::transaction(function () use ($itemId, $validated, $request): ?string {
-            $inventory = Inventory::whereKey($itemId)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if ($inventory->status !== 'under_maintenance') {
-                return 'Item is not currently under maintenance.';
-            }
-
-            $maintenanceRecord = MaintenanceRecord::query()
-                ->where('inventory_id', $inventory->item_id)
-                ->whereIn('status', ['reported', 'in_progress'])
-                ->latest('created_at')
-                ->lockForUpdate()
-                ->first();
-
-            if (! $maintenanceRecord) {
-                return 'No active maintenance record was found.';
-            }
-
-            $quantity = $inventory->quantity;
-            $completedAt = now();
-
-            $inventory->update(['status' => 'available']);
-
-            $maintenanceRecord->update([
-                'status' => 'completed',
-                'repair_notes' => $validated['repair_notes'] ?? $maintenanceRecord->repair_notes,
-                'maintenance_cost' => $validated['maintenance_cost'] ?? $maintenanceRecord->maintenance_cost,
-                'completed_at' => $completedAt,
-            ]);
-
-            StockMovement::create([
-                'inventory_id' => $inventory->item_id,
-                'user_id' => $request->user()?->id,
-                'movement_type' => 'maintenance_completed',
-                'quantity' => $quantity,
-                'quantity_before' => $quantity,
-                'quantity_after' => $quantity,
-                'reference_type' => 'maintenance_record',
-                'reference_id' => $maintenanceRecord->id,
-                'notes' => $validated['repair_notes'] ?? 'Item repaired and returned to inventory',
-            ]);
-
-            return null;
-        });
+        $error = $this->inventoryOperations->markRepaired(
+            (int) $itemId,
+            (int) $request->user()->id,
+            $validated['repair_notes'] ?? null,
+            isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
+        );
 
         if ($error !== null) {
             return redirect()->back()->with('error', $error);
@@ -1446,32 +1386,11 @@ class PropertyCustodianController extends Controller
             'notes' => ['required', 'string', 'max:500'],
         ]);
 
-        $error = DB::transaction(function () use ($itemId, $validated, $request): ?string {
-            $inventory = Inventory::whereKey($itemId)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if ($inventory->status !== 'under_maintenance') {
-                return 'Only items under maintenance can be marked ready to dispose.';
-            }
-
-            $quantity = $inventory->quantity;
-            $inventory->update(['status' => 'ready_to_dispose']);
-
-            StockMovement::create([
-                'inventory_id' => $inventory->item_id,
-                'user_id' => $request->user()?->id,
-                'movement_type' => 'ready_to_dispose',
-                'quantity' => $quantity,
-                'quantity_before' => $quantity,
-                'quantity_after' => $quantity,
-                'reference_type' => 'inventory',
-                'reference_id' => $inventory->item_id,
-                'notes' => $validated['notes'],
-            ]);
-
-            return null;
-        });
+        $error = $this->inventoryOperations->markReadyToDispose(
+            (int) $itemId,
+            (int) $request->user()->id,
+            $validated['notes'],
+        );
 
         if ($error !== null) {
             return redirect()->back()->with('error', $error);
@@ -1487,80 +1406,17 @@ class PropertyCustodianController extends Controller
         ]);
 
         $inventory = Inventory::findOrFail($itemId);
-
-        if (! in_array($inventory->status, ['available', 'ready_to_dispose'], true)) {
-            return redirect()->back()->with('error', 'Only available or ready-to-dispose items can be disposed.');
-        }
-
-        $error = DB::transaction(function () use ($inventory, $validated, $request): ?string {
-            $inventory = Inventory::whereKey($inventory->item_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if (! in_array($inventory->status, ['available', 'ready_to_dispose'], true)) {
-                return 'Item is not available for disposal.';
-            }
-
-            $quantity = $inventory->quantity;
-
-            $inventory->update(['status' => 'disposed']);
-
-            StockMovement::create([
-                'inventory_id' => $inventory->item_id,
-                'user_id' => $request->user()?->id,
-                'movement_type' => 'disposed',
-                'quantity' => $quantity,
-                'quantity_before' => $quantity,
-                'quantity_after' => 0,
-                'reference_type' => 'inventory',
-                'reference_id' => $inventory->item_id,
-                'notes' => $validated['notes'] ?? 'Item disposed',
-            ]);
-
-            return null;
-        });
+        $error = $this->inventoryOperations->dispose(
+            (int) $itemId,
+            (int) $request->user()->id,
+            $validated['notes'] ?? null,
+        );
 
         if ($error !== null) {
             return redirect()->back()->with('error', $error);
         }
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Item disposed successfully.');
-    }
-
-    private function createInventoryItem(array $attributes): void
-    {
-        $inventoryItem = Inventory::create($attributes);
-
-        $movementQuantity = (int) ($attributes['quantity'] ?? 0);
-        if ($movementQuantity > 0) {
-            StockMovement::create([
-                'inventory_id' => $inventoryItem->item_id,
-                'user_id' => $attributes['user_id'] ?? null,
-                'movement_type' => 'stock_in',
-                'quantity' => $movementQuantity,
-                'quantity_before' => 0,
-                'quantity_after' => $movementQuantity,
-                'reference_type' => 'inventory',
-                'reference_id' => $inventoryItem->item_id,
-                'notes' => $attributes['description'] ?? 'Stock-in',
-            ]);
-        }
-
-        $category = Category::find($attributes['category_id'] ?? null);
-        $qrCode = null;
-
-        if ($category && $category->requires_qr_code) {
-            do {
-                $token = 'dnhs_qr_' . Str::lower(Str::random(24));
-            } while (Inventory::where('qr_code', $token)->exists());
-
-            $qrCode = $token;
-        }
-
-        $inventoryItem->update([
-            'inventory_item_no' => sprintf('INV-%06d', $inventoryItem->item_id),
-            'qr_code' => $qrCode,
-        ]);
     }
 
     public function qrLookup(Request $request): \Illuminate\Http\JsonResponse

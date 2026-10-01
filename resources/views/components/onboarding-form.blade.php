@@ -1,4 +1,4 @@
-@props(['action'])
+@props(['action', 'showLocation' => false])
 
 <form action="{{ $action }}" method="POST" class="space-y-5">
     @csrf
@@ -18,6 +18,19 @@
             <input type="email" name="email" value="{{ old('email', auth()->user()->email) }}" required class="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
         </div>
     </div>
+
+    @if ($showLocation)
+        <div class="grid gap-5 md:grid-cols-2">
+            <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Building</label>
+                <input type="text" name="building" value="{{ old('building', auth()->user()->building) }}" maxlength="255" required class="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
+            </div>
+            <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Room</label>
+                <input type="text" name="room" value="{{ old('room', auth()->user()->room) }}" maxlength="255" required class="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
+            </div>
+        </div>
+    @endif
 
     <div class="grid gap-5 md:grid-cols-3">
         <div>

@@ -15,7 +15,7 @@
 /node_modules
 /public/build
 /public/hot
-/public/storage
+/public/storageI found multiple matches: 1) Dell Laptop (Category: ICT Equipment, Unit: piece, Inventory ID: 31, Serial: DELL2026LAPTOP001, Asset Tag: INV-000031), 2) Dell Laptop (Category: ICT Equipment, Unit: piece, Inventory ID: 32, Serial: DELL2026LAPTOP002, Asset Tag: INV-000032), 3) Dell Laptop (Category: ICT Equipment, Unit: piece, Inventory ID: 33, Serial: DELL2026LAPTOP003, Asset Tag: INV-000033), 4) Dell Laptop (Category: ICT Equipment, Unit: piece, Inventory ID: 34, Serial: DELL2026LAPTOP004, Asset Tag: INV-000034), 5) Dell Laptop (Category: Learning Resources, Unit: piece, Inventory ID: 36, Asset Tag: INV-000036), 6) Dell Laptop (Category: ICT Equipment, Unit: piece, Inventory ID: 37, Serial: DELL2026LAPTOP0021, Asset Tag: INV-000037), 7) Dell Laptop (Category: ICT Equipment, Unit: piece, Inventory ID: 38, Serial: DELL2026LAPTOP0022, Asset Tag: INV-000038). Which one do you mean? Please specify the category, serial number, or inventory ID.
 /storage/*.key
 /storage/pail
 /vendor

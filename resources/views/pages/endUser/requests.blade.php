@@ -31,15 +31,9 @@
                                     : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
                                 class="flex items-center gap-2 px-4 py-2.5 text-sm transition focus:outline-none -mb-3.5">
                                 <span>Incoming Requests</span>
-                                @if ($pendingIncomingCount > 0)
-                                    <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-600 dark:bg-red-900/30 dark:text-red-400">
-                                        {{ $pendingIncomingCount }}
-                                    </span>
-                                @else
-                                    <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                                        {{ $incomingRequests->count() }}
-                                    </span>
-                                @endif
+                                <span class="rounded-full px-2 py-0.5 text-xs font-semibold {{ $pendingIncomingCount > 0 ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }}">
+                                    {{ $incomingRequests->count() }}
+                                </span>
                             </button>
                         </div>
 
@@ -57,19 +51,28 @@
 
                                 <form method="POST" action="{{ route('endUser.requests.store') }}" class="space-y-4 text-left">
                                     @csrf
-                                    <div>
-                                        <label for="inventory-item" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Inventory Item</label>
-                                        <select id="inventory-item" name="item_id" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required>
+                                    <div x-data="{ syncItemType(select) { const option = select.selectedOptions[0]; this.$refs.itemName.value = option?.dataset.itemName ?? ''; this.$refs.categoryId.value = option?.dataset.categoryId ?? ''; this.$refs.unit.value = option?.dataset.unit ?? ''; } }">
+                                        <label for="requested-item-type" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Item Type</label>
+                                        <select id="requested-item-type" @change="syncItemType($event.target)" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" required>
                                             <option value="">Select an item</option>
                                             @foreach (($availableItems ?? []) as $inventoryItem)
-                                                <option value="{{ $inventoryItem['item_id'] }}">{{ $inventoryItem['item_name'] }} ({{ $inventoryItem['quantity'] }} available)</option>
+                                                <option value="{{ $loop->index }}" data-item-name="{{ $inventoryItem['item_name'] }}" data-category-id="{{ $inventoryItem['category_id'] }}" data-unit="{{ $inventoryItem['unit'] }}">
+                                                    {{ $inventoryItem['item_name'] }} · {{ $inventoryItem['category_name'] }} · {{ $inventoryItem['quantity'] }} {{ \Illuminate\Support\Str::plural($inventoryItem['unit'], $inventoryItem['quantity']) }} available
+                                                </option>
                                             @endforeach
                                         </select>
+                                        <input type="hidden" name="item_name" x-ref="itemName">
+                                        <input type="hidden" name="category_id" x-ref="categoryId">
+                                        <input type="hidden" name="unit" x-ref="unit">
                                     </div>
                                     <div>
                                         <label for="quantity" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label>
                                         <input id="quantity" name="quantity" type="number" min="1" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Enter quantity" required />
                                     </div>
+                                        <div>
+                                            <label for="request-notes" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Purpose or notes <span class="font-normal text-gray-400">(optional)</span></label>
+                                            <textarea id="request-notes" name="notes" rows="2" maxlength="1000" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"></textarea>
+                                        </div>
                                     <div class="flex justify-end gap-3 pt-2">
                                         <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
                                         <x-common.button-spinner text="Submit Request" loadingText="Submitting..." />
@@ -86,29 +89,43 @@
                                 <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                                     <tr class="text-center">
                                         <th class="px-4 py-3 text-left">Item Requested</th>
+                                        <th class="px-4 py-3">Type</th>
                                         <th class="px-4 py-3">Qty</th>
                                         <th class="px-4 py-3">Requested On</th>
                                         <th class="px-4 py-3">Status</th>
+                                        <th class="px-4 py-3">Fulfilled Records</th>
                                         <th class="px-4 py-3">Transaction Ref</th>
+                                        <th class="px-4 py-3">Note</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
                                     @forelse($myRequests as $req)
                                         @php
                                             $s = strtolower((string) $req->status);
+                                            $isTransfer = $req->targetUser?->role?->role_name === 'End User';
+                                            $isReturn = ! $isTransfer && $req->item_id && ! $req->requested_item_name && ! $req->transaction_id;
+                                            $requestType = $isTransfer ? 'Transfer' : ($isReturn ? 'Return' : 'Item Request');
                                             $badgeClass = match (true) {
                                                 str_contains($s, 'approved') || str_contains($s, 'accepted') => 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
                                                 str_contains($s, 'waiting') || str_contains($s, 'pending') => 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
-                                                str_contains($s, 'declined') || str_contains($s, 'rejected') => 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+                                                str_contains($s, 'declined') || str_contains($s, 'rejected') || str_contains($s, 'cancelled') => 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
                                                 default => 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
                                             };
                                         @endphp
                                         <tr class="text-center hover:bg-gray-50 dark:hover:bg-gray-800/50">
                                             <td class="px-4 py-4 text-left font-medium text-gray-900 dark:text-gray-100">
-                                                <div>{{ optional($req->item)->item_name ?? 'Unknown item' }}</div>
+                                                <div>{{ $req->requested_item_name ?? optional($req->item)->item_name ?? 'Unknown item' }}</div>
+                                                @if($req->requested_category_id)
+                                                    <span class="text-xs text-gray-500">{{ $req->requestedCategory?->category_name }} · {{ $req->requested_unit }}</span>
+                                                @endif
                                                 @if(optional($req->item)->inventory_item_no)
                                                     <span class="text-xs text-gray-400">{{ $req->item->inventory_item_no }}</span>
                                                 @endif
+                                            </td>
+                                            <td class="px-4 py-4">
+                                                <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $isTransfer ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : ($isReturn ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300') }}">
+                                                    {{ $requestType }}
+                                                </span>
                                             </td>
                                             <td class="px-4 py-4 font-semibold text-gray-800 dark:text-gray-200">{{ $req->quantity }}</td>
                                             <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">
@@ -120,7 +137,28 @@
                                                 </span>
                                             </td>
                                             <td class="px-4 py-4">
-                                                @if($req->transaction_id)
+                                                @if($req->fulfillmentRequests->isNotEmpty())
+                                                    <ul class="space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                                                        @foreach($req->fulfillmentRequests as $fulfillment)
+                                                            <li>{{ $fulfillment->item?->inventory_item_no ?? ('ID ' . $fulfillment->item_id) }} · Qty {{ $fulfillment->quantity }}</li>
+                                                        @endforeach
+                                                    </ul>
+                                                @elseif($req->item)
+                                                    <span class="text-xs text-gray-600 dark:text-gray-300">{{ $req->item->inventory_item_no ?? ('ID ' . $req->item_id) }} · Qty {{ $req->quantity }}</span>
+                                                @else
+                                                    <span class="text-xs text-gray-400">Awaiting fulfillment</span>
+                                                @endif
+                                            </td>
+                                            <td class="px-4 py-4">
+                                                @if($req->fulfillmentRequests->isNotEmpty())
+                                                    <ul class="space-y-1 text-xs font-mono text-gray-600 dark:text-gray-300">
+                                                        @foreach($req->fulfillmentRequests as $fulfillment)
+                                                            @if($fulfillment->transaction_id)
+                                                                <li>#TX-{{ str_pad($fulfillment->transaction_id, 5, '0', STR_PAD_LEFT) }}</li>
+                                                            @endif
+                                                        @endforeach
+                                                    </ul>
+                                                @elseif($req->transaction_id)
                                                     <span class="inline-flex items-center rounded-md bg-gray-100 px-2.5 py-1 text-xs font-mono text-gray-700 dark:bg-gray-800 dark:text-gray-300">
                                                         #TX-{{ str_pad($req->transaction_id, 5, '0', STR_PAD_LEFT) }}
                                                     </span>
@@ -128,10 +166,13 @@
                                                     <span class="text-xs text-gray-400">--</span>
                                                 @endif
                                             </td>
+                                            <td class="px-4 py-4 text-left text-xs text-gray-500 dark:text-gray-400">
+                                                {{ $req->status === 'cancelled' ? ($req->cancellation_reason ?: '—') : ($req->notes ?: '—') }}
+                                            </td>
                                         </tr>
                                     @empty
                                         <tr>
-                                            <td colspan="5" class="px-4 py-10 text-center text-gray-500 dark:text-gray-400">
+                                            <td colspan="8" class="px-4 py-10 text-center text-gray-500 dark:text-gray-400">
                                                 No item requests created yet. Click <strong>"Request Item"</strong> above to make a request.
                                             </td>
                                         </tr>
@@ -159,7 +200,11 @@
                                     @forelse($incomingRequests as $req)
                                         @php
                                             $s = strtolower((string) $req->status);
-                                            $isTransfer = $s === 'waiting for transfer approval' || $s === 'waiting for custodian approval';
+                                            $isRequisitionFulfillment = (bool) $req->parent_request_id;
+                                            $isTransfer = $req->user?->role?->role_name === 'End User';
+                                            $incomingType = $isRequisitionFulfillment
+                                                ? 'Requisition Fulfillment'
+                                                : ($isTransfer ? 'Transfer Request' : 'Direct Assignment');
                                             $badgeClass = match (true) {
                                                 str_contains($s, 'approved') || str_contains($s, 'accepted') => 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
                                                 str_contains($s, 'waiting') || str_contains($s, 'pending') => 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
@@ -174,9 +219,14 @@
                                                     <span class="text-xs text-gray-400">{{ $req->item->inventory_item_no }}</span>
                                                 @endif
                                                 {{-- Type badge --}}
-                                                <span class="mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ $isTransfer ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' }}">
-                                                    {{ $isTransfer ? 'Transfer Request' : 'Assignment' }}
+                                                <span class="mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {{ $isTransfer ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : ($isRequisitionFulfillment ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300') }}">
+                                                    {{ $incomingType }}
                                                 </span>
+                                                @if($isRequisitionFulfillment)
+                                                    <p class="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                                                        Fulfills requisition #{{ $req->parent_request_id }}{{ $req->parentRequest?->requested_item_name ? ' · ' . $req->parentRequest->requested_item_name : '' }}
+                                                    </p>
+                                                @endif
                                             </td>
                                             <td class="px-4 py-4 font-semibold text-gray-800 dark:text-gray-200">{{ $req->quantity }}</td>
                                             <td class="px-4 py-4 text-left">

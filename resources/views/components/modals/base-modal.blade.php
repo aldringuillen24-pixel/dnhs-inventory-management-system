@@ -15,7 +15,7 @@
         <div class="max-h-[90vh] w-full {{ $maxWidth }} overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900" @click.outside="closeModal()" @keydown.escape.window="closeModal()">
             <div class="mb-4 flex items-start justify-between gap-3">
                 <div>
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ $title }}</h3>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white text-start">{{ $title }}</h3>
                     @if ($subtitle)
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ $subtitle }}</p>
                     @endif

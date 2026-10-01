@@ -3,12 +3,16 @@
 @section('content')
     <x-common.page-breadcrumb pageTitle="Reports" />
 
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <x-cards.metric-card title="Total Units" value="{{ number_format($metrics['totalUnits']) }}" subtitle="Non-disposed inventory" />
-        <x-cards.metric-card title="Available Units" value="{{ number_format($metrics['availableUnits']) }}" subtitle="Ready for assignment" />
-        <x-cards.metric-card title="Assigned Units" value="{{ number_format($metrics['assignedUnits']) }}" subtitle="Currently in use" />
-        <x-cards.metric-card title="Inventory Value" value="PHP {{ number_format($metrics['totalValue'], 2) }}" subtitle="Recorded asset value" />
-    </div>
+    @php
+        $kpiMetrics = [
+            ['title' => 'Total Units', 'value' => number_format($metrics['totalUnits']), 'subtitle' => 'Non-disposed inventory', 'icon' => 'package', 'iconClass' => 'bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400'],
+            ['title' => 'Available Units', 'value' => number_format($metrics['availableUnits']), 'subtitle' => 'Ready for assignment', 'icon' => 'package-check', 'iconClass' => 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400'],
+            ['title' => 'Assigned Units', 'value' => number_format($metrics['assignedUnits']), 'subtitle' => 'Currently in use', 'icon' => 'user-check', 'iconClass' => 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'],
+            ['title' => 'Inventory Value', 'value' => 'PHP ' . number_format($metrics['totalValue'], 2), 'subtitle' => 'Recorded asset value', 'icon' => 'coins', 'iconClass' => 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400'],
+        ];
+    @endphp
+
+    <x-cards.kpi-summary :metrics="$kpiMetrics" />
 
     <div class="mt-6 grid gap-6 xl:grid-cols-2">
         <x-cards.base-card title="Units by Category" subtitle="Inventory distribution">

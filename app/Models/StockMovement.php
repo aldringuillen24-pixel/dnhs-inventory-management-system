@@ -20,6 +20,10 @@ class StockMovement extends Model
         'quantity_after',
         'reference_type',
         'reference_id',
+        'from_building',
+        'from_room',
+        'to_building',
+        'to_room',
         'notes',
     ];
 

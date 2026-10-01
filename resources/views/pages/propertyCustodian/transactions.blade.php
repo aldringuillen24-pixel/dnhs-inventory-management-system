@@ -1,53 +1,142 @@
-    @extends('layouts.app')
+    @extends('layouts.app', ['title' => 'Transactions'])
 
     @section('content')
-        <x-common.page-breadcrumb pageTitle="Transactions" />
+        <div class="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">Transactions</h2>
+            <x-modals.base-modal title="Assign Inventory Item" subtitle="Record a new item assignment.">
+                <x-slot:trigger>
+                    <button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
+                        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M10 5a1 1 0 0 1 1 1v3h3a1 1 0 1 1 0 2h-3v3a1 1 0 1 1-2 0v-3H6a1 1 0 1 1 0-2h3V6a1 1 0 0 1 1-1Z" clip-rule="evenodd" />
+                        </svg>
+                        Assign Item
+                    </button>
+                </x-slot:trigger>
+
+                <div x-data="{ assignmentMode: 'registered' }" class="space-y-4">
+                    <div class="grid grid-cols-2 border-b border-gray-200 dark:border-gray-700" role="tablist" aria-label="Assignment method">
+                        <button type="button" role="tab" :aria-selected="assignmentMode === 'registered'" @click="assignmentMode = 'registered'" :class="assignmentMode === 'registered' ? 'border-brand-500 text-brand-600 dark:text-brand-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'" class="border-b-2 px-3 py-2.5 text-sm font-medium">Registered End User</button>
+                        <button type="button" role="tab" :aria-selected="assignmentMode === 'manual'" @click="assignmentMode = 'manual'" :class="assignmentMode === 'manual' ? 'border-brand-500 text-brand-600 dark:text-brand-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'" class="border-b-2 px-3 py-2.5 text-sm font-medium">Manual Issue</button>
+                    </div>
+
+                    <form x-show="assignmentMode === 'registered'" method="POST" action="{{ route('propertyCustodian.transactions.assignItem') }}" class="space-y-4">
+                        @csrf
+                        <input type="hidden" name="assignment_type" value="registered">
+                        <div>
+                            <label for="registered-inventory-item" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Inventory Item</label>
+                            <select id="registered-inventory-item" name="item_id" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                <option value="">Select an item</option>
+                                @foreach ($availableInventoryItems as $inventoryItem)
+                                    <option value="{{ $inventoryItem['item_id'] }}">{{ $inventoryItem['item_name'] }} · {{ $inventoryItem['category_name'] ?? 'Uncategorized' }} · {{ $inventoryItem['unit'] ?? 'unit not set' }} · {{ $inventoryItem['serial_number'] ?? $inventoryItem['inventory_item_no'] ?? 'ID ' . $inventoryItem['item_id'] }} · Qty {{ $inventoryItem['quantity'] }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label for="registered-quantity" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label>
+                            <input id="registered-quantity" name="quantity" type="number" min="1" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Enter quantity" />
+                        </div>
+                        <div>
+                            <label for="registered-assign-to" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Assign To</label>
+                            <select id="registered-assign-to" name="user_id" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                <option value="">Select an end user</option>
+                                @foreach ($endUsers as $enduser)
+                                    <option value="{{ $enduser['id'] }}">{{ $enduser['name'] }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label for="registered-transaction-date" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Assigned</label>
+                            <input id="registered-transaction-date" name="transaction_date" type="date" value="{{ now()->format('Y-m-d') }}" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                        </div>
+                        <div class="flex justify-end gap-3 pt-2">
+                            <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button>
+                            <x-common.button-spinner text="Assign Item" loadingText="Submitting..." class="text-white" />
+                        </div>
+                    </form>
+
+                    <form x-show="assignmentMode === 'manual'" x-data="{ syncManualItem(select) { const option = select.selectedOptions[0]; this.$refs.category.value = option?.dataset.categoryId ?? ''; this.$refs.unit.value = option?.dataset.unit ?? ''; } }" method="POST" action="{{ route('propertyCustodian.transactions.assignItem') }}" class="space-y-4">
+                        @csrf
+                        <input type="hidden" name="assignment_type" value="manual">
+                        <input type="hidden" name="category_id" x-ref="category">
+                        <input type="hidden" name="unit" x-ref="unit">
+                        <div>
+                            <label for="manual-inventory-item" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Inventory Item</label>
+                            <select id="manual-inventory-item" name="item_id" @change="syncManualItem($event.target)" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                <option value="">Select an item</option>
+                                @foreach ($availableInventoryItems as $inventoryItem)
+                                    <option value="{{ $inventoryItem['item_id'] }}" data-category-id="{{ $inventoryItem['category_id'] }}" data-unit="{{ $inventoryItem['unit'] }}">{{ $inventoryItem['item_name'] }} · {{ $inventoryItem['category_name'] ?? 'Uncategorized' }} · {{ $inventoryItem['unit'] ?? 'unit not set' }} · {{ $inventoryItem['serial_number'] ?? $inventoryItem['inventory_item_no'] ?? 'ID ' . $inventoryItem['item_id'] }} · Qty {{ $inventoryItem['quantity'] }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label for="manual-quantity" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label>
+                                <input id="manual-quantity" name="quantity" type="number" min="1" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                            <div>
+                                <label for="manual-transaction-date" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Issue Date</label>
+                                <input id="manual-transaction-date" name="transaction_date" type="date" value="{{ now()->format('Y-m-d') }}" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                        </div>
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label for="manual-recipient-name" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Recipient Full Name</label>
+                                <input id="manual-recipient-name" name="manual_recipient_name" type="text" maxlength="255" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                            <div>
+                                <label for="manual-department" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Department / Office</label>
+                                <input id="manual-department" name="manual_department" type="text" maxlength="255" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                        </div>
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div><label for="manual-building" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Building</label><input id="manual-building" name="building" type="text" maxlength="255" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div>
+                            <div><label for="manual-room" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Room</label><input id="manual-room" name="room" type="text" maxlength="255" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div>
+                        </div>
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label for="manual-recipient-type" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Recipient Type <span class="font-normal text-gray-400">(optional)</span></label>
+                                <select id="manual-recipient-type" name="manual_recipient_type" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                                    <option value="">Select type</option>
+                                    <option value="Staff">Staff</option>
+                                    <option value="Student">Student</option>
+                                    <option value="Visitor">Visitor</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="manual-contact" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Contact / ID Reference <span class="font-normal text-gray-400">(optional)</span></label>
+                                <input id="manual-contact" name="manual_contact" type="text" maxlength="255" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                        </div>
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <label for="manual-expected-return-date" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Expected Return <span class="font-normal text-gray-400">(optional)</span></label>
+                                <input id="manual-expected-return-date" name="expected_return_date" type="date" min="{{ now()->format('Y-m-d') }}" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                            <div>
+                                <label for="manual-notes" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Purpose / Notes <span class="font-normal text-gray-400">(optional)</span></label>
+                                <input id="manual-notes" name="manual_notes" type="text" maxlength="1000" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                            </div>
+                        </div>
+                        <div class="flex justify-end gap-3 pt-2">
+                            <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button>
+                            <x-common.button-spinner text="Issue Item" loadingText="Issuing..." class="text-white" />
+                        </div>
+                    </form>
+                </div>
+            </x-modals.base-modal>
+        </div>
 
         {{-- KPI Summary --}}
-        <div class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xs dark:border-gray-800 dark:bg-gray-900">
-            <div class="grid md:grid-cols-4">
-                <div class="flex items-center gap-4 p-4">
-                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
-                        <i data-lucide="user-check" class="h-5 w-5"></i>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                        <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Assigned Items</p>
-                        <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($totalAssignedCount) }}</p>
-                        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Items currently assigned</p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
-                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg {{ $pendingRequestsCount > 0 ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }}">
-                        <i data-lucide="clipboard-list" class="h-5 w-5"></i>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                        <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Pending Requests</p>
-                        <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($pendingRequestsCount) }}</p>
-                        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Awaiting custodian action</p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
-                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg {{ $overdueReturnsCount > 0 ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' }}">
-                        <i data-lucide="alert-triangle" class="h-5 w-5"></i>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                        <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Overdue Returns</p>
-                        <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($overdueReturnsCount) }}</p>
-                        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Items past their return date</p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-4 border-t border-gray-200 p-4 dark:border-gray-800 md:border-l md:border-t-0">
-                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-brand-600 dark:bg-blue-500/10 dark:text-brand-400">
-                        <i data-lucide="file-text" class="h-5 w-5"></i>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                        <p class="truncate text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Transactions</p>
-                        <p class="mt-0.5 text-2xl font-bold tabular-nums text-gray-900 dark:text-white">{{ number_format($totalTransactionsCount) }}</p>
-                        <p class="truncate text-xs text-gray-500 dark:text-gray-400">Recorded inventory movements</p>
-                    </div>
-                </div>
-            </div>
-        </div>
+        @php
+            $transactionKpiMetrics = [
+                ['title' => 'Total Assigned Items', 'value' => number_format($totalAssignedCount), 'subtitle' => 'Items currently assigned', 'icon' => 'user-check', 'iconClass' => 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400', 'accentClass' => 'border-l-indigo-500'],
+                ['title' => 'Pending Requests', 'value' => number_format($pendingRequestsCount), 'subtitle' => 'Awaiting custodian action', 'icon' => 'clipboard-list', 'iconClass' => $pendingRequestsCount > 0 ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400', 'accentClass' => $pendingRequestsCount > 0 ? 'border-l-amber-500' : 'border-l-gray-400'],
+                ['title' => 'Overdue Returns', 'value' => number_format($overdueReturnsCount), 'subtitle' => 'Items past their return date', 'icon' => 'alert-triangle', 'iconClass' => $overdueReturnsCount > 0 ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400', 'accentClass' => $overdueReturnsCount > 0 ? 'border-l-red-500' : 'border-l-gray-400'],
+                ['title' => 'Total Transactions', 'value' => number_format($totalTransactionsCount), 'subtitle' => 'Recorded inventory movements', 'icon' => 'file-text', 'iconClass' => 'bg-blue-50 text-brand-600 dark:bg-blue-500/10 dark:text-brand-400', 'accentClass' => 'border-l-brand-500'],
+            ];
+        @endphp
+        <x-cards.kpi-summary :metrics="$transactionKpiMetrics" />
 
         {{-- Main Management Card with Tabs --}}
         <div class="grid gap-6 xl:grid-cols-12 mt-6">
@@ -165,8 +254,9 @@
                                         @forelse ($incomingRequests as $request)
                                             @php
                                                 $requesterName = $request->user?->full_name ?: ($request->user?->username ?? 'Unknown User');
-                                                $itemName = optional($request->item)->item_name ?? 'Unknown item';
-                                                $categoryName = optional(optional($request->item)->category)->category_name ?? 'General';
+                                                $itemName = $request->requested_item_name ?? optional($request->item)->item_name ?? 'Unknown item';
+                                                $categoryName = $request->requestedCategory?->category_name ?? optional(optional($request->item)->category)->category_name ?? 'General';
+                                                $unitName = $request->requested_unit ?? optional($request->item)->unit;
                                                 $totalStock = $request->total_available_stock ?? (optional($request->item)->quantity ?? 0);
                                                 $hasStock = $totalStock >= $request->quantity;
                                                 $stockAfterApproval = max(0, $totalStock - $request->quantity);
@@ -180,10 +270,12 @@
                                                     <div class="font-medium text-gray-800 dark:text-gray-200">{{ $itemName }}</div>
                                                     @if(optional($request->item)->inventory_item_no)
                                                         <span class="text-xs text-gray-400">{{ $request->item->inventory_item_no }}</span>
+                                                    @elseif($request->requested_item_name)
+                                                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ $categoryName }} · {{ $unitName }}</span>
                                                     @endif
                                                 </td>
                                                 <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">
-                                                    {{ $categoryName }}
+                                                    {{ $categoryName }}{{ $unitName ? ' · ' . $unitName : '' }}
                                                 </td>
                                                 <td class="px-4 py-4 font-semibold text-gray-800 dark:text-gray-200">
                                                     {{ $request->quantity }}
@@ -198,6 +290,77 @@
                                                 </td>
                                                 <td class="px-4 py-4">
                                                     <div class="flex items-center justify-center gap-2">
+                                                        @if($request->requested_item_name && !$request->item_id && $request->status === 'waiting for approval')
+                                                            <x-modals.base-modal title="Review Item Request" subtitle="Select matching inventory records to issue." maxWidth="max-w-2xl">
+                                                                <x-slot:trigger>
+                                                                    <button type="button" @click="open = true" class="inline-flex items-center gap-1 rounded-md bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-brand-700">
+                                                                        Open Request
+                                                                    </button>
+                                                                </x-slot:trigger>
+
+                                                                <form method="POST" action="{{ route('propertyCustodian.requests.approve', $request->id) }}" class="space-y-4 text-left">
+                                                                    @csrf
+                                                                    <div class="grid gap-4 md:grid-cols-2">
+                                                                        <section class="space-y-3 rounded-md bg-gray-50 p-4 text-sm dark:bg-gray-800">
+                                                                            <h4 class="font-semibold text-gray-900 dark:text-white">Request details</h4>
+                                                                            <div><span class="text-gray-500 dark:text-gray-400">Requester</span><div class="font-medium text-gray-900 dark:text-white">{{ $requesterName }}{{ $request->user?->email ? ' · ' . $request->user->email : '' }}</div></div>
+                                                                            <div><span class="text-gray-500 dark:text-gray-400">Requested item</span><div class="font-medium text-gray-900 dark:text-white">{{ $itemName }} · {{ $categoryName }} · {{ $unitName }}</div></div>
+                                                                            <div><span class="text-gray-500 dark:text-gray-400">Quantity</span><div class="font-medium text-gray-900 dark:text-white">{{ $request->quantity }}</div></div>
+                                                                            <div><span class="text-gray-500 dark:text-gray-400">Available</span><div class="font-medium text-gray-900 dark:text-white">{{ $totalStock }} {{ \Illuminate\Support\Str::plural($unitName, $totalStock) }}</div></div>
+                                                                            @if($request->notes)
+                                                                                <div><span class="text-gray-500 dark:text-gray-400">Purpose / notes</span><div class="font-medium text-gray-900 dark:text-white">{{ $request->notes }}</div></div>
+                                                                            @endif
+                                                                        </section>
+
+                                                                        <fieldset class="min-w-0">
+                                                                            <legend class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Select inventory</legend>
+                                                                            <div class="max-h-80 space-y-1 overflow-y-auto rounded-md border border-gray-200 p-2 dark:border-gray-700">
+                                                                                @forelse($request->matching_inventory_items as $stockItem)
+                                                                                    <label class="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                                                        <input type="checkbox" name="inventory_ids[]" value="{{ $stockItem->item_id }}" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+                                                                                        <span class="min-w-0">
+                                                                                            <span class="block truncate text-sm font-medium text-gray-900 dark:text-white">{{ $stockItem->inventory_item_no ?? 'Inventory #' . $stockItem->item_id }}{{ $stockItem->serial_number ? ' · ' . $stockItem->serial_number : '' }}</span>
+                                                                                            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ $stockItem->quantity }} {{ \Illuminate\Support\Str::plural($unitName, $stockItem->quantity) }} available</span>
+                                                                                        </span>
+                                                                                    </label>
+                                                                                @empty
+                                                                                    <p class="px-3 py-4 text-sm text-gray-500 dark:text-gray-400">No matching available inventory remains.</p>
+                                                                                @endforelse
+                                                                            </div>
+                                                                            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                                                                @if($request->requestedCategory?->requires_serial_number)
+                                                                                    Select exactly {{ $request->quantity }} assets.
+                                                                                @else
+                                                                                    Select records with enough combined stock to fulfill {{ $request->quantity }} {{ \Illuminate\Support\Str::plural($unitName, $request->quantity) }}.
+                                                                                @endif
+                                                                            </p>
+                                                                        </fieldset>
+                                                                    </div>
+
+                                                                    <div class="flex justify-end gap-3 pt-2">
+                                                                        <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Close</button>
+                                                                        <button type="submit" @disabled(!$hasStock || $request->matching_inventory_items->isEmpty()) class="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50">Assign</button>
+                                                                    </div>
+                                                                </form>
+                                                            </x-modals.base-modal>
+
+                                                            <x-modals.base-modal title="Cancel Request" subtitle="Provide a reason for cancelling this request." maxWidth="max-w-sm">
+                                                                <x-slot:trigger>
+                                                                    <button type="button" @click="open = true" class="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-red-700">Cancel Request</button>
+                                                                </x-slot:trigger>
+                                                                <form method="POST" action="{{ route('propertyCustodian.requests.cancel', $request->id) }}" class="space-y-4 text-left">
+                                                                    @csrf
+                                                                    <div>
+                                                                        <label for="cancellation-reason-{{ $request->id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Cancellation reason</label>
+                                                                        <textarea id="cancellation-reason-{{ $request->id }}" name="cancellation_reason" rows="3" maxlength="1000" required class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-red-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"></textarea>
+                                                                    </div>
+                                                                    <div class="flex justify-end gap-3">
+                                                                        <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Back</button>
+                                                                        <button type="submit" class="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">Confirm Cancellation</button>
+                                                                    </div>
+                                                                </form>
+                                                            </x-modals.base-modal>
+                                                        @elseif(!$request->requested_item_name)
                                                         {{-- Approve Modal Trigger --}}
                                                         <x-modals.base-modal title="Approve Item Request" subtitle="Confirm assignment of requested item to the requester." maxWidth="max-w-md">
                                                             <x-slot:trigger>
@@ -264,6 +427,7 @@
                                                                 </div>
                                                             </form>
                                                         </x-modals.base-modal>
+                                                        @endif
                                                     </div>
                                                 </td>
                                             </tr>
@@ -508,6 +672,10 @@
                                                                         <span class="font-semibold text-green-600 dark:text-green-400">{{ $returnRequest->quantity }}</span>
                                                                     </div>
                                                                 </div>
+                                                                <div class="grid gap-3 sm:grid-cols-2">
+                                                                    <div><label for="return-building-{{ $returnRequest->id }}" class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Storage Building</label><input id="return-building-{{ $returnRequest->id }}" name="building" value="{{ old('building', $returnRequest->building) }}" type="text" maxlength="255" class="w-full rounded-md border border-gray-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div>
+                                                                    <div><label for="return-room-{{ $returnRequest->id }}" class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Storage Room</label><input id="return-room-{{ $returnRequest->id }}" name="room" value="{{ old('room', $returnRequest->room) }}" type="text" maxlength="255" class="w-full rounded-md border border-gray-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" /></div>
+                                                                </div>
                                                                 <div class="flex justify-end gap-3 pt-2">
                                                                     <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
                                                                     <x-common.button-spinner text="Confirm Approval" loadingText="Approving..." class="bg-green-600 hover:bg-green-700" />
@@ -607,59 +775,8 @@
                         {{-- TAB 2: TRANSACTION HISTORY --}}
                         <div x-show="activeTab === 'history'" x-cloak>
                             <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                                <div class="flex-1">
+                                <div class="w-full">
                                     <input type="search" x-model="searchHistory" placeholder="Search transactions..." aria-label="Search transaction history" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                </div>
-                                <div class="flex flex-wrap gap-2">
-                                    <!-- Assign Inventory Item Modal -->
-                                    <x-modals.base-modal title="Assign Inventory Item" subtitle="Record a new item assignment.">
-                                        <x-slot:trigger>
-                                            <button type="button" @click="open = true" class="inline-flex items-center gap-2 rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600">
-                                                <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                    <path fill-rule="evenodd" d="M10 5a1 1 0 0 1 1 1v3h3a1 1 0 1 1 0 2h-3v3a1 1 0 1 1-2 0v-3H6a1 1 0 1 1 0-2h3V6a1 1 0 0 1 1-1Z" clip-rule="evenodd" />
-                                                </svg>
-                                                Assign Item
-                                            </button>
-                                        </x-slot:trigger>
-
-                                        <form method="POST" action="{{ route('propertyCustodian.transactions.assignItem') }}" class="space-y-4">
-                                            @csrf
-                                            <div>
-                                                <label for="inventory-item" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Inventory Item</label>
-                                                <select id="inventory-item" name="item_id" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                                                    <option value="">Select an item</option>
-                                                    @foreach ($availableInventoryItems as $inventoryItem)
-                                                        <option value="{{ $inventoryItem['item_id'] }}">
-                                                            {{ $inventoryItem['item_name'] }} (Qty: {{ $inventoryItem['quantity'] }})
-                                                        </option>
-                                                    @endforeach
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label for="quantity" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label>
-                                                <input id="quantity" name="quantity" type="number" min="1" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" placeholder="Enter quantity"/>
-                                            </div>
-                                            <div>
-                                                <label for="assign-to" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Assign To</label>
-                                                <select id="assign-to" name="user_id" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                                                    <option value="">Select an end user</option>
-                                                    @foreach ($endUsers as $enduser)
-                                                        <option value="{{ $enduser['id'] }}">
-                                                            {{ $enduser['name'] }}
-                                                        </option>
-                                                    @endforeach
-                                                </select>    
-                                            </div>
-                                            <div>
-                                                <label for="date-assigned" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Date Assigned</label>
-                                                <input id="date-assigned" name="transaction_date" type="date" value="{{ old('transaction_date', now()->format('Y-m-d')) }}" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                                            </div>
-                                            <div class="flex justify-end gap-3 pt-2">
-                                                <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
-                                                <x-common.button-spinner text="Assign Item" loadingText="Assigning..." class="text-white"/>
-                                            </div>
-                                        </form>
-                                    </x-modals.base-modal>
                                 </div>
                             </div>
 
@@ -674,6 +791,7 @@
                                             <th class="px-4 py-3">Transaction Date</th>
                                             <th class="px-4 py-3">Date Returned</th>
                                             <th class="px-4 py-3">Activity</th>
+                                            <th class="px-4 py-3">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody x-ref="transactionRows" class="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
@@ -685,9 +803,11 @@
                                                     optional($transaction->item)->item_name ?? '',
                                                     optional($transaction->item)->inventory_item_no ?? '',
                                                     $transaction->fromUser?->full_name ?? $transaction->fromUser?->username ?? 'Warehouse',
-                                                    $transaction->user?->full_name ?? $transaction->user?->username ?? 'Unknown',
+                                                    $transaction->manual_recipient_name ?? $transaction->user?->full_name ?? $transaction->user?->username ?? 'Unknown',
+                                                    $transaction->manual_department ?? '',
                                                     $transaction->transaction_date?->format('Y-m-d') ?? '',
                                                     $transaction->return_date?->format('Y-m-d') ?? '',
+                                                    $transaction->expected_return_date?->format('Y-m-d') ?? '',
                                                     $transaction->status ?? '',
                                                 ])) }}"
                                                 class="text-center hover:bg-gray-50 dark:hover:bg-gray-800/50">
@@ -699,9 +819,18 @@
                                                     @endif
                                                 </td>
                                                 <td class="px-4 py-4 text-left">{{ $transaction->fromUser?->full_name ?: ($transaction->fromUser?->username ?? 'Warehouse') }}</td>
-                                                <td class="px-4 py-4 text-left">{{ $transaction->user?->full_name ?: ($transaction->user?->username ?? 'Unknown') }}</td>
+                                                <td class="px-4 py-4 text-left">
+                                                    <div>{{ $transaction->manual_recipient_name ?? $transaction->user?->full_name ?: ($transaction->user?->username ?? 'Unknown') }}</div>
+                                                    @if($transaction->manual_recipient_name)
+                                                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ $transaction->manual_department }}{{ $transaction->manual_recipient_type ? ' · ' . $transaction->manual_recipient_type : '' }}</span>
+                                                        @if($transaction->manual_contact)
+                                                            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ $transaction->manual_contact }}</span>
+                                                        @endif
+                                                    @endif
+                                                </td>
                                                 <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">{{ $transaction->transaction_date ? $transaction->transaction_date->format('Y-m-d') : 'N/A' }}</td>
                                                 <td class="px-4 py-4 text-xs text-gray-500 dark:text-gray-400">{{ $transaction->return_date ? $transaction->return_date->format('Y-m-d') : 'N/A' }}</td>
+                            
                                                 <td class="px-4 py-4">
                                                     @php
                                                         $s = strtolower($transaction->status ?? '');
@@ -721,17 +850,40 @@
                                                         {{ ucfirst($transaction->status ?? 'N/A') }}
                                                     </span>
                                                 </td>
+                                                <td class="px-4 py-4">
+                                                    @if($transaction->manual_recipient_name && $transaction->expected_return_date && $transaction->status === 'assigned')
+                                                        <x-modals.base-modal title="Record Manual Return" subtitle="Confirm that this item has been received back." maxWidth="max-w-sm">
+                                                            <x-slot:trigger>
+                                                                <button type="button" @click="open = true" class="rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Record Return</button>
+                                                            </x-slot:trigger>
+                                                            <form method="POST" action="{{ route('propertyCustodian.transactions.manual-return', $transaction->id) }}" class="space-y-4 text-left">
+                                                                @csrf
+                                                                <p class="text-sm text-gray-600 dark:text-gray-300">Return {{ $transaction->item?->item_name ?? 'the issued item' }} from {{ $transaction->manual_recipient_name }}?</p>
+                                                                <div>
+                                                                    <label for="manual-return-notes-{{ $transaction->id }}" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Return notes <span class="font-normal text-gray-400">(optional)</span></label>
+                                                                    <textarea id="manual-return-notes-{{ $transaction->id }}" name="notes" rows="2" maxlength="1000" class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"></textarea>
+                                                                </div>
+                                                                <div class="flex justify-end gap-3">
+                                                                    <button type="button" @click="open = false" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Back</button>
+                                                                    <button type="submit" class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Confirm Return</button>
+                                                                </div>
+                                                            </form>
+                                                        </x-modals.base-modal>
+                                                    @else
+                                                        <span class="text-xs text-gray-400">—</span>
+                                                    @endif
+                                                </td>
                                             </tr>
                                         @empty
                                             <tr>
-                                                <td colspan="7" class="px-4 py-10 text-center text-gray-500 dark:text-gray-400">
+                                                <td colspan="8" class="px-4 py-10 text-center text-gray-500 dark:text-gray-400">
                                                     No transactions found.
                                                 </td>
                                             </tr>
                                         @endforelse
                                         @if($transactions->isNotEmpty())
                                             <tr x-show="normalizeSearch(searchHistory) !== '' && !hasTransactionMatches()" x-cloak>
-                                                <td colspan="7" class="px-4 py-10 text-center text-gray-500 dark:text-gray-400">
+                                                <td colspan="8" class="px-4 py-10 text-center text-gray-500 dark:text-gray-400">
                                                     Transaction not found.
                                                 </td>
                                             </tr>

@@ -18,6 +18,41 @@ marked.setOptions({
 
 window.Alpine = Alpine;
 window.ApexCharts = ApexCharts;
+window.renderAiComparisonChart = function (element, chartData, metricLabel) {
+    if (!element || !chartData || !window.ApexCharts
+        || !Array.isArray(chartData.categories) || chartData.categories.length !== 2
+        || !Array.isArray(chartData.series) || chartData.series.length !== 1
+        || !Array.isArray(chartData.statuses) || chartData.statuses.length !== 2
+        || chartData.statuses.some(status => !['verified zero activity', 'activity recorded', 'history unavailable'].includes(status))
+        || typeof chartData.unit !== 'string'
+        || chartData.series.some(series => !Array.isArray(series.data)
+            || series.data.length !== 2
+            || series.data.some(value => value !== null && !Number.isFinite(value)))) {
+        return null;
+    }
+
+    const chart = new ApexCharts(element, {
+        chart: { type: 'bar', height: 240, toolbar: { show: false } },
+        plotOptions: { bar: { columnWidth: '48%', borderRadius: 2 } },
+        dataLabels: { enabled: false },
+        series: chartData.series,
+        xaxis: { categories: chartData.categories },
+        yaxis: { title: { text: `${metricLabel} (${chartData.unit})` } },
+        tooltip: {
+            y: {
+                formatter: (value, { dataPointIndex }) => chartData.statuses[dataPointIndex] === 'history unavailable'
+                    ? 'history unavailable'
+                    : `${value} (${chartData.statuses[dataPointIndex]})`,
+            },
+        },
+        noData: { text: 'No verified activity to chart' },
+        legend: { position: 'bottom' },
+        colors: ['#059669', '#d97706', '#0284c7', '#be123c', '#65a30d', '#9333ea'],
+    });
+    chart.render();
+
+    return chart;
+};
 window.flatpickr = flatpickr;
 window.FullCalendar = Calendar;
 window.lucide = { createIcons, icons };
@@ -61,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.querySelector('#chartThirteen')) {
         import('./components/chart/chart-13').then(module => module.initChartThirteen());
     }
-    if (document.querySelector('#adminInventoryChart')) {
+    if (document.querySelector('#adminInventoryChart, #adminUserRoleChart, #adminAccountStatusChart, #adminMaintenanceStatusChart, #adminInventoryStatusChart, #adminAuditActivityChart, #adminPendingRequestChart, #adminInventoryConditionChart')) {
         import('./components/chart/admin-dashboard').then(module => module.initAdminDashboard());
     }
     if (document.querySelector('#adminSystemRoleChart, #adminSystemRequestChart, #adminSystemMaintenanceChart')) {

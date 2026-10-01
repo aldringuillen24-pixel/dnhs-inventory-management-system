@@ -45,3 +45,16 @@ function something()
 {
     // ..
 }
+
+function geminiGenerateContentResponse(string $text): array
+{
+    return [
+        'candidates' => [[
+            'content' => [
+                'role' => 'model',
+                'parts' => [['text' => $text]],
+            ],
+            'finishReason' => 'STOP',
+        ]],
+    ];
+}

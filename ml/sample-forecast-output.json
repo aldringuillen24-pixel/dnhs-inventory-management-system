@@ -1,0 +1,845 @@
+{
+  "forecasts": [
+    {
+      "item_name": "Adjustable Wrench",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Basketball",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 7,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 3,
+        "2026-07": 4,
+        "2026-08": 5,
+        "2026-09": 6
+      }
+    },
+    {
+      "item_name": "Beaker Set",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Binding Machine",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Blue Pen",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 250,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 180,
+        "2026-07": 195,
+        "2026-08": 215,
+        "2026-09": 232
+      }
+    },
+    {
+      "item_name": "Bond Paper A4",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 180,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 120,
+        "2026-07": 135,
+        "2026-08": 150,
+        "2026-09": 165
+      }
+    },
+    {
+      "item_name": "Bond Paper Legal",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 130,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 90,
+        "2026-07": 100,
+        "2026-08": 110,
+        "2026-09": 120
+      }
+    },
+    {
+      "item_name": "Bookshelf",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Colored Paper",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 105,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 75,
+        "2026-07": 82,
+        "2026-08": 90,
+        "2026-09": 97
+      }
+    },
+    {
+      "item_name": "Computer Monitor",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 7,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 3,
+        "2026-07": 4,
+        "2026-08": 5,
+        "2026-09": 6
+      }
+    },
+    {
+      "item_name": "Conference Table",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 3,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 1,
+        "2026-08": 2,
+        "2026-09": 2
+      }
+    },
+    {
+      "item_name": "Desktop Computer",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 7,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 3,
+        "2026-07": 4,
+        "2026-08": 5,
+        "2026-09": 6
+      }
+    },
+    {
+      "item_name": "Digital Microscope",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Digital Weighing Scale",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Document Scanner",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Emergency Light",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "External Hard Drive",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Filing Cabinet",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 3,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 2,
+        "2026-09": 3
+      }
+    },
+    {
+      "item_name": "Fire Extinguisher",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "First Aid Kit",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 7,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 3,
+        "2026-07": 4,
+        "2026-08": 5,
+        "2026-09": 6
+      }
+    },
+    {
+      "item_name": "Flag Set",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Folding Table",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Hammer",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Hand Drill",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Hot Plate",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Jump Rope",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 18,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 10,
+        "2026-07": 12,
+        "2026-08": 14,
+        "2026-09": 16
+      }
+    },
+    {
+      "item_name": "Label Printer",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Laboratory Balance",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Ladder",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Laminating Machine",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Laptop Computer",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Manila Paper",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 84,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 60,
+        "2026-07": 65,
+        "2026-08": 72,
+        "2026-09": 78
+      }
+    },
+    {
+      "item_name": "Measuring Tape",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 7,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 3,
+        "2026-07": 4,
+        "2026-08": 5,
+        "2026-09": 6
+      }
+    },
+    {
+      "item_name": "Megaphone",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Microscope",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Network Switch",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Notebook",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 130,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 80,
+        "2026-07": 92,
+        "2026-08": 105,
+        "2026-09": 117
+      }
+    },
+    {
+      "item_name": "Numbering Machine",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Paint Brush Set",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 7,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 3,
+        "2026-07": 4,
+        "2026-08": 5,
+        "2026-09": 6
+      }
+    },
+    {
+      "item_name": "Paper Shredder",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Pencil",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 200,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 140,
+        "2026-07": 155,
+        "2026-08": 170,
+        "2026-09": 185
+      }
+    },
+    {
+      "item_name": "Photocopier",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Pliers Set",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Portable Fan",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Printer",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Projector",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Reception Counter",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 3,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 1,
+        "2026-08": 2,
+        "2026-09": 2
+      }
+    },
+    {
+      "item_name": "Router",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Screwdriver Set",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Soccer Ball",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Sports Whistle",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 14,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 6,
+        "2026-07": 8,
+        "2026-08": 10,
+        "2026-09": 12
+      }
+    },
+    {
+      "item_name": "Storage Cabinet",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Student Armchair",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 16,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 8,
+        "2026-07": 10,
+        "2026-08": 12,
+        "2026-09": 14
+      }
+    },
+    {
+      "item_name": "Table Tennis Net",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Table Tennis Racket",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 8,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 4,
+        "2026-07": 5,
+        "2026-08": 6,
+        "2026-09": 7
+      }
+    },
+    {
+      "item_name": "Tablet",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Teacher Chair",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 8,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 4,
+        "2026-07": 5,
+        "2026-08": 6,
+        "2026-09": 7
+      }
+    },
+    {
+      "item_name": "Teacher Desk",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Test Tube Rack",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Thermometer",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Time Attendance Machine",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Training Cone",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 24,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 12,
+        "2026-07": 15,
+        "2026-08": 18,
+        "2026-09": 21
+      }
+    },
+    {
+      "item_name": "Tripod Stand",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Visitor Chair",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 8,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 4,
+        "2026-07": 5,
+        "2026-08": 6,
+        "2026-09": 7
+      }
+    },
+    {
+      "item_name": "Volleyball",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 7,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 3,
+        "2026-07": 4,
+        "2026-08": 5,
+        "2026-09": 6
+      }
+    },
+    {
+      "item_name": "Wall Clock",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Water Cooler",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Water Dispenser",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 5,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 1,
+        "2026-07": 2,
+        "2026-08": 3,
+        "2026-09": 4
+      }
+    },
+    {
+      "item_name": "Web Camera",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 6,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 2,
+        "2026-07": 3,
+        "2026-08": 4,
+        "2026-09": 5
+      }
+    },
+    {
+      "item_name": "Yellow Pad",
+      "forecast_month": "2026-10",
+      "predicted_quantity": 102,
+      "historical_months": 4,
+      "monthly_usage": {
+        "2026-06": 70,
+        "2026-07": 78,
+        "2026-08": 86,
+        "2026-09": 94
+      }
+    }
+  ],
+  "insufficient_history": []
+}

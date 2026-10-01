@@ -1,14 +1,16 @@
 export const initAdminDashboard = () => {
-    const chartElement = document.querySelector('#adminInventoryChart');
-    if (!chartElement) return;
+    const chartElements = document.querySelectorAll('#adminInventoryChart, #adminUserRoleChart, #adminAccountStatusChart, #adminMaintenanceStatusChart, #adminInventoryStatusChart, #adminAuditActivityChart, #adminPendingRequestChart, #adminInventoryConditionChart');
+    if (!chartElements.length) return [];
 
-    const labels = JSON.parse(chartElement.dataset.labels || '[]');
-    const values = JSON.parse(chartElement.dataset.values || '[]');
+    return [...chartElements].map(chartElement => {
+        const labels = JSON.parse(chartElement.dataset.labels || '[]');
+        const values = JSON.parse(chartElement.dataset.values || '[]').map(Number);
+        const colors = JSON.parse(chartElement.dataset.colors || '[]');
 
-    const chart = new ApexCharts(chartElement, {
+        const chart = new ApexCharts(chartElement, {
         series: values,
         labels,
-        colors: ['#10b981', '#0ea5e9', '#f59e0b', '#8b5cf6', '#ef4444', '#64748b'],
+        colors: colors.length ? colors : ['#10b981', '#0ea5e9', '#f59e0b', '#8b5cf6', '#ef4444', '#64748b'],
         chart: {
             type: 'donut',
             height: 280,
@@ -35,10 +37,11 @@ export const initAdminDashboard = () => {
         tooltip: {
             y: { formatter: value => `${value} units` },
         },
-    });
+        });
 
-    chart.render();
-    return chart;
+        chart.render();
+        return chart;
+    });
 };
 
 export default initAdminDashboard;
