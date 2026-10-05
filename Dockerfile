@@ -44,12 +44,17 @@ ENV APACHE_DOCUMENT_ROOT=/var/www/html/public \
     COMPOSER_ALLOW_SUPERUSER=1 \
     FORECAST_PYTHON_BINARY=python3
 
-# System libraries, PHP extensions required by composer.json/lock
-# (dompdf: gd/zip/mbstring/dom — queue worker: pcntl — i18n: intl),
-# plus Python 3 for ml/forecast_demand.py (scikit-learn, joblib).
-# NOTE: tokenizer is compiled first and alone. Building it in parallel (-j)
-# together with the other Zend-based extensions races on zend_language_parser
-# and fails the whole build ("No rule to make target ... zend_language_parser.y").
+# System libraries and PHP extensions required by composer.json/lock:
+#   bcmath, curl, gd, intl, mbstring, opcache, pcntl, pdo_mysql, pdo_pgsql, zip
+# (dompdf needs gd/zip/mbstring/dom, the queue worker needs pcntl,
+#  validation needs intl, Render's Postgres needs pdo_pgsql.)
+# Plus Python 3 for ml/forecast_demand.py (scikit-learn, joblib).
+#
+# NOTE: tokenizer is deliberately NOT built here. It is already compiled into
+# the php:8.2-apache base image, and asking docker-php-ext-install to rebuild it
+# fails with "No rule to make target .../Zend/zend_language_parser.y" because the
+# generated Zend parser sources are not shipped. ctype, dom, fileinfo, filter,
+# pdo, xml, session, openssl, json and zlib are likewise already bundled.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip curl \
         libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
@@ -57,10 +62,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libicu-dev libpq-dev \
         python3 python3-pip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install tokenizer \
     && docker-php-ext-install -j"$(nproc)" \
-        bcmath ctype curl dom fileinfo filter gd intl mbstring \
-        opcache pcntl pdo pdo_mysql pdo_pgsql xml zip \
+        bcmath curl gd intl mbstring \
+        opcache pcntl pdo_mysql pdo_pgsql zip \
     && a2enmod rewrite headers \
     && sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
         /etc/apache2/sites-available/000-default.conf \
