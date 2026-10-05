@@ -8,6 +8,13 @@ use App\Models\User;
 uses(RefreshDatabase::class);
 
 test('seeded administrator can sign in and is redirected to the admin dashboard', function () {
+    // AdminUserSeeder reads the credentials from the environment and stores no
+    // default password in source, so the bootstrap variables are supplied here.
+    putenv('ADMIN_USERNAME=admin');
+    putenv('ADMIN_PASSWORD=test-admin-password');
+    $_ENV['ADMIN_USERNAME'] = 'admin';
+    $_ENV['ADMIN_PASSWORD'] = 'test-admin-password';
+
     Artisan::call('db:seed');
 
     $this->assertDatabaseHas('roles', ['role_name' => 'Administrator']);
@@ -18,7 +25,7 @@ test('seeded administrator can sign in and is redirected to the admin dashboard'
 
     $response = $this->post('/signin', [
         'username' => 'admin',
-        'password' => 'admin123',
+        'password' => 'test-admin-password',
     ]);
 
     $response->assertRedirect('/admin/dashboard');
@@ -26,6 +33,10 @@ test('seeded administrator can sign in and is redirected to the admin dashboard'
         
         \App\Models\User::where('username', 'admin')->first()
     );
+
+    putenv('ADMIN_USERNAME');
+    putenv('ADMIN_PASSWORD');
+    unset($_ENV['ADMIN_USERNAME'], $_ENV['ADMIN_PASSWORD']);
 });
 
 test('legacy sign-in sends temporary-password users to Vue onboarding', function () {
