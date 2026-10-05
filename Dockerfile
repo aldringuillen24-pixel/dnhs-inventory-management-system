@@ -47,6 +47,9 @@ ENV APACHE_DOCUMENT_ROOT=/var/www/html/public \
 # System libraries, PHP extensions required by composer.json/lock
 # (dompdf: gd/zip/mbstring/dom — queue worker: pcntl — i18n: intl),
 # plus Python 3 for ml/forecast_demand.py (scikit-learn, joblib).
+# NOTE: tokenizer is compiled first and alone. Building it in parallel (-j)
+# together with the other Zend-based extensions races on zend_language_parser
+# and fails the whole build ("No rule to make target ... zend_language_parser.y").
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip curl \
         libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
@@ -54,9 +57,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libicu-dev libpq-dev \
         python3 python3-pip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install tokenizer \
     && docker-php-ext-install -j"$(nproc)" \
         bcmath ctype curl dom fileinfo filter gd intl mbstring \
-        opcache pcntl pdo pdo_mysql pdo_pgsql tokenizer xml zip \
+        opcache pcntl pdo pdo_mysql pdo_pgsql xml zip \
     && a2enmod rewrite headers \
     && sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' \
         /etc/apache2/sites-available/000-default.conf \
