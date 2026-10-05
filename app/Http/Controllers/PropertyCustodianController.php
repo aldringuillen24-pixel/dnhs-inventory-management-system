@@ -51,12 +51,17 @@ class PropertyCustodianController extends Controller
             ])
             ->values();
 
+        // HAVING repeats the aggregate instead of referencing the select alias
+        // `available_quantity`. MySQL resolves alias references in HAVING, but
+        // PostgreSQL raises "column available_quantity does not exist" because it
+        // resolves HAVING names against the table first. Repeating SUM(quantity)
+        // is standard SQL and behaves identically on both drivers.
         $lowStockCount = Inventory::query()
             ->where('status', 'available')
             ->select('item_name')
             ->selectRaw('SUM(quantity) as available_quantity')
             ->groupBy('item_name')
-            ->having('available_quantity', '<=', 3)
+            ->havingRaw('SUM(quantity) <= ?', [3])
             ->get()
             ->count();
         $today = now()->startOfDay();
