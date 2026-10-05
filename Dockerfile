@@ -40,9 +40,13 @@ RUN composer dump-autoload --optimize --no-dev --no-interaction \
 # ------------------------------------------------------------------ runtime ---
 FROM php:8.2-apache
 
+# LOG_CHANNEL=stderr makes Laravel write errors to the container's stdout, which
+# is what Render displays in the service Logs tab. Without it, exceptions go to
+# storage/logs/laravel.log inside the container and are unreachable on Render.
 ENV APACHE_DOCUMENT_ROOT=/var/www/html/public \
     COMPOSER_ALLOW_SUPERUSER=1 \
-    FORECAST_PYTHON_BINARY=python3
+    FORECAST_PYTHON_BINARY=python3 \
+    LOG_CHANNEL=stderr
 
 # System libraries and PHP extensions required by composer.json/lock:
 #   bcmath, curl, gd, intl, mbstring, opcache, pcntl, pdo_mysql, pdo_pgsql, zip
