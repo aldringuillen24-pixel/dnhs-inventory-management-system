@@ -406,6 +406,37 @@ test('the inventory table groups matching item names and sums their quantity and
         ->assertJsonPath('inventoryItems.0.item_name', 'Workbook');
 });
 
+test('the inventory listing groups records with the same ICS while retaining each source record', function () {
+    $category = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => false,
+    ]);
+
+    foreach (range(1, 4) as $number) {
+        Inventory::create([
+            'category_id' => $category->category_id,
+            'unit' => 'piece',
+            'user_id' => $this->propertyCustodian->id,
+            'item_name' => 'Epson',
+            'ics_no' => 'ICS-2026-2',
+            'quantity' => 1,
+            'unit_cost' => 1500,
+            'status' => 'available',
+            'date_acquired' => '2026-10-04',
+            'serial_number' => sprintf('EPSON-%03d', $number),
+        ]);
+    }
+
+    $this->actingAs($this->propertyCustodian)
+        ->getJson(route('api.custodian.inventory'))
+        ->assertOk()
+        ->assertJsonPath('allInventoryPage.data.0.item_name', 'Epson')
+        ->assertJsonPath('allInventoryPage.data.0.ics_no', 'ICS-2026-2')
+        ->assertJsonPath('allInventoryPage.data.0.quantity', 4)
+        ->assertJsonPath('allInventoryPage.data.0.source_count', 4)
+        ->assertJsonCount(4, 'allInventoryPage.data.0.sourceItems');
+});
+
 test('inventory API provides disposed items in the disposed workspace', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',

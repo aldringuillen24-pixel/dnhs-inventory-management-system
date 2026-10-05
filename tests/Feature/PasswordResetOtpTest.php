@@ -70,6 +70,20 @@ test('otp expiry is exposed for the countdown', function () {
     expect($minutesLeft)->toBeGreaterThanOrEqual(4)->toBeLessThanOrEqual(5);
 });
 
+test('password reset email transport failure returns service unavailable', function () {
+    $user = passwordResetUser();
+
+    Mail::shouldReceive('to')
+        ->once()
+        ->with($user->email)
+        ->andThrow(new RuntimeException('SMTP unavailable'));
+
+    $this->postJson('/api/password/email', ['email' => $user->email])
+        ->assertStatus(503)
+        ->assertJsonPath('message', 'We could not send the verification email. Please try again later.')
+        ->assertJsonPath('errors.email.0', 'We could not send the verification email. Please try again later.');
+});
+
 test('an expired otp is rejected', function () {
     $user = passwordResetUser();
 

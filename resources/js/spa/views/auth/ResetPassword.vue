@@ -215,7 +215,11 @@ async function sendOtp() {
   errors.value = {};
   formError.value = '';
   try {
-    const { data } = await api.post('/password/email', { email: email.value });
+    const { data } = await api.post(
+      '/password/email',
+      { email: email.value },
+      { skipToast: true },
+    );
     email.value = data.email ?? email.value;
     startCountdown(data.expires_at);
     otp.value = '';

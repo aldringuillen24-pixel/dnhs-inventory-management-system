@@ -145,7 +145,7 @@ class PasswordResetController extends Controller
             return response()->json([
                 'message' => 'We could not send the verification email. Please try again later.',
                 'errors' => ['email' => ['We could not send the verification email. Please try again later.']],
-            ], 422);
+            ], 503);
         }
 
         return response()->json([
