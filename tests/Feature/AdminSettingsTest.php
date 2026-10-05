@@ -31,27 +31,21 @@ beforeEach(function () {
     ]);
 });
 
-test('administrator can view system settings page', function () {
+test('administrator can retrieve system settings data', function () {
     $this->actingAs($this->admin)
-        ->get(route('admin.settings'))
+        ->getJson(route('api.admin.settings'))
         ->assertOk()
-        ->assertSee('System Settings')
-        ->assertSee('Inventory Policies')
-        ->assertSee('Security Defaults')
-        ->assertSee('AI Configuration')
-        ->assertSee('Diagnostics');
-});
-
-test('system settings page does not contain school profile tab', function () {
-    $response = $this->actingAs($this->admin)->get(route('admin.settings'));
-    $response->assertOk();
-    $response->assertDontSee('General & School Profile', false);
-    $response->assertDontSee('School & Institutional Information', false);
+        ->assertJsonStructure([
+            'systemDiagnostics',
+            'inventoryPolicy',
+            'securityPolicy',
+            'aiConfig',
+        ]);
 });
 
 test('non-administrator cannot access system settings', function () {
     $this->actingAs($this->endUser)
-        ->get(route('admin.settings'))
+        ->getJson(route('api.admin.settings'))
         ->assertForbidden();
 });
 

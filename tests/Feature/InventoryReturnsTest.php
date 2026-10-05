@@ -926,10 +926,11 @@ class InventoryReturnsTest extends TestCase
         $response->assertSee('disabled title="This category is not eligible for maintenance."', false);
     }
 
-    public function test_furniture_category_is_not_eligible_for_maintenance()
+    public function test_furniture_category_is_eligible_for_maintenance()
     {
         $this->seed(\Database\Seeders\CategorySeeder::class);
-        $category = Category::where('category_name', 'Furniture and Fixtures')->firstOrFail();
+        $category = Category::where('category_name', 'Furniture')->firstOrFail();
+        $this->assertTrue((bool) $category->is_maintenance_eligible);
 
         $item = Inventory::create([
             'category_id' => $category->category_id,
@@ -943,16 +944,39 @@ class InventoryReturnsTest extends TestCase
         ]);
 
         $this->actingAs($this->custodian)
-            ->get(route('propertyCustodian.inventory'))
-            ->assertOk()
-            ->assertSee('disabled title="This category is not eligible for maintenance."', false);
+            ->post(route('propertyCustodian.inventory.send-to-maintenance', $item->item_id), [
+                'issue_description' => 'Furniture repair request.',
+            ])
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('inventory', [
+            'item_id' => $item->item_id,
+            'status' => 'under_maintenance',
+        ]);
+    }
+
+    public function test_consumables_category_is_not_eligible_for_maintenance()
+    {
+        $this->seed(\Database\Seeders\CategorySeeder::class);
+        $category = Category::where('category_name', 'Consumables')->firstOrFail();
+
+        $item = Inventory::create([
+            'category_id' => $category->category_id,
+            'item_name' => 'Bond Paper',
+            'quantity' => 1,
+            'unit' => 'ream',
+            'unit_cost' => 320,
+            'date_acquired' => now()->toDateString(),
+            'status' => 'available',
+            'user_id' => $this->custodian->id,
+        ]);
 
         $this->actingAs($this->custodian)
-            ->post(route('propertyCustodian.inventory.send-to-maintenance', $item->item_id), [
-                'issue_description' => 'Furniture should not enter maintenance.',
+            ->postJson(route('api.custodian.inventory.send-to-maintenance', $item->item_id), [
+                'issue_description' => 'Consumables should not enter maintenance.',
             ])
-            ->assertRedirect()
-            ->assertSessionHas('error', 'Items in this category are not eligible for maintenance.');
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Items in this category are not eligible for maintenance.');
 
         $this->assertDatabaseHas('inventory', [
             'item_id' => $item->item_id,

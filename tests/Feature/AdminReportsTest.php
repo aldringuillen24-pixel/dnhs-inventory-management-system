@@ -32,7 +32,7 @@ beforeEach(function () {
     ]);
 });
 
-test('an administrator can view the system reports page', function () {
+test('an administrator can retrieve system reports data', function () {
     UserAuditLog::create([
         'user_id'     => $this->admin->id,
         'action'      => 'user_created',
@@ -40,18 +40,18 @@ test('an administrator can view the system reports page', function () {
         'target_name' => 'Custodian User',
     ]);
 
-    $response = $this->actingAs($this->admin)->get(route('admin.reports'));
+    $response = $this->actingAs($this->admin)->getJson(route('api.admin.reports'));
 
-    $response->assertOk();
-    $response->assertViewIs('pages.administrator.reports');
-    $response->assertSee('System Reports');
-    $response->assertSee('Active Users');
-    $response->assertSee('Pending Setup');
-    $response->assertSee('Pending Requests');
-    $response->assertSee('Active Maintenance');
-    $response->assertSee('Download PDF Report');
-    $response->assertSee('Recent System Audit Activity');
-    $response->assertSee('Manage Users');
+    $response->assertOk()
+        ->assertJsonStructure([
+            'title',
+            'metrics' => ['activeUsers', 'pendingOnboarding', 'pendingRequests', 'openMaintenance'],
+            'roleData',
+            'requestStatusData',
+            'maintenanceStatusData',
+            'recentActivity',
+        ])
+        ->assertJsonPath('title', 'System Reports');
 });
 
 test('an administrator can download the system pdf report', function () {
@@ -63,7 +63,7 @@ test('an administrator can download the system pdf report', function () {
 });
 
 test('a non-administrator cannot access the admin reports page', function () {
-    $response = $this->actingAs($this->custodian)->get(route('admin.reports'));
+    $response = $this->actingAs($this->custodian)->getJson(route('api.admin.reports'));
 
     $response->assertForbidden();
 });

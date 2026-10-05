@@ -129,11 +129,9 @@ class MenuHelper
                 ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/property-custodian/profile'],
             ],
             'inspector' => [
-                ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/'],
-                ['icon' => 'inspection', 'name' => 'Items Inspection', 'path' => '/inspection'],
-                ['icon' => 'history', 'name' => 'Inspection History', 'path' => '/inspection/history'],
-                ['icon' => 'reports', 'name' => 'Reports', 'path' => '/reports'],
-                ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/profile'],
+                ['icon' => 'inventory', 'name' => 'Inventory Overview', 'path' => '/spa/inspector/inventory'],
+                ['icon' => 'reports', 'name' => 'Reports', 'path' => '/spa/inspector/reports'],
+                ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/spa/profile'],
             ],
             'end user' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/end-user/dashboard'],

@@ -36,6 +36,10 @@ class LoginController extends Controller
 
             $request->session()->flash('success', 'Signed in successfully.');
 
+            if ($user->temporary_password && $user->role) {
+                return redirect('/spa/onboarding');
+            }
+
             // Redirect based on role
             if ($user->role) {
                 $role = strtolower($user->role->role_name);
@@ -45,26 +49,14 @@ class LoginController extends Controller
                 }
 
                 if ($role === 'property custodian') {
-                    if ($user->temporary_password) {
-                        return redirect()->intended(route('propertyCustodian.onboarding'));
-                    }
-
                     return redirect()->intended(route('propertyCustodian.dashboard'));
                 }
 
                 if ($role === 'end user') {
-                    if ($user->temporary_password) {
-                        return redirect()->intended(route('endUser.onboarding'));
-                    }
-
                     return redirect()->intended(route('endUser.dashboard'));
                 }
 
                 if ($role === 'school head') {
-                    if ($user->temporary_password) {
-                        return redirect()->intended(route('schoolHead.onboarding'));
-                    }
-
                     return redirect()->intended(route('schoolHead.dashboard'));
                 }
             }
@@ -79,6 +71,55 @@ class LoginController extends Controller
 
         throw ValidationException::withMessages([
             'username' => 'The provided credentials do not match our records.',
+        ]);
+    }
+
+    /**
+     * Handle a JSON authentication attempt for the Vue SPA sign-in view.
+     * Mirrors login() rules (active account, valid role) but responds
+     * with the session payload instead of Blade redirects.
+     */
+    public function loginJson(Request $request)
+    {
+        $credentials = $request->validate([
+            'username' => ['required', 'string'],
+            'password' => ['required', 'string'],
+        ]);
+
+        if (! Auth::attempt(['username' => $credentials['username'], 'password' => $credentials['password']], $request->boolean('remember'))) {
+            throw ValidationException::withMessages([
+                'username' => 'The provided credentials do not match our records.',
+            ]);
+        }
+
+        $request->session()->regenerate();
+
+        $user = Auth::user()->load('role');
+
+        if ($user->status !== 'active') {
+            Auth::logout();
+
+            throw ValidationException::withMessages([
+                'username' => 'Your account is inactive. Please contact administrator.',
+            ]);
+        }
+
+        if (! $user->role) {
+            Auth::logout();
+
+            throw ValidationException::withMessages([
+                'username' => 'Your account does not have a valid role. Please contact an administrator.',
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Signed in successfully.',
+            'user' => $user,
+            'role' => $user->role?->role_name,
+            'onboarding_required' => $user->temporary_password !== null,
+            // The session regenerates on login, so hand the fresh token
+            // to the SPA (its <meta> copy is now stale).
+            'csrf_token' => csrf_token(),
         ]);
     }
 }

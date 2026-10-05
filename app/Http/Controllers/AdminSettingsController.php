@@ -10,11 +10,10 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
 
 class AdminSettingsController extends Controller
 {
-    public function index(): View
+    public function index(Request $request): JsonResponse
     {
         $dbConnected = true;
         $dbError = null;
@@ -69,7 +68,7 @@ class AdminSettingsController extends Controller
             'max_history_messages' => 6,
         ]);
 
-        return view('pages.administrator.settings', compact(
+        return response()->json(compact(
             'systemDiagnostics',
             'inventoryPolicy',
             'securityPolicy',

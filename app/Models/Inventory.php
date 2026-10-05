@@ -34,6 +34,25 @@ class Inventory extends Model
         'expected_end_date',
     ];
 
+    /**
+     * Statuses in which a record's units are still issued out to someone.
+     *
+     * `status` carries two independent meanings: custody and condition. Flagging
+     * an assigned item for inspection rewrites `status` to `under_inspection`
+     * (InventoryOperationService::sendToInspection) without releasing the units —
+     * `assigned_to_user_id` is untouched and markInspected() later restores
+     * `status_before`. So `under_inspection` overlays custody rather than replacing
+     * it. A status equality filter against 'assigned' therefore hides an item that
+     * is still in someone's hands.
+     *
+     * A status alone is not sufficient to prove custody: stock flagged straight
+     * from `available` also reads `under_inspection` but has no holder. Pair this
+     * with an active assignment transaction to tell the two apart — a manual issue
+     * has a transaction but no `assigned_to_user_id`, since its recipient is not a
+     * user record.
+     */
+    public const CUSTODY_STATUSES = ['assigned', 'under_inspection'];
+
     protected function casts(): array
     {
         return [
@@ -152,6 +171,30 @@ class Inventory extends Model
         ];
     }
 
+    /**
+     * The quantity that is actually on the books for this record.
+     *
+     * A fully issued record keeps 0 in `quantity` because the units moved onto the
+     * assignment transaction (see InventoryOperationService::issueManual). Statuses
+     * that sit alongside custody (assigned, and inspection flagged from assigned)
+     * must therefore read the transaction total instead of the stored column.
+     */
+    public function effectiveQuantity(): int
+    {
+        $transactions = $this->relationLoaded('transactions')
+            ? $this->transactions
+            : $this->transactions()->with('assignmentReturns:id,transaction_id,quantity')->get();
+
+        $issued = (int) $transactions->where('status', 'assigned')->sum(function ($transaction): int {
+            $out = (int) ($transaction->issued_quantity ?: $transaction->quantity);
+            $returned = (int) $transaction->assignmentReturns->sum('quantity');
+
+            return max(0, $out - $returned);
+        });
+
+        return $issued > 0 ? $issued : max(0, (int) $this->quantity);
+    }
+
     public function stockMovements()
     {
         return $this->hasMany(StockMovement::class, 'inventory_id', 'item_id');
@@ -165,6 +208,16 @@ class Inventory extends Model
     public function maintenanceRecords()
     {
         return $this->hasMany(MaintenanceRecord::class, 'inventory_id', 'item_id');
+    }
+
+    public function inspectionRecords()
+    {
+        return $this->hasMany(InspectionRecord::class, 'inventory_id', 'item_id');
+    }
+
+    public function latestInspection()
+    {
+        return $this->hasOne(InspectionRecord::class, 'inventory_id', 'item_id')->latestOfMany();
     }
 
     public function latestMaintenance()

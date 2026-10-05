@@ -82,7 +82,7 @@ class EndUserController extends Controller
             ->limit(5)
             ->get();
 
-        return view('pages.endUser.dashboard', [
+        return response()->json([
             'title' => 'End User Dashboard',
             'metrics' => [
                 'assignedItems' => $assignedItems,
@@ -97,46 +97,6 @@ class EndUserController extends Controller
             'conditionData' => $conditionData,
             'recentActivity' => $recentActivity,
         ]);
-    }
-
-    public function onboarding()
-    {
-        $user = User::findOrFail(Auth::id());
-
-        if (!$user->temporary_password) {
-            return redirect()->route('endUser.dashboard');
-        }
-
-        return view('pages.endUser.onboarding', ['title' => 'Complete Your Account Setup']);
-    }
-
-    public function onboardingPost(Request $request)
-    {
-        $user = User::findOrFail(Auth::id());
-
-        if (!$user->temporary_password) {
-            return redirect()->route('endUser.dashboard');
-        }
-
-        $validated = $request->validate([
-            'first_name' => ['required', 'string', 'max:255'],
-            'last_name' => ['nullable', 'string', 'max:255'],
-            'email' => ['required', 'email', 'max:255', 'unique:users,email,' . $user->id],
-            'building' => ['required', 'string', 'max:255'],
-            'room' => ['required', 'string', 'max:255'],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
-        ]);
-
-        $user->first_name = $validated['first_name'];
-        $user->last_name = $validated['last_name'] ?? '';
-        $user->email = $validated['email'];
-        $user->building = $validated['building'];
-        $user->room = $validated['room'];
-        $user->password = $validated['password'];
-        $user->temporary_password = null;
-        $user->save();
-
-        return redirect()->route('endUser.dashboard')->with('success', 'Your account has been updated.');
     }
 
     public function updateProfile(Request $request)
@@ -161,7 +121,7 @@ class EndUserController extends Controller
         return redirect()->route('endUser.profile')->with('success', 'Profile updated successfully.');
     }
 
-    public function requests()
+    public function requests(Request $request)
     {
         $user = Auth::user();
 
@@ -219,7 +179,7 @@ class EndUserController extends Controller
             ->count();
         $myPendingCount = $myRequests->where('status', 'waiting for approval')->count();
 
-        return view('pages.endUser.requests', [
+        return response()->json([
             'title'                => 'Requests',
             'myRequests'           => $myRequests,
             'incomingRequests'     => $incomingRequests,
@@ -246,9 +206,9 @@ class EndUserController extends Controller
         ]);
     }
 
-    public function myRequests()
+    public function myRequests(Request $request)
     {
-        return $this->requests();
+        return $this->requests($request);
     }
 
     public function storeRequest(Request $request)
@@ -299,7 +259,7 @@ class EndUserController extends Controller
         }
     }
 
-    public function myAssignedItems()
+    public function myAssignedItems(Request $request)
     {
         $user = Auth::user();
 
@@ -395,7 +355,7 @@ class EndUserController extends Controller
             ->sortByDesc(fn ($row) => $row['date'])
             ->values();
 
-        return view('pages.endUser.myAssignedItems', [
+        return response()->json([
             'title' => 'My Assigned Items',
             'activityRows' => $activityRows,
             'endUsers' => $endUsers,

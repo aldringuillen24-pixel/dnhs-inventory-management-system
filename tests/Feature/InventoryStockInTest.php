@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Category;
+use App\Models\AssignmentRequest;
 use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\StockMovement;
@@ -104,13 +105,13 @@ test('stock-in records an audit ledger entry with before and after quantities', 
         ->and($movement->to_room)->toBe('Supply Room');
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
-        ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['total'] === 25
-            && $metrics['available'] === 25
-            && $metrics['assigned'] === 0);
+        ->getJson(route('api.custodian.inventory'))
+        ->assertJsonPath('inventoryMetrics.total', 25)
+        ->assertJsonPath('inventoryMetrics.available', 25)
+        ->assertJsonPath('inventoryMetrics.assigned', 0);
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.transactions'))
-        ->assertViewHas('availableInventoryItems', fn ($items) => $items->first()['quantity'] === 25);
+        ->getJson(route('api.custodian.transactions'))
+        ->assertJsonPath('availableInventoryItems.0.quantity', 25);
 });
 
 test('a serialized stock-in creates one inventory record per serial number', function () {
@@ -139,21 +140,19 @@ test('a serialized stock-in creates one inventory record per serial number', fun
     expect(Inventory::where('item_name', 'Laptop')->pluck('quantity')->unique()->all())->toBe([1]);
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
+        ->getJson(route('api.custodian.inventory'))
         ->assertOk()
-        ->assertSee('Serial Number', false)
-        ->assertSee('SN-001', false)
-        ->assertSee('SN-002', false)
-        ->assertSee('+1 more', false);
+        ->assertJsonFragment(['serial_number' => 'SN-001'])
+        ->assertJsonFragment(['serial_number' => 'SN-002'])
+        ->assertJsonFragment(['serial_number' => 'SN-003']);
 
-    $this->get(route('propertyCustodian.inventory', ['workspace' => 'available']))
+    $this->getJson(route('api.custodian.inventory', ['workspace' => 'available']))
         ->assertOk()
-        ->assertSee('Serial Number', false)
-        ->assertSee('SN-001', false)
-        ->assertSee('+1 more', false);
+        ->assertJsonPath('activeWorkspace', 'available')
+        ->assertJsonFragment(['serial_number' => 'SN-001']);
 });
 
-test('the inventory edit modal exposes every serial number in a serialized group', function () {
+test('inventory API exposes every serial number in a serialized group', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => true,
@@ -169,15 +168,10 @@ test('the inventory edit modal exposes every serial number in a serialized group
         'serial_numbers' => ['SN-DESKTOP-001', 'SN-DESKTOP-002'],
     ]);
 
-    $response = $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'));
-
-    $response->assertOk()
-        ->assertDontSee('id="edit-building-', false)
-        ->assertDontSee('id="edit-room-', false)
-        ->assertSee('Serial numbers', false)
-        ->assertSee('SN-DESKTOP-001', false)
-        ->assertSee('SN-DESKTOP-002', false);
+    $this->actingAs($this->propertyCustodian)
+        ->getJson(route('api.custodian.inventory'))
+        ->assertOk()
+        ->assertJsonFragment(['serialNumbers' => ['SN-DESKTOP-001', 'SN-DESKTOP-002']]);
 });
 
 test('a non-serialized stock-in creates one inventory record with the entered quantity', function () {
@@ -229,11 +223,11 @@ test('stock-in copies the category lifespan default and calculates the expected 
 });
 
 test('inventory updates accept a lifespan override and recalculate the expected end date', function () {
-    $category = Category::create([
-        'category_name' => 'Office Equipment',
-        'requires_serial_number' => false,
-        'default_lifespan_years' => 3,
-    ]);
+    $category = Category::firstOrCreate(
+        ['category_name' => 'Office Equipment'],
+        ['requires_serial_number' => false, 'default_lifespan_years' => 3],
+    );
+    $category->update(['requires_serial_number' => false, 'default_lifespan_years' => 3]);
 
     $inventory = Inventory::create([
         'category_id' => $category->category_id,
@@ -273,10 +267,11 @@ test('inventory updates accept a lifespan override and recalculate the expected 
 });
 
 test('inventory quantity edits update both pages and record the stock delta', function () {
-    $category = Category::create([
-        'category_name' => 'Office Equipment',
-        'requires_serial_number' => false,
-    ]);
+    $category = Category::firstOrCreate(
+        ['category_name' => 'Office Equipment'],
+        ['requires_serial_number' => false],
+    );
+    $category->update(['requires_serial_number' => false]);
     $inventory = Inventory::create([
         'category_id' => $category->category_id,
         'unit' => 'piece',
@@ -307,13 +302,13 @@ test('inventory quantity edits update both pages and record the stock delta', fu
         ->and($movement->quantity_after)->toBe(3);
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
-        ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['available'] === 3)
-        ->assertViewHas('allInventoryPage', fn ($page) => (int) $page->getCollection()->first()->quantity === 3);
+        ->getJson(route('api.custodian.inventory'))
+        ->assertJsonPath('inventoryMetrics.available', 3)
+        ->assertJsonPath('allInventoryPage.data.0.quantity', 3);
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.transactions'))
-        ->assertViewHas('availableInventoryItems', fn ($items) => $items->first()['quantity'] === 3);
+        ->getJson(route('api.custodian.transactions'))
+        ->assertJsonPath('availableInventoryItems.0.quantity', 3);
 });
 
 test('lifespan status follows the documented date boundaries', function () {
@@ -354,7 +349,7 @@ test('lifespan status follows the documented date boundaries', function () {
     Carbon::setTestNow();
 });
 
-test('the inventory table displays unit cost and calculated total cost', function () {
+test('inventory API returns unit cost and calculated total cost', function () {
     $category = Category::create([
         'category_name' => 'Learning Resources',
         'requires_serial_number' => false,
@@ -371,10 +366,10 @@ test('the inventory table displays unit cost and calculated total cost', functio
     ]);
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
+        ->getJson(route('api.custodian.inventory'))
         ->assertOk()
-        ->assertSee('₱120.00')
-        ->assertSee('₱3,000.00');
+        ->assertJsonPath('allInventoryPage.data.0.unit_cost', '120.00')
+        ->assertJsonPath('allInventoryPage.data.0.total_cost', 3000);
 });
 
 test('the inventory table groups matching item names and sums their quantity and total cost', function () {
@@ -404,16 +399,14 @@ test('the inventory table groups matching item names and sums their quantity and
     ]);
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
+        ->getJson(route('api.custodian.inventory'))
         ->assertOk()
-        ->assertSee('₱2,800.00')
-        ->assertSee('25')
-        ->assertSee('Workbook', false)
-        ->assertDontSee('₱1,000.00')
-        ->assertDontSee('₱1,800.00');
+        ->assertJsonPath('allInventoryPage.data.0.quantity', 25)
+        ->assertJsonPath('allInventoryPage.data.0.total_cost', 2800)
+        ->assertJsonPath('inventoryItems.0.item_name', 'Workbook');
 });
 
-test('the inventory listing provides disposed items in the disposed tab', function () {
+test('inventory API provides disposed items in the disposed workspace', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -430,14 +423,13 @@ test('the inventory listing provides disposed items in the disposed tab', functi
     ]);
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
+        ->getJson(route('api.custodian.inventory'))
         ->assertOk()
-        ->assertSee('Disposed Laptop', false)
-        ->assertSee('Disposed', false)
-        ->assertSee('ready_to_dispose', false);
+        ->assertJsonFragment(['item_name' => 'Disposed Laptop', 'status' => 'disposed'])
+        ->assertJsonPath('inventoryPages.disposed.data.0.item_name', 'Disposed Laptop');
 });
 
-test('all inventory includes disposed records and ignores removed filter query parameters', function () {
+test('inventory API exposes the disposed workspace and ignores removed filters', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -463,11 +455,11 @@ test('all inventory includes disposed records and ignores removed filter query p
     }
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
+        ->getJson(route('api.custodian.inventory'))
         ->assertOk()
-        ->assertViewHas('allInventoryPage', fn ($page) => $page->getCollection()->contains('item_name', 'Disposed Projector'));
+        ->assertJsonPath('inventoryPages.disposed.data.0.item_name', 'Disposed Projector');
 
-    $this->get(route('propertyCustodian.inventory', [
+    $this->getJson(route('api.custodian.inventory', [
         'workspace' => 'all',
         'search' => 'does-not-match',
         'category' => $category->category_id,
@@ -475,16 +467,12 @@ test('all inventory includes disposed records and ignores removed filter query p
         'condition' => 'fair',
     ]))
         ->assertOk()
-        ->assertViewHas('activeWorkspace', 'all')
-        ->assertViewHas('allInventoryPage', fn ($page) => $page->total() === 5)
-        ->assertDontSee('Search inventory...')
-        ->assertDontSee('All Categories')
-        ->assertDontSee('All Statuses')
-        ->assertDontSee('All Conditions')
-        ->assertDontSee('applyFilters()');
+        ->assertJsonPath('activeWorkspace', 'all')
+        ->assertJsonPath('allInventoryPage.total', 4)
+        ->assertJsonFragment(['item_name' => 'Disposed Projector']);
 });
 
-test('all inventory only shows edit and delete actions for available records', function () {
+test('inventory API preserves record status for workspace actions', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -504,20 +492,13 @@ test('all inventory only shows edit and delete actions for available records', f
         ]);
     }
 
-    $content = $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
+    $response = $this->actingAs($this->propertyCustodian)
+        ->getJson(route('api.custodian.inventory'))
         ->assertOk()
-        ->getContent();
+        ->json('allInventoryPage.data');
 
-    $availableStart = strpos($content, 'Available Asset');
-    $assignedStart = strpos($content, 'Assigned Asset');
-    $availableRow = substr($content, $availableStart, strpos($content, '</tr>', $availableStart) - $availableStart);
-    $assignedRow = substr($content, $assignedStart, strpos($content, '</tr>', $assignedStart) - $assignedStart);
-
-    expect($availableRow)->toContain('title="Edit Item"')
-        ->and($availableRow)->toContain('title="Delete Item"')
-        ->and($assignedRow)->not->toContain('title="Edit Item"')
-        ->and($assignedRow)->not->toContain('title="Delete Item"');
+    expect(collect($response)->keyBy('item_name')->get('Available Asset')['status'])->toBe('available')
+        ->and(collect($response)->keyBy('item_name')->get('Assigned Asset')['status'])->toBe('assigned');
 });
 
 test('the inventory listing paginates after 25 grouped items', function () {
@@ -539,12 +520,12 @@ test('the inventory listing paginates after 25 grouped items', function () {
     }
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
+        ->getJson(route('api.custodian.inventory'))
         ->assertOk()
-        ->assertSee('all_page=2', false);
+        ->assertJsonPath('allInventoryPage.last_page', 2);
 });
 
-test('the maintenance modal includes available items beyond the first page', function () {
+test('inventory API includes maintenance candidates beyond the first page', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -564,21 +545,19 @@ test('the maintenance modal includes available items beyond the first page', fun
     }
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
+        ->getJson(route('api.custodian.inventory'))
         ->assertOk()
-        ->assertSee('Maintenance Asset 26', false)
-        ->assertSee('name="maintenance_item_choice"', false);
+        ->assertJsonFragment(['item_name' => 'Maintenance Asset 26']);
 });
 
-test('failed stock-in validation reopens the modal with the error summary visible', function () {
+test('stock-in API returns validation errors for invalid data', function () {
     $category = Category::create([
         'category_name' => 'Learning Resources',
         'requires_serial_number' => false,
     ]);
 
     $response = $this->actingAs($this->propertyCustodian)
-        ->from(route('propertyCustodian.inventory'))
-        ->post(route('propertyCustodian.inventory.stock-in'), [
+        ->postJson(route('api.custodian.inventory.stock-in'), [
             'item_name' => '',
             'category_id' => $category->category_id,
             'description' => 'Bad entry',
@@ -589,13 +568,8 @@ test('failed stock-in validation reopens the modal with the error summary visibl
             'quantity' => 0,
         ]);
 
-    $response->assertRedirect(route('propertyCustodian.inventory'));
-    $response->assertSessionHasErrors(['item_name', 'unit_cost', 'quantity']);
-
-    $this->get(route('propertyCustodian.inventory'))
-        ->assertOk()
-        ->assertSee('x-data="{ open: true, closeModal()', false)
-        ->assertSee('Please correct the highlighted fields and try again.');
+    $response->assertUnprocessable()
+        ->assertJsonValidationErrors(['item_name', 'unit_cost', 'quantity']);
 });
 
 test('property custodian can delete specific selected items from a serialized group', function () {
@@ -663,6 +637,45 @@ test('delete rejects deletion when any selected item is assigned', function () {
     $response->assertRedirect(route('propertyCustodian.inventory'));
     $response->assertSessionHas('error', 'Assigned inventory cannot be deleted.');
     $this->assertDatabaseHas('inventory', ['item_id' => $assignedItem->item_id]);
+});
+
+test('delete rejects inventory with request history and preserves the records', function () {
+    $category = Category::create([
+        'category_name' => 'IT Equipment',
+        'requires_serial_number' => false,
+    ]);
+
+    $item = Inventory::create([
+        'category_id' => $category->category_id,
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Returned Projector',
+        'quantity' => 1,
+        'unit' => 'unit',
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $request = AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 1,
+        'status' => 'returned',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->delete(route('propertyCustodian.inventory.destroy', $item), [
+            'selected_item_ids' => [$item->item_id],
+        ])
+        ->assertRedirect(route('propertyCustodian.inventory'))
+        ->assertSessionHas(
+            'error',
+            'One or more selected items have request or assignment history and cannot be deleted. Return assigned items if needed, then dispose of them to preserve their records.'
+        );
+
+    $this->assertDatabaseHas('inventory', ['item_id' => $item->item_id]);
+    $this->assertDatabaseHas('requests', ['id' => $request->id, 'item_id' => $item->item_id]);
 });
 
 test('editing and deletion reject inventory that is not available', function () {

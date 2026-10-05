@@ -15,13 +15,12 @@ class UserController extends Controller
 {
     public function exportSlips(Request $request)
     {
-        $selectedUserIds = array_filter(array_map('intval', (array) $request->input('selected_user_ids', [])));
+        $validatedData = $request->validate([
+            'selected_user_ids' => ['required', 'array', 'min:1'],
+            'selected_user_ids.*' => ['required', 'integer', 'exists:users,id'],
+        ]);
 
-        if (empty($selectedUserIds)) {
-            return redirect()->back()->with('error', 'Please select at least one account.');
-        }
-
-        $users = User::whereIn('id', $selectedUserIds)
+        $users = User::whereIn('id', $validatedData['selected_user_ids'])
             ->with('role')
             ->orderBy('created_at', 'desc')
             ->get();
@@ -60,6 +59,12 @@ class UserController extends Controller
 
         $users = $query->paginate(10)->withQueryString();
 
+        if ($request->expectsJson()) {
+            $users->getCollection()->each(function (User $user) {
+                $user->setAttribute('onboarding_pending', !empty($user->temporary_password));
+            });
+        }
+
         $metrics = [
             'total' => User::count(),
             'active' => User::where('status', 'active')->count(),
@@ -69,7 +74,33 @@ class UserController extends Controller
             'admins' => User::whereHas('role', fn ($q) => $q->where('role_name', 'Administrator'))->count(),
         ];
 
-        return view('pages.administrator.users-management', compact('users', 'roles', 'metrics'));
+        return response()->json(compact('users', 'roles', 'metrics'));
+    }
+
+    public function updateOwnProfile(Request $request)
+    {
+        $user = $request->user();
+
+        $validatedData = $request->validate([
+            'first_name' => ['required', 'string', 'max:255'],
+            'last_name' => ['nullable', 'string', 'max:255'],
+            'username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')->ignore($user->id)],
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'password' => ['nullable', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user->first_name = $validatedData['first_name'];
+        $user->last_name = $validatedData['last_name'] ?? '';
+        $user->username = $validatedData['username'];
+        $user->email = $validatedData['email'];
+
+        if (!empty($validatedData['password'])) {
+            $user->password = $validatedData['password'];
+        }
+
+        $user->save();
+
+        return redirect()->route('admin.profile')->with('success', 'Profile updated successfully.');
     }
 
     public function store(Request $request)

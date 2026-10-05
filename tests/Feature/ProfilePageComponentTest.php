@@ -3,34 +3,10 @@
 use App\Models\User;
 use App\Models\Role;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Blade;
 
 uses(RefreshDatabase::class);
 
-test('the reusable profile page component renders configurable profile content', function () {
-    $user = User::factory()->make([
-        'first_name' => 'Jamie',
-        'last_name' => 'Rivera',
-        'username' => 'jrivera',
-        'email' => 'jamie@example.com',
-    ]);
-
-    $html = Blade::render(
-        '<x-profile-page :user="$user" role-label="Inventory Manager" form-action="/profile/update" form-method="PATCH" />',
-        compact('user'),
-    );
-
-    expect($html)
-        ->toContain('Inventory Manager account')
-        ->toContain('Jamie Rivera')
-        ->toContain('jamie@example.com')
-        ->toContain('action="/profile/update"')
-        ->toContain('name="_method" value="PATCH"')
-        ->toContain('Personal details')
-        ->toContain('Security');
-});
-
-test('an authenticated property custodian can render and update the profile page', function () {
+test('an authenticated property custodian is directed to the SPA profile and can update it', function () {
     $role = Role::create(['role_name' => 'Property Custodian']);
     $user = User::factory()->create([
         'role_id' => $role->role_id,
@@ -43,10 +19,7 @@ test('an authenticated property custodian can render and update the profile page
     $this->actingAs($user);
 
     $this->get(route('propertyCustodian.profile'))
-        ->assertOk()
-        ->assertSee('Property Custodian account')
-        ->assertSee('name="first_name"', false)
-        ->assertSee('name="password_confirmation"', false);
+        ->assertRedirect('/spa/profile');
 
     $this->patch(route('propertyCustodian.profile.update'), [
         'first_name' => 'Updated',

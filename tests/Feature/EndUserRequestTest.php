@@ -87,11 +87,13 @@ test('end user onboarding saves the account building and room', function () {
 
     $this->actingAs($this->endUser)
         ->get(route('endUser.onboarding'))
-        ->assertOk()
-        ->assertSee('name="building"', false)
-        ->assertSee('name="room"', false);
+        ->assertRedirect('/spa/onboarding');
 
-    $this->post(route('endUser.onboarding.post'), [
+    $this->get('/spa/onboarding')
+        ->assertOk()
+        ->assertSee('id="app"', false);
+
+    $this->postJson('/api/onboarding', [
         'first_name' => $this->endUser->first_name,
         'last_name' => $this->endUser->last_name,
         'email' => $this->endUser->email,
@@ -99,11 +101,99 @@ test('end user onboarding saves the account building and room', function () {
         'room' => '203',
         'password' => 'secure-password',
         'password_confirmation' => 'secure-password',
-    ])->assertRedirect(route('endUser.dashboard'));
+    ])->assertOk()
+        ->assertJsonPath('onboarding_required', false)
+        ->assertJsonPath('user.building', 'Main Building')
+        ->assertJsonPath('user.room', '203');
 
     expect($this->endUser->fresh()->building)->toBe('Main Building')
         ->and($this->endUser->fresh()->room)->toBe('203')
         ->and($this->endUser->fresh()->temporary_password)->toBeNull();
+});
+
+test('inspector onboarding updates the sign-in username', function () {
+    $inspectorRole = Role::create(['role_name' => 'Inspector']);
+
+    $inspector = User::create([
+        'role_id' => $inspectorRole->role_id,
+        'first_name' => 'School',
+        'last_name' => 'Inspector',
+        'username' => 'inspector-a7f3',
+        'email' => 'inspector@example.com',
+        'password' => 'password',
+        'status' => 'active',
+        'temporary_password' => 'temporary-password',
+    ]);
+
+    $this->actingAs($inspector)
+        ->postJson('/api/onboarding', [
+            'first_name' => 'School',
+            'last_name' => 'Inspector',
+            'username' => 'school-inspector',
+            'email' => 'inspector@example.com',
+            'password' => 'secure-password',
+            'password_confirmation' => 'secure-password',
+        ])->assertOk()
+        ->assertJsonPath('user.username', 'school-inspector');
+
+    expect($inspector->fresh()->username)->toBe('school-inspector')
+        ->and($inspector->fresh()->temporary_password)->toBeNull();
+});
+
+test('inspector onboarding accepts the username the admin already assigned', function () {
+    $inspectorRole = Role::create(['role_name' => 'Inspector']);
+
+    $inspector = User::create([
+        'role_id' => $inspectorRole->role_id,
+        'first_name' => 'School',
+        'last_name' => 'Inspector',
+        'username' => 'inspector-a7f3',
+        'email' => 'inspector@example.com',
+        'password' => 'password',
+        'status' => 'active',
+        'temporary_password' => 'temporary-password',
+    ]);
+
+    // ignore($user->id) must let the unchanged value pass the unique check.
+    $this->actingAs($inspector)
+        ->postJson('/api/onboarding', [
+            'first_name' => 'School',
+            'last_name' => 'Inspector',
+            'username' => 'inspector-a7f3',
+            'email' => 'inspector@example.com',
+            'password' => 'secure-password',
+            'password_confirmation' => 'secure-password',
+        ])->assertOk()
+        ->assertJsonPath('user.username', 'inspector-a7f3');
+});
+
+test('inspector onboarding rejects a username already taken', function () {
+    $inspectorRole = Role::create(['role_name' => 'Inspector']);
+
+    $inspector = User::create([
+        'role_id' => $inspectorRole->role_id,
+        'first_name' => 'School',
+        'last_name' => 'Inspector',
+        'username' => 'inspector-a7f3',
+        'email' => 'inspector@example.com',
+        'password' => 'password',
+        'status' => 'active',
+        'temporary_password' => 'temporary-password',
+    ]);
+
+    $this->actingAs($inspector)
+        ->postJson('/api/onboarding', [
+            'first_name' => 'School',
+            'last_name' => 'Inspector',
+            'username' => 'custodian',
+            'email' => 'inspector@example.com',
+            'password' => 'secure-password',
+            'password_confirmation' => 'secure-password',
+        ])->assertStatus(422)
+        ->assertJsonValidationErrors('username');
+
+    expect($inspector->fresh()->username)->toBe('inspector-a7f3')
+        ->and($inspector->fresh()->temporary_password)->not->toBeNull();
 });
 
 test('end user cannot request more than available stock of the selected type', function () {

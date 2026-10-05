@@ -22,7 +22,7 @@ beforeEach(function () {
     ]);
 });
 
-test('administrator can view user management page with metrics', function () {
+test('administrator can retrieve user management data with metrics', function () {
     User::create([
         'role_id' => $this->custodianRole->role_id,
         'first_name' => 'John',
@@ -43,15 +43,16 @@ test('administrator can view user management page with metrics', function () {
         'status' => 'inactive',
     ]);
 
-    $response = $this->actingAs($this->admin)->get(route('admin.users-management'));
+    $response = $this->actingAs($this->admin)->getJson(route('api.admin.users.index'));
 
-    $response->assertOk();
-    $response->assertSee('System User Accounts');
-    $response->assertSee('Total Accounts');
-    $response->assertSee('Active Users');
-    $response->assertSee('Inactive Users');
-    $response->assertSee('John Doe');
-    $response->assertSee('Jane Smith');
+    $response->assertOk()
+        ->assertJsonStructure([
+            'users' => ['data'],
+            'roles',
+            'metrics' => ['total', 'active', 'inactive', 'custodians', 'endUsers', 'admins'],
+        ])
+        ->assertJsonFragment(['first_name' => 'John', 'last_name' => 'Doe'])
+        ->assertJsonFragment(['first_name' => 'Jane', 'last_name' => 'Smith']);
 });
 
 test('administrator can filter users by role and status', function () {
@@ -75,12 +76,11 @@ test('administrator can filter users by role and status', function () {
         'status' => 'inactive',
     ]);
 
-    $response = $this->actingAs($this->admin)->get(route('admin.users-management', [
+    $response = $this->actingAs($this->admin)->getJson(route('api.admin.users.index', [
         'role_id' => $this->custodianRole->role_id,
     ]));
 
-    $response->assertOk();
-    $response->assertSee('Custodian Person');
-    $response->assertDontSee('Teacher One');
+    $response->assertOk()
+        ->assertJsonFragment(['first_name' => 'Custodian', 'last_name' => 'Person'])
+        ->assertJsonMissing(['first_name' => 'Teacher', 'last_name' => 'One']);
 });
-

@@ -56,22 +56,18 @@ test('a valid otp authorizes a password reset and the password can be updated', 
     $resetResponse->assertSessionMissing('password_reset_email');
 });
 
-test('otp verification page shows a live expiry countdown', function () {
+test('otp expiry is exposed for the countdown', function () {
+    Mail::fake();
     $user = passwordResetUser();
 
-    PasswordResetOTP::create([
-        'email' => $user->email,
-        'otp_hash' => Hash::make('123456'),
-        'expires_at' => now()->addMinutes(5),
-        'attempts' => 0,
-    ]);
+    $response = $this->postJson('/api/password/email', ['email' => $user->email]);
 
-    $response = $this->get(route('password.otp', ['email' => $user->email]));
+    $response->assertOk()->assertJsonPath('email', $user->email);
 
-    $response->assertOk()
-        ->assertSee('Your code expires in')
-        ->assertSee('otp-countdown')
-        ->assertSee('data-expires-at');
+    $expiresAt = $response->json('expires_at');
+    expect($expiresAt)->not->toBeNull();
+    $minutesLeft = now()->diffInMinutes(\Illuminate\Support\Carbon::parse($expiresAt), false);
+    expect($minutesLeft)->toBeGreaterThanOrEqual(4)->toBeLessThanOrEqual(5);
 });
 
 test('an expired otp is rejected', function () {

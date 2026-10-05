@@ -1,0 +1,51 @@
+# Files excluded from the Docker build context.
+# Keeps the image small and guarantees dependencies are built fresh inside Docker.
+
+# Version control
+.git
+.gitattributes
+.gitignore
+
+# Environment and secrets (supplied by Render, never baked into the image)
+.env
+.env.*
+!.env.example
+
+# PHP dependencies (installed inside Docker via Composer)
+/vendor
+
+# Frontend dependencies and local build output (rebuilt inside Docker)
+node_modules
+public/build
+public/hot
+
+# Python virtual environments and caches (ML deps installed via pip in Docker)
+.venv-forecast
+.venv-slip-ocr
+.venv
+__pycache__/
+*.pyc
+ml/__pycache__/
+
+# Laravel runtime files (regenerated at boot)
+/storage/logs/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/framework/cache/*
+/bootstrap/cache/*.php
+!/bootstrap/cache/.gitignore
+
+# Local development artefacts
+database/database.sqlite
+database/*.sqlite
+npm-debug.log
+yarn-error.log
+
+# Editor, OS and tooling noise
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+.opencode
+task/
+task.md

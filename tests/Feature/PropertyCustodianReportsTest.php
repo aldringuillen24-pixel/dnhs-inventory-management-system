@@ -31,19 +31,25 @@ beforeEach(function () {
     ]);
 });
 
-test('a property custodian can view the interactive inventory report', function () {
+test('a property custodian can retrieve inventory report data', function () {
     $response = $this->actingAs($this->custodian)
-        ->get(route('propertyCustodian.reports', [
+        ->getJson(route('api.custodian.reports', [
             'date_from' => now()->subDays(7)->toDateString(),
             'date_to' => now()->toDateString(),
         ]));
 
-    $response->assertOk();
-    $response->assertViewIs('pages.propertyCustodian.reports');
-    $response->assertSee('Operational inventory report');
-    $response->assertSee('custodianReportMovementChart');
-    $response->assertSee('Low-stock watchlist');
-    $response->assertSee('Attention queue');
+    $response->assertOk()
+        ->assertJsonStructure([
+            'title',
+            'metrics',
+            'categoryData',
+            'statusData',
+            'recentTransactions',
+            'liveForecastResult',
+            'demoForecastResult',
+            'reportFilters' => ['date_from', 'date_to'],
+        ])
+        ->assertJsonPath('title', 'Property Custodian Reports');
 });
 
 test('an end user cannot view the property custodian inventory report', function () {

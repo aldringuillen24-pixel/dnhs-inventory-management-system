@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AssignmentRequest;
 use App\Models\AssignmentReturn;
 use App\Models\Category;
+use App\Models\InspectionRecord;
 use App\Models\Inventory;
 use App\Models\MaintenanceRecord;
 use App\Models\StockMovement;
@@ -1103,10 +1104,12 @@ class InventoryOperationService
         bool $isSerialized,
         array $groupItemIds,
         int $actorId,
+        ?array $serialNumbers = null,
     ): ?string {
-        return DB::transaction(function () use ($itemId, $attributes, $quantity, $isSerialized, $groupItemIds, $actorId): ?string {
+        return DB::transaction(function () use ($itemId, $attributes, $quantity, $isSerialized, $groupItemIds, $actorId, $serialNumbers): ?string {
             $items = Inventory::query()
                 ->whereIn('item_id', $groupItemIds)
+                ->orderBy('item_id')
                 ->lockForUpdate()
                 ->get();
 
@@ -1115,7 +1118,7 @@ class InventoryOperationService
             }
 
             if ($isSerialized) {
-                foreach ($items as $item) {
+                foreach ($items as $index => $item) {
                     $locationBefore = $item->only(['building', 'room']);
                     $locationChanged = (
                         array_key_exists('building', $attributes)
@@ -1124,7 +1127,11 @@ class InventoryOperationService
                         array_key_exists('room', $attributes)
                         && $attributes['room'] !== $item->room
                     );
-                    $item->update($attributes);
+                    $itemAttributes = $attributes;
+                    if ($serialNumbers !== null && array_key_exists($index, $serialNumbers)) {
+                        $itemAttributes['serial_number'] = $serialNumbers[$index];
+                    }
+                    $item->update($itemAttributes);
                     if ($locationChanged) {
                         $quantity = (int) $item->quantity;
                         $this->recordMovement(
@@ -1266,6 +1273,24 @@ class InventoryOperationService
         });
     }
 
+    public function sendItemsToMaintenance(array $itemIds, int $actorId, string $issue, ?string $notes): ?string
+    {
+        try {
+            DB::transaction(function () use ($itemIds, $actorId, $issue, $notes): void {
+                foreach (array_values(array_unique(array_map('intval', $itemIds))) as $itemId) {
+                    $error = $this->sendToMaintenance($itemId, $actorId, $issue, $notes);
+                    if ($error !== null) {
+                        throw new \DomainException($error);
+                    }
+                }
+            });
+        } catch (\DomainException $exception) {
+            return $exception->getMessage();
+        }
+
+        return null;
+    }
+
     public function markRepaired(int $itemId, int $actorId, ?string $repairNotes, ?float $maintenanceCost): ?string
     {
         return DB::transaction(function () use ($itemId, $actorId, $repairNotes, $maintenanceCost): ?string {
@@ -1308,6 +1333,24 @@ class InventoryOperationService
         });
     }
 
+    public function markItemsRepaired(array $itemIds, int $actorId, ?string $repairNotes, ?float $maintenanceCost): ?string
+    {
+        try {
+            DB::transaction(function () use ($itemIds, $actorId, $repairNotes, $maintenanceCost): void {
+                foreach (array_values(array_unique(array_map('intval', $itemIds))) as $itemId) {
+                    $error = $this->markRepaired($itemId, $actorId, $repairNotes, $maintenanceCost);
+                    if ($error !== null) {
+                        throw new \DomainException($error);
+                    }
+                }
+            });
+        } catch (\DomainException $exception) {
+            return $exception->getMessage();
+        }
+
+        return null;
+    }
+
     public function markReadyToDispose(int $itemId, int $actorId, string $notes): ?string
     {
         return DB::transaction(function () use ($itemId, $actorId, $notes): ?string {
@@ -1334,6 +1377,24 @@ class InventoryOperationService
         });
     }
 
+    public function markItemsReadyToDispose(array $itemIds, int $actorId, string $notes): ?string
+    {
+        try {
+            DB::transaction(function () use ($itemIds, $actorId, $notes): void {
+                foreach (array_values(array_unique(array_map('intval', $itemIds))) as $itemId) {
+                    $error = $this->markReadyToDispose($itemId, $actorId, $notes);
+                    if ($error !== null) {
+                        throw new \DomainException($error);
+                    }
+                }
+            });
+        } catch (\DomainException $exception) {
+            return $exception->getMessage();
+        }
+
+        return null;
+    }
+
     public function dispose(int $itemId, int $actorId, ?string $notes): ?string
     {
         return DB::transaction(function () use ($itemId, $actorId, $notes): ?string {
@@ -1354,6 +1415,140 @@ class InventoryOperationService
                 'inventory',
                 $inventory->item_id,
                 $notes ?? 'Item disposed',
+            );
+
+            return null;
+        });
+    }
+
+    public function disposeItems(array $itemIds, int $actorId, ?string $notes): ?string
+    {
+        try {
+            DB::transaction(function () use ($itemIds, $actorId, $notes): void {
+                foreach (array_values(array_unique(array_map('intval', $itemIds))) as $itemId) {
+                    $inventory = Inventory::query()->whereKey($itemId)->lockForUpdate()->firstOrFail();
+                    if ($inventory->status !== 'ready_to_dispose') {
+                        throw new \DomainException('Only items marked ready to dispose can be disposed.');
+                    }
+
+                    $error = $this->dispose($itemId, $actorId, $notes);
+                    if ($error !== null) {
+                        throw new \DomainException($error);
+                    }
+                }
+            });
+        } catch (\DomainException $exception) {
+            return $exception->getMessage();
+        }
+
+        return null;
+    }
+
+    /**
+     * Statuses a custodian may flag for inspection. Unlike maintenance this is not
+     * gated on the category, because inspection is a verification step rather than
+     * a repair.
+     */
+    public const INSPECTABLE_STATUSES = [
+        'available',
+        'assigned',
+        'under_maintenance',
+        'ready_to_dispose',
+    ];
+
+    public function sendToInspection(int $itemId, int $actorId, ?string $reason): ?string
+    {
+        return DB::transaction(function () use ($itemId, $actorId, $reason): ?string {
+            $inventory = Inventory::query()->whereKey($itemId)->lockForUpdate()->firstOrFail();
+            if (! in_array($inventory->status, self::INSPECTABLE_STATUSES, true)) {
+                return 'Only available, assigned, under maintenance, or ready to dispose items can be sent to inspection.';
+            }
+
+            $statusBefore = $inventory->status;
+            $quantity = $inventory->effectiveQuantity();
+
+            $inspection = InspectionRecord::create([
+                'inventory_id' => $inventory->item_id,
+                'flagged_by' => $actorId,
+                'status_before' => $statusBefore,
+                'status' => 'flagged',
+                'finding_notes' => $reason,
+                'flagged_at' => now(),
+            ]);
+
+            $inventory->update(['status' => 'under_inspection']);
+
+            $this->recordMovement(
+                $inventory->item_id,
+                $actorId,
+                'inspection',
+                $quantity,
+                $quantity,
+                $quantity,
+                'inspection_record',
+                $inspection->id,
+                $reason,
+            );
+
+            return null;
+        });
+    }
+
+    public function sendItemsToInspection(array $itemIds, int $actorId, ?string $reason): ?string
+    {
+        try {
+            DB::transaction(function () use ($itemIds, $actorId, $reason): void {
+                foreach (array_values(array_unique(array_map('intval', $itemIds))) as $itemId) {
+                    $error = $this->sendToInspection($itemId, $actorId, $reason);
+                    if ($error !== null) {
+                        throw new \DomainException($error);
+                    }
+                }
+            });
+        } catch (\DomainException $exception) {
+            return $exception->getMessage();
+        }
+
+        return null;
+    }
+
+    public function markInspected(int $inspectionId, int $actorId, ?string $notes): ?string
+    {
+        return DB::transaction(function () use ($inspectionId, $actorId, $notes): ?string {
+            $inspection = InspectionRecord::query()->whereKey($inspectionId)->lockForUpdate()->firstOrFail();
+            if ($inspection->status !== 'flagged') {
+                return 'This inspection record has already been completed.';
+            }
+
+            $inventory = Inventory::query()->whereKey($inspection->inventory_id)->lockForUpdate()->firstOrFail();
+            if ($inventory->status !== 'under_inspection') {
+                return 'This item is no longer awaiting inspection.';
+            }
+
+            $statusBefore = in_array($inspection->status_before, self::INSPECTABLE_STATUSES, true)
+                ? $inspection->status_before
+                : 'available';
+
+            $inventory->update(['status' => $statusBefore]);
+
+            $inspection->update([
+                'status' => 'inspected',
+                'inspected_by' => $actorId,
+                'finding_notes' => $notes ?? $inspection->finding_notes,
+                'inspected_at' => now(),
+            ]);
+
+            $quantity = $inventory->effectiveQuantity();
+            $this->recordMovement(
+                $inventory->item_id,
+                $actorId,
+                'inspection',
+                $quantity,
+                $quantity,
+                $quantity,
+                'inspection_record',
+                $inspection->id,
+                $notes,
             );
 
             return null;

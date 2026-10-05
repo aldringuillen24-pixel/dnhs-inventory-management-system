@@ -55,7 +55,7 @@ test('administrator user changes are logged', function () {
     ]);
 });
 
-test('school head can view audit logs page', function () {
+test('school head can retrieve audit logs data', function () {
     $schoolHead = User::create([
         'role_id' => $this->schoolHeadRole->role_id,
         'first_name' => 'School',
@@ -66,10 +66,14 @@ test('school head can view audit logs page', function () {
         'status' => 'active',
     ]);
 
-    $response = $this->actingAs($schoolHead)->get(route('schoolHead.audit-logs'));
+    $response = $this->actingAs($schoolHead)->getJson(route('api.school-head.audit-logs'));
 
-    $response->assertOk();
-    $response->assertSee('Audit Logs');
+    $response->assertOk()
+        ->assertJsonStructure([
+            'title',
+            'logs' => ['data'],
+        ])
+        ->assertJsonPath('title', 'Audit Logs');
 });
 
 test('administrator can change a users name or password while onboarding is still active', function () {

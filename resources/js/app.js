@@ -1,4 +1,6 @@
 import './bootstrap';
+import './media-play-guard';
+
 import Alpine from 'alpinejs';
 import ApexCharts from 'apexcharts';
 import { createIcons, icons } from 'lucide';
@@ -120,3 +122,14 @@ document.addEventListener('DOMContentLoaded', () => {
         import('./components/calendar-init').then(module => module.calendarInit());
     }
 });
+
+// QR camera scanner (inventory page). Bundled locally so the camera works
+// without reaching the html5-qrcode CDN. Exposed on window because the
+// Blade/Alpine scanner calls it as a global. Loaded at module evaluation
+// (not on DOMContentLoaded) so it is ready before the user opens the modal.
+if (document.querySelector('#qr-camera-viewport') && !window.Html5Qrcode) {
+    window.__html5QrcodeReady = import('html5-qrcode').then(module => {
+        window.Html5Qrcode = module.Html5Qrcode ?? module.default;
+        return window.Html5Qrcode;
+    }).catch(() => null);
+}

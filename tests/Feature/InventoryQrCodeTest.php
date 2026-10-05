@@ -3,6 +3,7 @@
 use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Role;
+use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -83,6 +84,41 @@ test('stock-in for a qr-eligible category generates a unique qr_code token', fun
         ->toStartWith('dnhs_qr_');
 });
 
+test('stock-in creates a separate QR-coded inventory record for each QR-eligible unit', function () {
+    $category = Category::create([
+        'category_name' => 'Office Equipment',
+        'requires_serial_number' => false,
+        'requires_qr_code' => true,
+    ]);
+
+    $response = $this->actingAs($this->custodian)->post(route('propertyCustodian.inventory.stock-in'), [
+        'item_name' => 'Air Printer',
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'unit_cost' => 15000,
+        'date_acquired' => '2026-09-01',
+        'quantity' => 4,
+    ]);
+
+    $items = Inventory::where('item_name', 'Air Printer')->orderBy('item_id')->get();
+
+    $response->assertRedirect(route('propertyCustodian.inventory'));
+    expect($items)->toHaveCount(4)
+        ->and($items->pluck('quantity')->unique()->all())->toBe([1])
+        ->and($items->pluck('qr_code')->unique())->toHaveCount(4)
+        ->and($items->every(fn (Inventory $item) => str_starts_with($item->qr_code, 'dnhs_qr_')))->toBeTrue()
+        ->and($items->pluck('inventory_item_no')->unique())->toHaveCount(4);
+
+    $inventoryResponse = $this->actingAs($this->custodian)
+        ->getJson(route('api.custodian.inventory'))
+        ->assertOk();
+    $listedSourceItems = collect($inventoryResponse->json('inventoryItems'))
+        ->flatMap(fn (array $group) => $group['sourceItems'] ?? [])
+        ->where('item_name', 'Air Printer');
+
+    expect($listedSourceItems)->toHaveCount(4);
+});
+
 // ── Test 2: Stock-in for a non-QR category leaves qr_code null ───────────────
 
 test('stock-in for a non-qr category leaves qr_code as null', function () {
@@ -122,6 +158,63 @@ test('qr lookup returns item data for a valid token', function () {
         ->assertJsonFragment(['ics_no' => 'ICS-TEST-001']);
 });
 
+test('qr lookup includes the assignee and return details for an assigned item', function () {
+    $category = qrCategory();
+    $token = 'dnhs_qr_assigned_testtoken';
+    $item = seedInventoryItem($this->custodian, $category, $token);
+    $item->update([
+        'quantity' => 0,
+        'status' => 'assigned',
+    ]);
+    Transaction::create([
+        'user_id' => $this->custodian->id,
+        'item_id' => $item->item_id,
+        'quantity' => 1,
+        'issued_quantity' => 1,
+        'transaction_date' => '2026-09-01',
+        'status' => 'assigned',
+    ]);
+
+    $this->actingAs($this->custodian)
+        ->getJson('/property-custodian/inventory/qr/lookup?token=' . $token)
+        ->assertOk()
+        ->assertJsonPath('quantity', 1)
+        ->assertJsonPath('assigned_to', 'Property Custodian (1)')
+        ->assertJsonPath('return_assignments.0.recipient', 'Property Custodian')
+        ->assertJsonPath('return_assignments.0.remaining_quantity', 1)
+        ->assertJsonPath('return_assignments.0.inventory_id', $item->item_id);
+});
+
+    test('Vue qr lookup api returns the scanned item data', function () {
+        $category = qrCategory();
+        $token = 'dnhs_qr_vue_testtoken123456';
+        $item = seedInventoryItem($this->custodian, $category, $token);
+
+        $this->actingAs($this->custodian)
+        ->getJson(route('api.custodian.inventory.qr.lookup', ['token' => $token]))
+        ->assertOk()
+        ->assertJsonPath('found', true)
+        ->assertJsonPath('item_id', $item->item_id)
+        ->assertJsonPath('item_name', 'Test Laptop')
+        ->assertJsonPath('quantity', 1)
+        ->assertJsonPath('unit', 'piece');
+    });
+
+test('Vue inventory data includes QR tokens for eligible source items', function () {
+        $category = qrCategory();
+        $eligibleItem = seedInventoryItem($this->custodian, $category, 'dnhs_qr_inventory_token123');
+
+        $response = $this->actingAs($this->custodian)
+            ->getJson(route('api.custodian.inventory'))
+            ->assertOk();
+
+        $sourceItems = collect($response->json('inventoryItems'))
+            ->flatMap(fn (array $group) => $group['sourceItems'] ?? []);
+
+        expect($sourceItems->firstWhere('item_id', $eligibleItem->item_id)['qr_code'] ?? null)
+            ->toBe('dnhs_qr_inventory_token123');
+});
+
 // ── Test 4: QR lookup returns 404 for an unknown token ───────────────────────
 
 test('qr lookup returns 404 for an unknown token', function () {
@@ -132,19 +225,27 @@ test('qr lookup returns 404 for an unknown token', function () {
         ->assertJsonFragment(['found' => false]);
 });
 
-// ── Test 5: QR label route returns 200 for items with a qr_code ──────────────
+// ── Retired standalone label routes ─────────────────────────────────────────
+// QR printing now happens client-side in the SPA record modal, so the
+// standalone print-qr / qr-label routes are gone. These tests lock in
+// the retirement (404) and prove the data the printer needs is still
+// served by the lookup and inventory APIs.
 
-test('qr label page is accessible for an item that has a qr_code', function () {
+test('qr label page is retired and returns 404', function () {
     $category = qrCategory();
     $token    = 'dnhs_qr_labeltest1234567890ab';
     $item     = seedInventoryItem($this->custodian, $category, $token);
 
-    $response = $this->actingAs($this->custodian)
-        ->get('/property-custodian/inventory/' . $item->item_id . '/qr-label');
+    $this->actingAs($this->custodian)
+        ->get('/property-custodian/inventory/' . $item->item_id . '/qr-label')
+        ->assertNotFound();
 
-    $response->assertOk()
-        ->assertSee($item->inventory_item_no)
-        ->assertSee($item->item_name);
+    // The lookup data the client-side printer flow needs is still available.
+    $this->actingAs($this->custodian)
+        ->getJson('/property-custodian/inventory/qr/lookup?token=' . $token)
+        ->assertOk()
+        ->assertJsonPath('found', true)
+        ->assertJsonPath('inventory_item_no', $item->inventory_item_no);
 });
 
 // ── Test 6: QR label route returns 404 for items without a qr_code ───────────
@@ -159,34 +260,39 @@ test('qr label page returns 404 for an item without a qr_code', function () {
     $response->assertNotFound();
 });
 
-test('property custodian can retrieve print-label JSON data after scanning a valid QR code', function () {
+test('print-qr json endpoint is retired in favor of client-side printing', function () {
     $category = qrCategory();
     $token    = 'dnhs_qr_printjson1234567890';
     $item     = seedInventoryItem($this->custodian, $category, $token);
 
-    $lookupResponse = $this->actingAs($this->custodian)
-        ->getJson('/property-custodian/inventory/qr/lookup?token=' . $token);
+    $this->actingAs($this->custodian)
+        ->getJson('/property-custodian/inventory/qr/lookup?token=' . $token)
+        ->assertOk();
 
-    $lookupResponse->assertOk();
-
-    $printResponse = $this->actingAs($this->custodian)
-        ->getJson('/property-custodian/inventory/' . $item->item_id . '/print-qr');
-
-    $printResponse->assertOk()
-        ->assertJsonPath('activeItem.item_id', $item->item_id)
-        ->assertJsonPath('activeItem.qr_code', $token)
-        ->assertJsonPath('items.0.item_id', $item->item_id);
+    $this->actingAs($this->custodian)
+        ->getJson('/property-custodian/inventory/' . $item->item_id . '/print-qr')
+        ->assertNotFound();
 });
 
-test('print-qr route is accessible and displays two-column workspace', function () {
+test('print-qr group route is retired', function () {
+    $category = qrCategory();
+    $first = seedInventoryItem($this->custodian, $category, 'dnhs_qr_group_first123');
+    seedInventoryItem($this->custodian, $category, 'dnhs_qr_group_second123', 'INV-000002');
+
+    $this->actingAs($this->custodian)
+        ->getJson('/property-custodian/inventory/' . $first->item_id . '/print-qr?single=1')
+        ->assertNotFound();
+
+    $this->actingAs($this->custodian)
+        ->getJson('/property-custodian/inventory/' . $first->item_id . '/print-qr')
+        ->assertNotFound();
+});
+
+test('print-qr page route is retired', function () {
     $category = qrCategory();
     $item = seedInventoryItem($this->custodian, $category, 'dnhs_qr_printqr1234567890');
 
-    $response = $this->actingAs($this->custodian)
-        ->get('/property-custodian/inventory/' . $item->item_id . '/print-qr');
-
-    $response->assertOk()
-        ->assertSee('Print QR Code')
-        ->assertSee($item->inventory_item_no)
-        ->assertSee($item->item_name);
+    $this->actingAs($this->custodian)
+        ->get('/property-custodian/inventory/' . $item->item_id . '/print-qr')
+        ->assertNotFound();
 });

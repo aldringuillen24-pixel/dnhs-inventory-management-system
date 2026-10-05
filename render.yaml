@@ -1,0 +1,64 @@
+# Render blueprint for the DNHS Inventory Management System.
+# Creates a Docker web service (./Dockerfile on branch main) plus managed Postgres.
+# Secrets are entered in the Render dashboard, never committed to git.
+
+services:
+  - type: web
+    name: dnhs-inventory
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    envVars:
+      - key: APP_NAME
+        value: DNHS Inventory
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_URL
+        sync: false # e.g. https://dnhs-inventory.onrender.com (set after first deploy)
+      - key: APP_KEY
+        sync: false # generate locally: php artisan key:generate --show, then paste here
+        required: true
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: port
+      - key: DB_DATABASE
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: password
+      - key: SESSION_DRIVER
+        value: database
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: FILESYSTEM_DISK
+        value: local
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: FORECAST_PYTHON_BINARY
+        value: python3
+      - key: FORECAST_DEMO_MODE
+        value: "false"
+
+databases:
+  - name: dnhs-inventory-db
+    plan: starter

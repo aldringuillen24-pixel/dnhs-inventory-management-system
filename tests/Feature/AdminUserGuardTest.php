@@ -59,6 +59,79 @@ test('an administrator cannot deactivate themselves', function () {
     expect($this->admin->status)->toBe('active');
 });
 
+test('admin user API exposes onboarding state without exposing the temporary password', function () {
+    $pendingUser = User::create([
+        'role_id' => $this->propertyRole->role_id,
+        'first_name' => 'Pending',
+        'last_name' => 'User',
+        'username' => 'pending-user',
+        'email' => 'pending@test.com',
+        'password' => 'temporary-password',
+        'temporary_password' => 'temporary-password',
+        'status' => 'active',
+    ]);
+
+    $completedUser = User::create([
+        'role_id' => $this->propertyRole->role_id,
+        'first_name' => 'Completed',
+        'last_name' => 'User',
+        'username' => 'completed-user',
+        'email' => 'completed@test.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+
+    $response = $this->actingAs($this->admin)->getJson(route('api.admin.users.index'));
+
+    $response->assertOk()
+        ->assertJsonFragment(['id' => $pendingUser->id, 'onboarding_pending' => true])
+        ->assertJsonFragment(['id' => $completedUser->id, 'onboarding_pending' => false])
+        ->assertJsonMissing(['temporary_password' => 'temporary-password']);
+});
+
+test('administrator can update their own profile information', function () {
+    $response = $this->actingAs($this->admin)->patchJson(route('api.admin.profile.update'), [
+        'first_name' => 'Updated',
+        'last_name' => 'Administrator',
+        'username' => 'updated-admin',
+        'email' => 'updated-admin@test.com',
+        'password' => 'new-secure-password',
+        'password_confirmation' => 'new-secure-password',
+    ]);
+
+    $response->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $this->admin->refresh();
+    expect($this->admin->first_name)->toBe('Updated')
+        ->and($this->admin->last_name)->toBe('Administrator')
+        ->and($this->admin->username)->toBe('updated-admin')
+        ->and($this->admin->email)->toBe('updated-admin@test.com')
+        ->and(\Illuminate\Support\Facades\Hash::check('new-secure-password', $this->admin->password))->toBeTrue();
+});
+
+test('administrator can download PDF slips for selected accounts through the API', function () {
+    $user = User::create([
+        'role_id' => $this->propertyRole->role_id,
+        'first_name' => 'Slip',
+        'last_name' => 'User',
+        'username' => 'slip-user',
+        'email' => 'slip@test.com',
+        'password' => 'temporary-password',
+        'temporary_password' => 'temporary-password',
+        'status' => 'active',
+    ]);
+
+    $response = $this->actingAs($this->admin)
+        ->postJson(route('api.admin.users.export-slips'), [
+            'selected_user_ids' => [$user->id],
+        ]);
+
+    $response->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
+    expect($response->getContent())->toStartWith('%PDF-');
+});
+
 test('cannot deactivate the last active administrator', function () {
     $this->otherAdmin->update(['status' => 'inactive']);
 

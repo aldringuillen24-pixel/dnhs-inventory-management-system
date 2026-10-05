@@ -13,47 +13,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
-use Illuminate\View\View;
+use Illuminate\Http\JsonResponse;
 
 class SchoolHeadController extends Controller
 {
-    public function onboarding(): View|\Illuminate\Http\RedirectResponse
-    {
-        $user = User::findOrFail(Auth::id());
-
-        if (!$user->temporary_password) {
-            return redirect()->route('schoolHead.dashboard');
-        }
-
-        return view('pages.schoolHead.onboarding', ['title' => 'Complete Your Account Setup']);
-    }
-
-    public function onboardingPost(Request $request): \Illuminate\Http\RedirectResponse
-    {
-        $user = User::findOrFail(Auth::id());
-
-        if (!$user->temporary_password) {
-            return redirect()->route('schoolHead.dashboard');
-        }
-
-        $validated = $request->validate([
-            'first_name' => ['required', 'string', 'max:255'],
-            'last_name' => ['nullable', 'string', 'max:255'],
-            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
-        ]);
-
-        $user->first_name = $validated['first_name'];
-        $user->last_name = $validated['last_name'] ?? '';
-        $user->email = $validated['email'];
-        $user->password = $validated['password'];
-        $user->temporary_password = null;
-        $user->save();
-
-        return redirect()->route('schoolHead.dashboard')->with('success', 'Your account has been updated.');
-    }
-
-    public function index(): View
+    public function index(Request $request): JsonResponse
     {
         $inventory = Inventory::query()
             ->where('status', '!=', 'disposed')
@@ -155,7 +119,7 @@ class SchoolHeadController extends Controller
             ];
         });
 
-        return view('pages.schoolHead.dashboard', [
+        return response()->json([
             'title' => 'School Head Dashboard',
             'metrics' => [
                 'totalUnits' => (int) $inventory->sum('quantity'),
@@ -176,44 +140,54 @@ class SchoolHeadController extends Controller
         ]);
     }
 
-    public function inventoryOverview(): View
+    public function inventoryOverview(Request $request): JsonResponse
     {
         $inventory = Inventory::query()
+            ->with(['transactions' => fn ($query) => $query->where('status', 'assigned')->with('assignmentReturns:id,transaction_id,quantity')])
             ->where('status', '!=', 'disposed')
             ->get();
 
+        // Custody-based statuses read the assignment transaction: a fully issued
+        // record keeps 0 in inventory.quantity, so summing the column reports 0.
+        $effective = fn ($item): int => in_array($item->status, ['assigned', 'under_inspection'], true)
+            ? $item->effectiveQuantity()
+            : (int) $item->quantity;
+
         $categories = Category::query()
-            ->with(['inventoryItems' => fn ($query) => $query->where('status', '!=', 'disposed')])
+            ->with(['inventoryItems' => fn ($query) => $query
+                ->where('status', '!=', 'disposed')
+                ->with(['transactions' => fn ($query) => $query->where('status', 'assigned')->with('assignmentReturns:id,transaction_id,quantity')]),
+            ])
             ->get()
-            ->map(function ($category) {
+            ->map(function ($category) use ($effective) {
                 $items = $category->inventoryItems;
 
                 return [
                     'name' => $category->category_name,
-                    'total' => (int) $items->sum('quantity'),
-                    'available' => (int) $items->where('status', 'available')->sum('quantity'),
-                    'assigned' => (int) $items->where('status', 'assigned')->sum('quantity'),
-                    'value' => (float) $items->sum(fn ($item) => $item->quantity * $item->unit_cost),
+                    'total' => (int) $items->sum($effective),
+                    'available' => (int) $items->where('status', 'available')->sum($effective),
+                    'assigned' => (int) $items->where('status', 'assigned')->sum($effective),
+                    'value' => (float) $items->sum(fn ($item) => $effective($item) * $item->unit_cost),
                 ];
             })
             ->filter(fn ($category) => $category['total'] > 0)
             ->sortByDesc('total')
             ->values();
 
-        return view('pages.schoolHead.inventory-overview', [
+        return response()->json([
             'title' => 'Inventory Overview',
             'categories' => $categories,
             'metrics' => [
-                'units' => (int) $inventory->sum('quantity'),
-                'available' => (int) $inventory->where('status', 'available')->sum('quantity'),
-                'assigned' => (int) $inventory->where('status', 'assigned')->sum('quantity'),
+                'units' => (int) $inventory->sum($effective),
+                'available' => (int) $inventory->where('status', 'available')->sum($effective),
+                'assigned' => (int) $inventory->where('status', 'assigned')->sum($effective),
                 'lowStock' => $categories->where('available', '<=', 3)->count(),
-                'value' => (float) $inventory->sum(fn ($item) => $item->quantity * $item->unit_cost),
+                'value' => (float) $inventory->sum(fn ($item) => $effective($item) * $item->unit_cost),
             ],
         ]);
     }
 
-    public function reports(): View
+    public function reports(Request $request): JsonResponse
     {
         $inventory = Inventory::query()->where('status', '!=', 'disposed')->get();
         $statusData = $inventory->groupBy('status')->map(fn ($items, $status) => [
@@ -232,7 +206,7 @@ class SchoolHeadController extends Controller
         $recentTransactions = Transaction::with(['item:item_id,item_name', 'user:id,first_name,last_name'])
             ->latest('transaction_date')->latest('id')->limit(10)->get();
 
-        return view('pages.schoolHead.reports', [
+        return response()->json([
             'title' => 'Reports',
             'metrics' => [
                 'totalUnits' => (int) $inventory->sum('quantity'),
@@ -246,22 +220,17 @@ class SchoolHeadController extends Controller
         ]);
     }
 
-    public function auditLogs(): View
+    public function auditLogs(Request $request): JsonResponse
     {
         $logs = UserAuditLog::query()
             ->with(['actor', 'targetUser'])
             ->orderByDesc('created_at')
             ->paginate(20);
 
-        return view('pages.schoolHead.audit-logs', [
+        return response()->json([
             'title' => 'Audit Logs',
             'logs' => $logs,
         ]);
-    }
-
-    public function profile(): View
-    {
-        return view('pages.schoolHead.profile', ['title' => 'Profile']);
     }
 
     public function updateProfile(Request $request): \Illuminate\Http\RedirectResponse

@@ -7,11 +7,12 @@ use App\Models\MaintenanceRecord;
 use App\Models\User;
 use App\Models\UserAuditLog;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\View\View;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AdminDashboardController extends Controller
 {
-    public function index(): View
+    public function index(Request $request): JsonResponse
     {
         $users = User::query()->with('role')->get();
 
@@ -31,7 +32,7 @@ class AdminDashboardController extends Controller
             ->map(fn ($logs, $action) => ['label' => ucwords(str_replace('_', ' ', (string) $action)), 'value' => $logs->count()])
             ->values();
 
-        return view('pages.administrator.dashboard', [
+        return response()->json([
             'title' => 'Admin Dashboard',
             'metrics' => [
                 'activeUsers' => $users->where('status', 'active')->count(),
@@ -43,13 +44,17 @@ class AdminDashboardController extends Controller
         ]);
     }
 
-    public function reports(): View
+    public function reports(Request $request): JsonResponse
     {
-        return view('pages.administrator.reports', $this->reportData());
+        return response()->json($this->reportData());
     }
 
-    public function downloadReports()
+    public function downloadReports(Request $request)
     {
+        if ($request->expectsJson()) {
+            return response()->json($this->reportData());
+        }
+
         return Pdf::loadView('pdfs.administrator-system-report', $this->reportData())
             ->download('administrator-system-report.pdf');
     }

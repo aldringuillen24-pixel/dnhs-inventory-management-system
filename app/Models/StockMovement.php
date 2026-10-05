@@ -36,4 +36,14 @@ class StockMovement extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function assignmentReturn()
+    {
+        return $this->belongsTo(AssignmentReturn::class, 'reference_id');
+    }
+
+    public function assignmentRequest()
+    {
+        return $this->belongsTo(AssignmentRequest::class, 'reference_id');
+    }
 }

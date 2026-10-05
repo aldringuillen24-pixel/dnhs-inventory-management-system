@@ -157,19 +157,12 @@ test('the demand forecast page data reads the generated forecast JSON', function
         ->and($result['rows'][0]['calculation_basis'])->toContain('pending demand');
 
     $this->actingAs($user)
-        ->get(route('propertyCustodian.reports'))
+        ->getJson(route('api.custodian.reports'))
         ->assertOk()
-        ->assertSee('Sample/Demo Demand Forecast')
-        ->assertSee('SAMPLE DATA ONLY')
-        ->assertSee('Production ML Demand Forecast')
-        ->assertSee('13 reams')
-        ->assertDontSee('Demand Forecast & Procurement Recommendations')
-        ->assertDontSee('Priority Procurement Items')
-        ->assertSeeInOrder([
-            'Stock movement trend',
-            'Stock status',
-            'Units by category',
-        ]);
+        ->assertJsonPath('title', 'Property Custodian Reports')
+        ->assertJsonPath('liveForecastResult.rows.0.forecast_demand', 20)
+        ->assertJsonPath('liveForecastResult.rows.0.available_stock', 12)
+        ->assertJsonPath('liveForecastResult.rows.0.suggested_procurement', 13);
 });
 
 test('live reader rejects stale output and duplicate stable identities', function () {
@@ -261,18 +254,21 @@ test('live chat ranks Laravel recommendations and reports use the identical rows
         ->toContain('Advisory forecast priorities', 'Predicted demand', 'Available stock', 'Pending demand', 'Safety stock', 'Suggested quantity', 'Urgent Notebook', '20 boxes', '4 boxes', '5 boxes', '21 boxes', 'Urgent', 'Low', 'Review recommended')
         ->toContain('Reserve Binder');
 
-    $this->get(route('propertyCustodian.reports'))
+    $this->getJson(route('api.custodian.reports'))
         ->assertOk()
-        ->assertSee('Production ML Demand Forecast')
-        ->assertSee('Urgent Notebook')
-        ->assertSee('21 boxes')
-        ->assertSee('Pending demand');
+        ->assertJsonPath('liveForecastResult.source_type', 'live')
+        ->assertJsonFragment([
+            'item_name' => 'Urgent Notebook',
+            'forecast_demand' => 20,
+            'suggested_procurement' => 21,
+        ]);
 
-    $this->get(route('propertyCustodian.reports.forecast.recommendations'))
+    $this->getJson(route('api.custodian.reports.forecast.recommendations'))
         ->assertOk()
-        ->assertSee('Urgent Notebook')
-        ->assertSee('21 boxes')
-        ->assertSee('4 boxes');
+        ->assertJsonFragment(['item_name' => 'Urgent Notebook'])
+        ->assertJsonFragment(['suggested_procurement' => 21]);
+
+    $this->get('/spa/reports/forecast')->assertOk();
 
     expect(Inventory::query()->orderBy('item_id')->get()->toArray())->toEqual($inventoryBefore)
         ->and(StockMovement::count())->toBe($movementCount)
@@ -486,24 +482,38 @@ test('chat and reports show the same labeled demo result without live stock reco
         ->toContain('Sample/Demo stock-out demand forecast', 'not live inventory', 'Inventory ID 1001', 'Category ID 1', '3 pieces', 'Inventory ID 2001', '5 pieces', 'insufficient verified history', 'Unknown months: July 2026, September 2026')
         ->not->toContain('"source_type"', '"forecasts"', 'Live only item');
 
-    $this->get(route('propertyCustodian.reports'))
+    $this->getJson(route('api.custodian.reports'))
         ->assertOk()
-        ->assertSee('Sample/Demo Demand Forecast')
-        ->assertSee('SAMPLE DATA ONLY')
-        ->assertSee('ID 1001: Teacher Desk')
-        ->assertSee('3 pieces')
-        ->assertSee('ID 2001: Teacher Desk')
-        ->assertSee('Unknown: July 2026, September 2026')
-        ->assertSee(route('propertyCustodian.reports.forecast.recommendations', ['source' => 'demo']));
+        ->assertJsonPath('demoForecastResult.source_type', 'demo')
+        ->assertJsonFragment([
+            'inventory_id' => 1001,
+            'item_name' => 'Teacher Desk',
+            'forecast_demand' => 3,
+            'source_type' => 'demo',
+        ])
+        ->assertJsonFragment([
+            'inventory_id' => 2001,
+            'item_name' => 'Teacher Desk',
+            'forecast_demand' => 5,
+            'source_type' => 'demo',
+        ])
+        ->assertJsonFragment([
+            'inventory_id' => 4001,
+            'item_name' => 'Limited Test Kits',
+            'unknown_months' => ['2026-07', '2026-09'],
+            'source_type' => 'demo',
+        ]);
 
-    $this->get(route('propertyCustodian.reports.forecast.recommendations', ['source' => 'demo']))
+    $demoResponse = $this->getJson(route('api.custodian.reports.forecast.recommendations', ['source' => 'demo']))
         ->assertOk()
-        ->assertSee('Sample/Demo Demand Forecast')
-        ->assertSee('ID 1001: Teacher Desk')
-        ->assertSee('ID 2001: Teacher Desk')
-        ->assertSee('5 pieces')
-        ->assertSee('No available stock or procurement recommendation is included.')
-        ->assertDontSee('Suggested procurement quantity');
+        ->assertJsonFragment(['inventory_id' => 1001, 'item_name' => 'Teacher Desk'])
+        ->assertJsonFragment(['inventory_id' => 2001, 'item_name' => 'Teacher Desk'])
+        ->assertJsonFragment(['forecast_demand' => 5]);
+
+    expect(collect($demoResponse->json('recommendations.data'))
+        ->every(fn (array $row): bool => ! array_key_exists('suggested_procurement', $row)))->toBeTrue();
+
+    $this->get('/spa/reports/forecast')->assertOk();
 
     expect(Inventory::count())->toBe($inventoryCount)
         ->and(StockMovement::count())->toBe($movementCount)
@@ -538,20 +548,19 @@ test('demo forecast details paginate the expanded identity list', function () {
 
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
     $user = User::factory()->create(['role_id' => $role->role_id]);
-    $url = route('propertyCustodian.reports.forecast.recommendations', ['source' => 'demo']);
+    $apiUrl = route('api.custodian.reports.forecast.recommendations', ['source' => 'demo']);
 
-    $this->actingAs($user)->get($url)
-        ->assertOk()
-        ->assertSee('ID 1001: Teacher Desk')
-        ->assertSee('ID 6012: Sample Item 12')
-        ->assertSee('Showing')
-        ->assertSee('of')
-        ->assertSee('19');
+    $pageOne = $this->actingAs($user)->getJson($apiUrl)->assertOk();
+    expect($pageOne->json('recommendations.total'))->toBe(19)
+        ->and($pageOne->json('recommendations.data'))->toHaveCount(15);
+    expect(collect($pageOne->json('recommendations.data'))->pluck('inventory_id')->all())
+        ->toContain(1001, 6012);
 
-    $this->get($url . '&page=2')
-        ->assertOk()
-        ->assertSee('ID 6013: Sample Item 13')
-        ->assertSee('ID 6016: Sample Item 16');
+    $pageTwo = $this->getJson($apiUrl . '&page=2')->assertOk();
+    expect(collect($pageTwo->json('recommendations.data'))->pluck('inventory_id')->all())
+        ->toContain(6013, 6016);
+
+    $this->get('/spa/reports/forecast')->assertOk();
 });
 
 test('detailed forecast recommendations support filters sorting and pagination', function () {
@@ -578,50 +587,53 @@ test('detailed forecast recommendations support filters sorting and pagination',
 
     putStoredLiveForecast($forecasts);
 
-    $url = route('propertyCustodian.reports.forecast.recommendations');
+    $apiUrl = route('api.custodian.reports.forecast.recommendations');
 
-    $this->actingAs($user)
-        ->get($url . '?search=Notebook%2012&category=Office%20Supplies&priority=Urgent&confidence=Low')
-        ->assertOk()
-        ->assertSee('Notebook 12')
-        ->assertSee('Urgent')
-        ->assertSee('Recommendation details')
-        ->assertDontSee('Notebook 11');
+    $filtered = $this->actingAs($user)
+        ->getJson($apiUrl . '?search=Notebook%2012&category=Office%20Supplies&priority=Urgent&confidence=Low')
+        ->assertOk();
+    expect(collect($filtered->json('recommendations.data'))->pluck('item_name')->all())
+        ->toContain('Notebook 12')
+        ->not->toContain('Notebook 11');
+    $filtered->assertJsonFragment(['priority' => 'Urgent']);
 
-    $this->get($url . '?sort=suggested')
-        ->assertOk()
-        ->assertSeeInOrder(['Notebook 18', 'Notebook 17'])
-        ->assertDontSee('Notebook 03');
+    $sorted = $this->getJson($apiUrl . '?sort=suggested')->assertOk();
+    expect(array_slice(collect($sorted->json('recommendations.data'))->pluck('item_name')->all(), 0, 2))
+        ->toBe(['Notebook 18', 'Notebook 17']);
+    expect(collect($sorted->json('recommendations.data'))->pluck('item_name')->all())
+        ->not->toContain('Notebook 03');
 
-    $this->get($url . '?sort=suggested&page=2')
-        ->assertOk()
-        ->assertSee('Notebook 03')
-        ->assertSee('Notebook 01')
-        ->assertDontSee('Notebook 18');
+    $sortedPageTwo = $this->getJson($apiUrl . '?sort=suggested&page=2')->assertOk();
+    expect(collect($sortedPageTwo->json('recommendations.data'))->pluck('item_name')->all())
+        ->toContain('Notebook 03', 'Notebook 01')
+        ->not->toContain('Notebook 18');
 
-    $this->get(route('propertyCustodian.reports'))
+    $this->get('/spa/reports/forecast')->assertOk();
+
+    $this->getJson(route('api.custodian.reports'))
         ->assertOk()
-        ->assertSee('Sample/Demo Demand Forecast')
-        ->assertDontSee('Inventory availability appears incomplete or unrecorded.')
-        ->assertDontSee('Priority Procurement Items');
+        ->assertJsonPath('demoForecastResult.source_type', 'demo')
+        ->assertJsonMissing(['item_name' => 'Live only item']);
 });
 
 test('detailed forecast page shows separate empty and error states', function () {
     Storage::fake('forecast');
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
     $user = User::factory()->create(['role_id' => $role->role_id]);
-    $url = route('propertyCustodian.reports.forecast.recommendations');
+    $apiUrl = route('api.custodian.reports.forecast.recommendations');
 
     $this->actingAs($user)
-        ->get($url)
+        ->getJson($apiUrl)
         ->assertOk()
-        ->assertSee('No demand forecast available')
-        ->assertSee('No trained production ML forecast is available. Model training runs separately from chat and reports.');
+        ->assertJsonPath('recommendations.data', [])
+        ->assertJsonPath('forecastResult.rows', []);
 
     Storage::disk('forecast')->put('forecast/forecast.json', '{invalid json');
 
-    $this->get($url)
+    $this->getJson($apiUrl)
         ->assertOk()
-        ->assertSee('Unable to load demand forecast')
-        ->assertSee('The latest forecast result could not be read. A valid refresh is required before displaying results.');
+        ->assertJsonPath('forecastResult.status', 'error')
+        ->assertJsonPath('recommendations.data', []);
+
+    $this->get('/spa/reports/forecast')->assertOk();
 });

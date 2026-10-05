@@ -7,6 +7,7 @@
 @source '../../storage/framework/views/*.php';
 @source '../**/*.blade.php';
 @source '../**/*.js';
+@source '../**/*.vue';
 
 
 @custom-variant dark (&:is(.dark *));
@@ -41,6 +42,46 @@
   --text-theme-sm--line-height: 20px;
   --text-theme-xs: 12px;
   --text-theme-xs--line-height: 18px;
+
+  /* ---------------------------------------------------------------------
+   * Compact scale ("shrink format")
+   * Derived from the property custodian pages, which are the reference
+   * implementation for every panel, KPI, table and chart in the SPA.
+   * Values here are the smallest of the three MetricCard sizes and the
+   * 240px chart height used on the custodian dashboards.
+   * ------------------------------------------------------------------- */
+  --text-compact-2xs: 10px;
+  --text-compact-2xs--line-height: 14px;
+  --text-compact-xs: 11px;
+  --text-compact-xs--line-height: 16px;
+  --text-compact-sm: 12px;
+  --text-compact-sm--line-height: 18px;
+  --text-compact-base: 14px;
+  --text-compact-base--line-height: 20px;
+  --text-compact-lg: 18px;
+  --text-compact-lg--line-height: 26px;
+  --text-compact-xl: 24px;
+  --text-compact-xl--line-height: 32px;
+
+  --spacing-compact-3xs: 0.25rem;
+  --spacing-compact-2xs: 0.375rem;
+  --spacing-compact-xs: 0.5rem;
+  --spacing-compact-sm: 0.625rem;
+  --spacing-compact-md: 0.75rem;
+  --spacing-compact-lg: 1rem;
+
+  --spacing-compact-control: 1.5rem;
+  --spacing-compact-control-y: 0.5rem;
+
+  --spacing-compact-cell: 0.625rem;
+  --spacing-compact-cell-y: 0.375rem;
+
+  --spacing-compact-icon-xs: 0.875rem;
+  --spacing-compact-icon-sm: 1rem;
+  --spacing-compact-icon-md: 1.25rem;
+
+  --spacing-compact-chart: 240px;
+  --spacing-compact-list: 6rem;
 
   --color-current: currentColor;
   --color-transparent: transparent;
@@ -166,6 +207,75 @@
   --z-index-9999: 9999;
   --z-index-99999: 99999;
   --z-index-999999: 999999;
+}
+
+.custodian-theme {
+  --color-brand-25: #f1faf6;
+  --color-brand-50: #e6f5ed;
+  --color-brand-100: #c9e9d7;
+  --color-brand-200: #9bd8b7;
+  --color-brand-300: #68c293;
+  --color-brand-400: #39a572;
+  --color-brand-500: #177b5d;
+  --color-brand-600: #12664f;
+  --color-brand-700: #105240;
+  --color-brand-800: #0e4136;
+  --color-brand-900: #0c332d;
+  --color-brand-950: #061f1b;
+  --shadow-focus-ring: 0 0 0 4px rgba(23, 123, 93, 0.18);
+  background-color: #f4f8f5;
+}
+
+.dark .custodian-theme {
+  background-color: #0b1411;
+}
+
+.custodian-theme #sidebar {
+  border-color: #d7e7dd;
+  background-color: #fbfdfb;
+}
+
+.dark .custodian-theme #sidebar {
+  border-color: #293b34;
+  background-color: #101a17;
+}
+
+.custodian-theme .custodian-panel,
+.custodian-theme .custodian-metric {
+  border-color: #d7e7dd;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(25, 65, 48, 0.06), 0 8px 24px rgba(25, 65, 48, 0.035);
+}
+
+.dark .custodian-theme .custodian-panel,
+.dark .custodian-theme .custodian-metric {
+  border-color: #293b34;
+  background-color: #111c18;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+.custodian-theme button,
+.custodian-theme a,
+.custodian-theme input,
+.custodian-theme select,
+.custodian-theme textarea {
+  transition-duration: 160ms;
+}
+
+.custodian-theme :focus-visible {
+  outline: 3px solid rgba(23, 123, 93, 0.4);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .custodian-theme *,
+  .custodian-theme *::before,
+  .custodian-theme *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 /*
@@ -302,6 +412,390 @@
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
   background-color: #344054;
 }
+@layer components {
+  /* ---------------------------------------------------------------------
+   * Compact format — reusable pieces of the property custodian layout.
+   * Reference: resources/js/spa/views/custodian/*.vue
+   * Apply these instead of hand-writing the utility chain so every role's
+   * page stays on the same scale.
+   * ------------------------------------------------------------------- */
+
+  /* Page shell: outer spacing between top-level blocks. */
+  .compact-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-compact-md);
+  }
+
+  /* Page header: title, optional subtitle, optional action cluster. */
+  .compact-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--spacing-compact-2xs);
+    margin-bottom: var(--spacing-compact-md);
+  }
+  .compact-header__title {
+    font-size: var(--text-compact-lg);
+    line-height: var(--text-compact-lg--line-height);
+    font-weight: 600;
+    color: var(--color-gray-800);
+  }
+  .compact-header__subtitle {
+    margin-top: calc(var(--spacing-compact-3xs) * -0.5);
+    font-size: var(--text-compact-sm);
+    line-height: var(--text-compact-sm--line-height);
+    color: var(--color-gray-500);
+  }
+  .compact-header__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-compact-xs);
+  }
+
+  /* Hero variant, used by the custodian/admin dashboards. */
+  .compact-hero {
+    padding: var(--spacing-compact-lg);
+  }
+  .compact-hero__eyebrow {
+    font-size: var(--text-compact-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .compact-hero__title {
+    margin-top: calc(var(--spacing-compact-3xs) * -0.5);
+    font-size: var(--text-compact-lg);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  .compact-hero__subtitle {
+    margin-top: calc(var(--spacing-compact-3xs) * -0.5);
+    max-width: 42rem;
+    font-size: var(--text-compact-sm);
+    color: var(--color-gray-500);
+  }
+
+  /* Bordered content card that wraps a panel. */
+  .compact-panel {
+    min-width: 0;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in srgb, var(--color-gray-200) 80%, transparent);
+    background-color: var(--color-white);
+    padding: var(--spacing-compact-md);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Panel header row: heading block on the left, chip on the right. */
+  .compact-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-compact-xs);
+    padding-bottom: 0.625rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-gray-100) 100%, transparent);
+  }
+  .compact-panel__title {
+    font-size: var(--text-compact-sm);
+    font-weight: 700;
+    color: var(--color-gray-800);
+  }
+  .compact-panel__subtitle {
+    font-size: var(--text-compact-xs);
+    line-height: 1.1rem;
+    color: var(--color-gray-500);
+  }
+  .compact-panel__body {
+    margin-top: var(--spacing-compact-3xs);
+    min-width: 0;
+    flex: 1 1 0%;
+  }
+
+  /* Layout grids. */
+  .compact-grid-2 {
+    display: grid;
+    gap: var(--spacing-compact-md);
+  }
+  @media (min-width: 1280px) {
+    .compact-grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .compact-kpi-grid {
+    display: grid;
+    gap: var(--spacing-compact-sm);
+  }
+  @media (min-width: 640px) {
+    .compact-kpi-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 1280px) {
+    .compact-kpi-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  /* Buttons: one primary and one outline variant. */
+  .compact-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    white-space: nowrap;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-compact-control-y) var(--spacing-compact-control);
+    font-size: var(--text-compact-sm);
+    font-weight: 600;
+    line-height: 1rem;
+    transition: background-color 150ms, border-color 150ms, color 150ms;
+  }
+  .compact-btn:focus-visible {
+    outline: 2px solid var(--color-emerald-500);
+    outline-offset: 2px;
+  }
+  .compact-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .compact-btn--sm {
+    padding: 0.25rem 0.625rem;
+    font-size: var(--text-compact-xs);
+  }
+  .compact-btn--primary {
+    background-color: var(--color-emerald-700);
+    color: var(--color-white);
+    box-shadow: var(--shadow-sm);
+  }
+  .compact-btn--primary:hover:not(:disabled) {
+    background-color: var(--color-emerald-800);
+  }
+  .compact-btn--outline {
+    border: 1px solid var(--color-gray-300);
+    background-color: var(--color-white);
+    color: var(--color-gray-700);
+    box-shadow: var(--shadow-sm);
+  }
+  .compact-btn--outline:hover:not(:disabled) {
+    background-color: var(--color-gray-50);
+  }
+
+  /* Filter bar: search + selects in a single row. */
+  .compact-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-compact-2xs);
+    padding: var(--spacing-compact-3xs);
+  }
+  @media (min-width: 640px) {
+    .compact-filters {
+      flex-direction: row;
+      align-items: center;
+    }
+  }
+  .compact-field {
+    width: 100%;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-gray-200);
+    background-color: var(--color-white);
+    padding: var(--spacing-compact-control-y) var(--spacing-compact-control);
+    font-size: var(--text-compact-sm);
+    color: var(--color-gray-800);
+  }
+  @media (min-width: 640px) {
+    .compact-field {
+      width: auto;
+      max-width: 20rem;
+    }
+  }
+  .compact-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: var(--text-compact-sm);
+    font-weight: 500;
+    color: var(--color-gray-700);
+  }
+
+  /* Tables: matches the custodian inventory/transaction tables. */
+  .compact-table {
+    width: 100%;
+    text-align: left;
+    font-size: var(--text-compact-sm);
+  }
+  .compact-table thead tr {
+    border-bottom: 1px solid var(--color-gray-200);
+    background-color: color-mix(in srgb, var(--color-gray-50) 80%, transparent);
+    font-size: var(--text-compact-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-gray-500);
+  }
+  .compact-table th {
+    padding: 0.625rem var(--spacing-compact-lg);
+    white-space: nowrap;
+  }
+  .compact-table td {
+    padding: 0.625rem var(--spacing-compact-lg);
+    vertical-align: middle;
+  }
+  .compact-table tbody tr {
+    transition: background-color 150ms;
+  }
+  .compact-table tbody tr:hover {
+    background-color: color-mix(in srgb, var(--color-gray-50) 70%, transparent);
+  }
+  .compact-table__muted {
+    font-size: var(--text-compact-xs);
+    color: var(--color-gray-500);
+  }
+
+  /* Chips and badges. */
+  .compact-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: var(--radius-md);
+    padding: 0.125rem 0.5rem;
+    font-size: var(--text-compact-xs);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .compact-chip--emerald {
+    background-color: var(--color-emerald-50);
+    color: var(--color-emerald-700);
+  }
+  .compact-chip--sky {
+    background-color: var(--color-sky-50);
+    color: var(--color-sky-700);
+  }
+
+  /* Chart height, shared by every ApexCharts instance and its skeleton. */
+  .compact-chart {
+    width: 100%;
+    height: var(--spacing-compact-chart);
+  }
+  .compact-chart-skeleton {
+    height: var(--spacing-compact-chart);
+    border-radius: var(--radius-md);
+    background-color: var(--color-gray-100);
+    animation: var(--animate-pulse);
+  }
+
+  /* Generic skeleton bar, sized to the text it stands in for. */
+  .compact-skeleton {
+    border-radius: var(--radius-md);
+    background-color: var(--color-gray-100);
+    animation: var(--animate-pulse);
+  }
+  .dark .compact-skeleton {
+    background-color: rgb(255 255 255 / 0.05);
+  }
+
+  /* Empty state. */
+  .compact-empty {
+    padding: 2rem var(--spacing-compact-lg);
+    text-align: center;
+    font-size: var(--text-compact-sm);
+    color: var(--color-gray-500);
+  }
+
+  /* Error / inline alert strip. */
+  .compact-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-compact-xs);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-rose-200);
+    background-color: var(--color-rose-50);
+    padding: var(--spacing-compact-md);
+    font-size: var(--text-compact-sm);
+    color: var(--color-rose-700);
+  }
+
+  /* Modal body blocks. */
+  .compact-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+
+  /* Dark mode counterparts. */
+  .dark .compact-header__title,
+  .dark .compact-panel__title,
+  .dark .compact-hero__title {
+    color: rgb(255 255 255 / 0.95);
+  }
+  .dark .compact-header__subtitle,
+  .dark .compact-panel__subtitle,
+  .dark .compact-hero__subtitle {
+    color: var(--color-gray-400);
+  }
+  .dark .compact-hero__eyebrow {
+    color: var(--color-emerald-400);
+  }
+  .dark .compact-panel {
+    border-color: var(--color-gray-800);
+    background-color: var(--color-gray-900);
+  }
+  .dark .compact-panel__header {
+    border-bottom-color: rgb(255 255 255 / 0.05);
+  }
+  .dark .compact-btn--outline {
+    border-color: var(--color-gray-700);
+    background-color: var(--color-gray-900);
+    color: rgb(255 255 255 / 0.9);
+  }
+  .dark .compact-btn--outline:hover:not(:disabled) {
+    background-color: var(--color-gray-800);
+  }
+  .dark .compact-filters {
+    background-color: transparent;
+  }
+  .dark .compact-field {
+    border-color: var(--color-gray-700);
+    background-color: var(--color-gray-800);
+    color: rgb(255 255 255 / 0.9);
+  }
+  .dark .compact-label {
+    color: var(--color-gray-300);
+  }
+  .dark .compact-table thead tr {
+    border-bottom-color: var(--color-gray-800);
+    background-color: color-mix(in srgb, var(--color-gray-800) 40%, transparent);
+    color: var(--color-gray-400);
+  }
+  .dark .compact-table tbody tr {
+    border-color: rgb(255 255 255 / 0.05);
+  }
+  .dark .compact-table tbody tr:hover {
+    background-color: rgb(255 255 255 / 0.02);
+  }
+  .dark .compact-table__muted {
+    color: var(--color-gray-400);
+  }
+  .dark .compact-chip--emerald {
+    background-color: color-mix(in srgb, var(--color-emerald-500) 10%, transparent);
+    color: var(--color-emerald-300);
+  }
+  .dark .compact-chip--sky {
+    background-color: color-mix(in srgb, var(--color-sky-500) 10%, transparent);
+    color: var(--color-sky-300);
+  }
+  .dark .compact-chart-skeleton {
+    background-color: rgb(255 255 255 / 0.05);
+  }
+  .dark .compact-alert {
+    border-color: color-mix(in srgb, var(--color-rose-900) 50%, transparent);
+    background-color: color-mix(in srgb, var(--color-rose-950) 20%, transparent);
+    color: var(--color-rose-400);
+  }
+}
+
 @layer utilities {
   /* For Remove Date Icon */
   input[type='date']::-webkit-inner-spin-button,
