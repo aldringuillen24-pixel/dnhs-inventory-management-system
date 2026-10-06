@@ -95,7 +95,15 @@ function icon(name) {
   return ICONS[name] ?? ICONS.dashboard;
 }
 
+/**
+ * Marks a nav item active for its own path and anything nested under it.
+ *
+ * Exact matching alone left the sidebar blank on nested routes such as
+ * /reports/forecast, because Reports is the only entry for that section and its
+ * path is the parent. The comparison is anchored to a trailing slash so a
+ * sibling like "/reports-archive" can never be swept in.
+ */
 function isActive(path) {
-  return route.path === path;
+  return route.path === path || route.path.startsWith(`${path}/`);
 }
 </script>
