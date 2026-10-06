@@ -207,9 +207,10 @@ watch(
     () => props.forecastPeriod,
     () => {
         // A retrained model invalidates the previous thread, which is still
-        // describing the old period.
+        // describing the old period. Its follow-up context is stale too.
         messages.value = [];
         question.value = '';
+        lastAnswerItems.value = [];
     },
 );
 
@@ -268,15 +269,34 @@ function scrollToBottom() {
     });
 }
 
-async function run(promptType, label) {
+/**
+ * The previous answer's items, kept as context for a follow-up.
+ *
+ * Only ids travel back to the server, never the reply prose, so the backend can
+ * narrow to items the forecast already supplied and cannot be talked into
+ * introducing anything new.
+ */
+const lastAnswerItems = ref([]);
+const lastPromptType = ref('purchase_first');
+
+async function run(promptType, label, contextIds = null) {
     busy.value = true;
     messages.value = [...messages.value, { key: nextKey(), role: 'user', text: label }];
     scrollToBottom();
 
+    const ids = contextIds === null ? [] : contextIds;
+
     try {
         const { data } = await api.post('/custodian/reports/forecast/decision-support', {
             prompt_type: promptType,
+            ...(ids.length ? { inventory_ids: ids } : {}),
         }, { skipToast: true });
+
+        lastAnswerItems.value = (data.items ?? []).map((item) => ({
+            inventory_id: item.inventory_id,
+            item_name: item.item_name,
+        }));
+        lastPromptType.value = data.prompt_type ?? promptType;
 
         messages.value = [
             ...messages.value,
@@ -287,6 +307,7 @@ async function run(promptType, label) {
                 source: data.source,
                 providerStatus: data.provider_status,
                 promptType: data.prompt_type,
+                scope: data.scope,
                 inventoryIds: data.inventory_ids ?? [],
             },
         ];
@@ -393,20 +414,95 @@ function submitQuestion() {
     }
 
     const lowered = text.toLowerCase();
+    const promptType = classify(lowered);
 
-    if (/wait|defer|later|skip|postpone|can i delay/.test(lowered)) {
-        run('deferrable', text);
-    } else if (/verif|trust|confiden|reliable|uncertain|insufficient/.test(lowered)) {
-        run('verify_first', text);
-    } else if (/first|priorit|urgent|top|buy|purchase|need to order|recommend/.test(lowered)) {
-        run('purchase_first', text);
-    } else {
+    // A follow-up narrows the previous answer instead of re-ranking the whole
+    // forecast. The ids sent are only ever ones the server already returned, so
+    // "the second one" cannot reach an item the custodian was never shown.
+    const followUpIds = resolveFollowUp(lowered);
+
+    if (promptType !== null) {
+        run(promptType, text, followUpIds);
+
+        return;
+    }
+
+    if (followUpIds !== null) {
+        // A bare reference such as "the second one" carries no question of its
+        // own, so it is answered against the same prompt as the previous turn.
+        run(lastPromptType.value, text, followUpIds);
+
+        return;
+    }
+
+    {
         messages.value = [...messages.value, { key: nextKey(), role: 'user', text }];
         pushAssistant(
             'That question is outside what this panel can answer. I can rank what to purchase first, '
-            + 'show what can wait, flag rows that need verification, or explain one named item.',
+            + 'show what can wait, flag rows that need verification, explain one named item, '
+            + 'or follow up on the last list (for example "why is the second one urgent?").',
         );
     }
+}
+
+/**
+ * Maps free text onto one of the three supported question kinds, or null when
+ * it is not recognisably a decision question.
+ */
+function classify(lowered) {
+    if (/wait|defer|later|skip|postpone|can i delay/.test(lowered)) return 'deferrable';
+    if (/verif|trust|confiden|reliable|uncertain|insufficient/.test(lowered)) return 'verify_first';
+    if (/first|priorit|urgent|top|buy|purchase|need to order|recommend|why|explain|how come|reason/.test(lowered)) return 'purchase_first';
+
+    return null;
+}
+
+/**
+ * Resolves a reference back to specific items from the previous answer.
+ *
+ * Returns null when the text names no prior item (so the whole forecast is in
+ * scope), and an empty array when it names nothing that can be resolved, which
+ * the caller treats as "no useful narrowing".
+ */
+function resolveFollowUp(lowered) {
+    if (lastAnswerItems.value.length === 0) return null;
+
+    const items = lastAnswerItems.value;
+    const ids = [];
+
+    // "the second one", "item 3", "the first and third"
+    const ordinals = [...lowered.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\b/g)].map((match) => parseInt(match[1], 10));
+    ordinals.forEach((position) => {
+        const item = items[position - 1];
+        if (item && !ids.includes(item.inventory_id)) ids.push(item.inventory_id);
+    });
+
+    // "the first", "the last one"
+    if (/\bfirst\b/.test(lowered) && !ordinals.length) {
+        const item = items[0];
+        if (item) ids.push(item.inventory_id);
+    }
+    if (/\b(last|final)\b/.test(lowered)) {
+        const item = items[items.length - 1];
+        if (item) ids.push(item.inventory_id);
+    }
+
+    // Named items from the previous list.
+    items.forEach((item) => {
+        const name = String(item.item_name ?? '').toLowerCase();
+        if (name && lowered.includes(name) && !ids.includes(item.inventory_id)) {
+            ids.push(item.inventory_id);
+        }
+    });
+
+    if (ids.length === 0) return null;
+
+    // "all of them", "the rest", "everything else" means the whole prior list.
+    if (/\b(all|rest|others|everything|them|these|those)\b/.test(lowered)) {
+        return items.map((item) => item.inventory_id);
+    }
+
+    return ids;
 }
 
 async function exportList(message) {
@@ -454,6 +550,9 @@ async function exportList(message) {
 function clearThread() {
     messages.value = [];
     question.value = '';
+    // The follow-up context belongs to the cleared thread, so it must not leak
+    // into the next conversation.
+    lastAnswerItems.value = [];
 }
 
 defineExpose({ clearThread });

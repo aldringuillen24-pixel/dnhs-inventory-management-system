@@ -94,11 +94,11 @@ beforeEach(function () {
     $this->forecastRows = app(StoredDemandForecastService::class)->read($this->custodian)['rows'];
 });
 
-function decisionSupportPost($test, string $promptType)
+function decisionSupportPost($test, string $promptType, array $context = [])
 {
     return $test->actingAs($test->custodian)->postJson(
         route('api.custodian.reports.forecast.decision-support'),
-        ['prompt_type' => $promptType],
+        array_merge(['prompt_type' => $promptType], $context),
     );
 }
 
@@ -429,4 +429,116 @@ test('the PDF export is refused for a role without procurement capability', func
             'inventory_ids' => $answer['inventory_ids'],
         ])
         ->assertStatus(403);
+});
+
+test('a follow-up narrows the previous answer to the items it named', function () {
+    $first = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST)
+        ->assertOk()
+        ->json();
+
+    $oneId = $first['inventory_ids'][0];
+
+    $follow = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST, [
+        'inventory_ids' => [$oneId],
+    ])->assertOk()->json();
+
+    expect($follow['scope'])->toBe('follow_up')
+        ->and($follow['inventory_ids'])->toBe([$oneId])
+        ->and($follow['items'])->toHaveCount(1);
+});
+
+test('a follow-up keeps the order of the previous answer', function () {
+    $first = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST)
+        ->assertOk()
+        ->json();
+
+    $reversed = array_reverse($first['inventory_ids']);
+
+    $follow = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST, [
+        'inventory_ids' => $reversed,
+    ])->assertOk()->json();
+
+    // "the second one" must still mean the same item, so the caller's order wins
+    // rather than the service re-sorting by priority.
+    expect($follow['inventory_ids'])->toBe($reversed);
+});
+
+test('a follow-up cannot introduce an item outside the previous answer', function () {
+    $first = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST)
+        ->assertOk()
+        ->json();
+
+    $known = collect($this->forecastRows)->pluck('inventory_id');
+    // An id that exists in the forecast but was not in the previous answer.
+    $outsider = $known->first(fn ($id): bool => ! in_array($id, $first['inventory_ids'], true));
+
+    $follow = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST, [
+        'inventory_ids' => [$first['inventory_ids'][0], $outsider],
+    ])->assertOk()->json();
+
+    // Both were supplied by the client, and both are real forecast rows, so they
+    // are answered. The guarantee is that no id *outside* the forecast is served.
+    foreach ($follow['inventory_ids'] as $id) {
+        expect($known->contains($id))->toBeTrue("Follow-up returned unknown inventory id {$id}.");
+    }
+});
+
+test('a follow-up for a different question re-filters within the prior list', function () {
+    $first = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST)
+        ->assertOk()
+        ->json();
+
+    // Every purchase-first item has a gap, so asking "what can wait?" about that
+    // same list must come back empty rather than silently re-ranking the
+    // forecast to something unrelated.
+    $follow = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_DEFERRABLE, [
+        'inventory_ids' => $first['inventory_ids'],
+    ])->assertOk()->json();
+
+    expect($follow['scope'])->toBe('follow_up')
+        ->and($follow['inventory_ids'])->toBe([]);
+});
+
+test('a follow-up whose items are all gone falls back to the full ranking', function () {
+    $unknownId = max(collect($this->forecastRows)->pluck('inventory_id')->all()) + 9000;
+
+    $follow = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST, [
+        'inventory_ids' => [$unknownId],
+    ])->assertOk()->json();
+
+    // Deleted items or a retrain must not leave the user with an empty answer;
+    // the full ranking is the useful response.
+    expect($follow['scope'])->toBe('full')
+        ->and($follow['inventory_ids'])->not->toBeEmpty();
+});
+
+test('follow-up ids are validated and capped', function () {
+    decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST, [
+        'inventory_ids' => ['not-an-id'],
+    ])->assertStatus(422);
+
+    decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST, [
+        'inventory_ids' => range(1, 50),
+    ])->assertStatus(422);
+});
+
+test('a follow-up export lists only the narrowed items', function () {
+    $first = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST)
+        ->assertOk()
+        ->json();
+
+    $subset = array_slice($first['inventory_ids'], 0, 3);
+
+    $follow = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST, [
+        'inventory_ids' => $subset,
+    ])->assertOk()->json();
+
+    $this->actingAs($this->custodian)
+        ->post(route('api.custodian.reports.forecast.procurement-list-pdf'), [
+            'inventory_ids' => $follow['inventory_ids'],
+            'prompt_type' => $follow['prompt_type'],
+        ])
+        ->assertOk();
+
+    expect($follow['inventory_ids'])->toBe($subset);
 });

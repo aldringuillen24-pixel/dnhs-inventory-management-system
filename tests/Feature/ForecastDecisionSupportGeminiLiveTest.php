@@ -74,6 +74,46 @@ beforeEach(function () {
     Storage::disk('forecast')->put('forecast/forecast.json', json_encode($forecast));
 });
 
+test('a live Gemini follow-up stays on the items it was given', function () {
+    $first = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.reports.forecast.decision-support'), [
+            'prompt_type' => 'purchase_first',
+        ])->assertOk()->json();
+
+    if (($first['provider_status'] ?? null) !== 'ok') {
+        $this->markTestSkipped('Provider unavailable for the first turn.');
+    }
+
+    $subset = array_slice($first['inventory_ids'], 0, 2);
+
+    $follow = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.reports.forecast.decision-support'), [
+            'prompt_type' => 'purchase_first',
+            'inventory_ids' => $subset,
+        ])->assertOk()->json();
+
+    fwrite(STDERR, "\n--- FOLLOW-UP scope=".$follow['scope'].' source='.$follow['source'].' status='.$follow['provider_status']." ---\n");
+    fwrite(STDERR, mb_substr((string) $follow['answer'], 0, 600)."\n");
+
+    expect($follow['scope'])->toBe('follow_up')
+        ->and($follow['inventory_ids'])->toBe($subset);
+
+    if (($follow['provider_status'] ?? null) !== 'ok') {
+        $this->markTestSkipped("Follow-up degraded: {$follow['provider_status']}.");
+    }
+
+    // The reply must discuss the narrowed items and not drag in the rest.
+    $names = collect($follow['items'])->pluck('item_name')->filter()->all();
+    $outside = collect($first['items'])
+        ->reject(fn (array $item): bool => in_array($item['inventory_id'], $subset, true))
+        ->pluck('item_name')
+        ->filter(fn (string $name): bool => strlen($name) > 12);
+
+    foreach ($outside as $name) {
+        expect($follow['answer'])->not->toContain($name);
+    }
+});
+
 test('a live Gemini run answers every quick prompt', function () {
     foreach (['purchase_first', 'deferrable', 'verify_first'] as $promptType) {
         $payload = $this->actingAs($this->custodian)

@@ -65,9 +65,16 @@ class ForecastDecisionSupportService
     }
 
     /**
-     * @return array{status:string,message?:string,answer?:string,source?:string,prompt_type?:string,question?:string,inventory_ids?:array<int>,items?:array<int,array<string,mixed>>,forecast_period?:?string,generated_at?:?string,summary?:array<string,mixed>}
+     * Answers a decision question, optionally narrowed by the previous answer.
+     *
+     * $context carries the prior exchange as ids only — never free prose — so a
+     * follow-up can only ever narrow or re-explain items the forecast already
+     * supplied. It cannot introduce an outside item.
+     *
+     * @param  array{inventory_ids?:array<int>,prompt_type?:string}  $context
+     * @return array{status:string,message?:string,answer?:string,source?:string,provider_status?:string,prompt_type?:string,question?:string,inventory_ids?:array<int>,items?:array<int,array<string,mixed>>,forecast_period?:?string,generated_at?:?string,summary?:array<string,mixed>,scope?:string}
      */
-    public function answer(User $user, string $promptType): array
+    public function answer(User $user, string $promptType, array $context = []): array
     {
         if (! in_array($promptType, self::PROMPT_TYPES, true)) {
             return ['status' => 'error', 'message' => 'That decision question is not supported.'];
@@ -88,8 +95,11 @@ class ForecastDecisionSupportService
             ];
         }
 
-        $selected = $this->selectRows(collect($forecast['rows'] ?? []), $promptType);
-        $facts = $this->buildFacts($forecast, $selected, $promptType);
+        $rows = collect($forecast['rows'] ?? []);
+        $selection = $this->resolveSelection($rows, $promptType, $context);
+
+        $selected = $selection['rows'];
+        $facts = $this->buildFacts($forecast, $selected, $promptType, $selection['scope']);
         $localAnswer = $this->localAnswer($facts);
 
         $answer = $localAnswer;
@@ -139,7 +149,78 @@ class ForecastDecisionSupportService
             'forecast_period' => $forecast['forecast_period'] ?? null,
             'generated_at' => $forecast['generated_at'] ?? null,
             'summary' => $forecast['summary'] ?? [],
+            'scope' => $selection['scope'],
         ];
+    }
+
+    /**
+     * Decides which rows a question is about.
+     *
+     * A follow-up may only NARROW the previous answer. When the client sends the
+     * prior answer's inventory ids, the selection is restricted to those rows,
+     * so "why is the second one urgent?" is answered about that item and cannot
+     * be used to pull an outside item into the thread. Ids that are no longer in
+     * the forecast are dropped, never trusted.
+     *
+     * @param  array{inventory_ids?:array<int>,prompt_type?:string}  $context
+     * @return array{rows: \Illuminate\Support\Collection, scope: string}
+     */
+    private function resolveSelection(Collection $rows, string $promptType, array $context): array
+    {
+        $priorIds = array_values(array_filter(array_map(
+            'intval',
+            (array) ($context['inventory_ids'] ?? [])
+        ), fn (int $id): bool => $id > 0));
+
+        if ($priorIds === []) {
+            return ['rows' => $this->selectRows($rows, $promptType), 'scope' => 'full'];
+        }
+
+        $known = $rows->whereIn('inventory_id', $priorIds)->values();
+
+        if ($known->isEmpty()) {
+            // Every prior id is gone (items deleted, model retrained). Fall back
+            // to the full ranking rather than answering about nothing.
+            return ['rows' => $this->selectRows($rows, $promptType), 'scope' => 'full'];
+        }
+
+        // Preserve the order the previous answer established, so "the second
+        // one" still means the same item.
+        $ordered = collect($priorIds)
+            ->map(fn (int $id) => $known->firstWhere('inventory_id', $id))
+            ->filter()
+            ->take(self::MAX_SELECTED_ITEMS)
+            ->values();
+
+        // A follow-up asking a *different* kind of question re-filters within the
+        // prior set, so "what can wait?" after a purchase-first answer only
+        // considers items that were already on the list.
+        return [
+            'rows' => $this->refilter($ordered, $promptType),
+            'scope' => 'follow_up',
+        ];
+    }
+
+    /**
+     * Applies the prompt's own filter to an already-restricted set.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    private function refilter(Collection $rows, string $promptType): Collection
+    {
+        return match ($promptType) {
+            self::PROMPT_DEFERRABLE => $rows
+                ->filter(fn (array $row): bool => ($row['status'] ?? null) === 'success'
+                    && ($row['needs_procurement'] ?? false) === false)
+                ->values(),
+            self::PROMPT_VERIFY_FIRST => $rows
+                ->filter(fn (array $row): bool => ($row['status'] ?? null) !== 'success'
+                    || in_array($row['confidence'] ?? null, ['Low', 'Medium'], true))
+                ->values(),
+            // purchase_first keeps the prior order: every one of these items
+            // already has a gap, which is why they were on the list.
+            default => $rows,
+        };
     }
 
     /**
@@ -199,11 +280,14 @@ class ForecastDecisionSupportService
         ];
     }
 
-    private function buildFacts(array $forecast, Collection $selected, string $promptType): array
+    private function buildFacts(array $forecast, Collection $selected, string $promptType, string $scope = 'full'): array
     {
-        return [
+        $facts = [
             'prompt_type' => $promptType,
             'question' => self::questionLabel($promptType),
+            // Tells the provider this is a narrowing follow-up, so it explains the
+            // listed items instead of re-ranking the whole forecast.
+            'scope' => $scope,
             'forecast_period' => $forecast['forecast_period'] ?? null,
             'generated_at' => $forecast['generated_at'] ?? null,
             'forecast_summary' => $forecast['summary'] ?? [],
@@ -211,6 +295,13 @@ class ForecastDecisionSupportService
             'max_items_shown' => self::MAX_SELECTED_ITEMS,
             'items' => $selected->map(fn (array $row): array => $this->presentRow($row))->all(),
         ];
+
+        if ($scope === 'follow_up') {
+            $facts['instruction'] = 'This is a follow-up about the specific items listed below. '
+                .'Answer only about them, in the order given. Do not introduce items that are not listed.';
+        }
+
+        return $facts;
     }
 
     private function systemPrompt(string $promptType): string

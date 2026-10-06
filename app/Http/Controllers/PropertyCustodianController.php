@@ -220,9 +220,17 @@ class PropertyCustodianController extends Controller
     {
         $validated = $request->validate([
             'prompt_type' => ['required', 'string', Rule::in(ForecastDecisionSupportService::PROMPT_TYPES)],
+            // Follow-up context: ids only, never free prose, so a follow-up can
+            // only narrow the previous answer to rows the forecast supplied.
+            'inventory_ids' => ['nullable', 'array', 'max:'.ForecastDecisionSupportService::MAX_SELECTED_ITEMS],
+            'inventory_ids.*' => ['integer', 'min:1'],
         ]);
 
-        $result = $this->forecastDecisionSupport->answer($request->user(), $validated['prompt_type']);
+        $result = $this->forecastDecisionSupport->answer(
+            $request->user(),
+            $validated['prompt_type'],
+            ['inventory_ids' => $validated['inventory_ids'] ?? []],
+        );
 
         if (($result['status'] ?? null) === 'forbidden') {
             return response()->json(['message' => $result['message']], 403);
