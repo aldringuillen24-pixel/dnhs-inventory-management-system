@@ -93,19 +93,54 @@
         </button>
       </div>
 
-      <!-- Results panel -->
+      <!-- Results panel: forecast-only decision support on the left, the
+           recommendation table on the right. The table keeps its own scroll so
+           narrowing the split never crops the rows. -->
       <div v-else class="custodian-panel overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div
-          v-if="availabilityWarning"
-          class="border-b border-amber-200/60 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 dark:border-amber-800/40 dark:bg-amber-950/30 dark:text-amber-200 sm:px-5"
-        >
-          Inventory availability appears incomplete or unrecorded. Verify current stock levels before using these procurement recommendations.
-        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-[25rem_minmax(0,1fr)] xl:grid-cols-[27rem_minmax(0,1fr)]">
+          <div
+            class="min-h-0 max-h-[86vh] border-b border-gray-200/80 dark:border-gray-800 lg:border-b-0 lg:border-r"
+            :class="showChatMobile ? 'block' : 'hidden lg:block'"
+          >
+            <ForecastDecisionChat
+              class="h-full"
+              :forecast-period="forecastPeriod === 'Not available' ? null : forecastPeriod"
+              :has-forecast="hasForecastRows"
+              :items-needing-procurement="itemsNeedingProcurement"
+              :low-confidence-count="lowConfidenceCount"
+              :total-items="forecastRowCount"
+              :table-filtered="activeFilterCount > 0"
+              :items="forecastItemIdentity"
+            />
+          </div>
+
+          <div class="flex min-w-0 flex-col">
+            <div
+              v-if="availabilityWarning"
+              class="border-b border-amber-200/60 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 dark:border-amber-800/40 dark:bg-amber-950/30 dark:text-amber-200 sm:px-5"
+            >
+              Inventory availability appears incomplete or unrecorded. Verify current stock levels before using these procurement recommendations.
+            </div>
 
         <!-- Filter bar: collapsed by default so the recommendations load immediately.
              The panel stays reachable, and opens itself whenever a filter is
              active so a narrowed result is never hidden behind a closed panel. -->
         <div class="flex flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-2.5 dark:border-white/5 sm:px-5">
+          <!-- Mobile only: the split view is a desktop layout, so decision
+               support stays behind a toggle until the user asks for it. -->
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 lg:hidden"
+            :aria-expanded="showChatMobile"
+            aria-controls="forecast-decision-chat"
+            @click="showChatMobile = !showChatMobile"
+          >
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true" class="h-3.5 w-3.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
+            </svg>
+            AI Decision Support
+          </button>
+
           <button
             type="button"
             class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
@@ -294,6 +329,8 @@
             @page="goToPage"
           />
         </div>
+          </div>
+        </div>
       </div>
 
       <p class="text-xs text-gray-500 dark:text-gray-400">Forecasts are recommendations only. They do not automatically change inventory or create procurement orders.</p>
@@ -306,6 +343,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { ArrowLeft, PackageSearch, RefreshCw } from 'lucide';
 import api from '../../lib/axios';
 import InventoryTableSkeleton from '../../components/ui/skeletons/InventoryTableSkeleton.vue';
+import ForecastDecisionChat from '../../components/forecast/ForecastDecisionChat.vue';
 import LucideIcon from '../../components/ui/data-display/LucideIcon.vue';
 import Pagination from '../../components/ui/data-display/Pagination.vue';
 
@@ -326,6 +364,9 @@ const page = ref(1);
 // The recommendations are the point of this page, so the filter panel starts
 // closed and the table loads straight away.
 const showFilters = ref(false);
+// Decision support is a side-by-side desktop layout; below `lg` it is opt-in so
+// the table keeps the full width on a phone.
+const showChatMobile = ref(false);
 const filters = ref({ search: '', category: '', priority: '', confidence: '', sort: 'suggested' });
 let searchTimer = null;
 
@@ -337,8 +378,26 @@ const activeFilterCount = computed(() => ['search', 'category', 'priority', 'con
 // apart from "your filters matched nothing".
 const hasForecastRows = computed(() => (forecastResult.value?.rows ?? []).length > 0);
 
+const forecastRowCount = computed(() => (forecastResult.value?.rows ?? []).length);
+
 const forecastStatus = computed(() => forecastResult.value?.status ?? null);
 const availabilityWarning = computed(() => forecastResult.value?.summary?.availability_warning === true);
+
+const itemsNeedingProcurement = computed(() => forecastResult.value?.summary?.items_needing_procurement ?? 0);
+
+// Confidence is no longer a table column, so the chat opener is where the
+// "verify before ordering" risk gets surfaced.
+const lowConfidenceCount = computed(() => (forecastResult.value?.rows ?? []).filter((row) => (
+  row?.status !== 'success' || row?.confidence === 'Low' || row?.confidence === 'Medium'
+)).length);
+
+// Item identity only, so the chat can recognise "why is <item> urgent?" and
+// send it to the single-item explanation endpoint.
+const forecastItemIdentity = computed(() => (forecastResult.value?.rows ?? []).map((row) => ({
+  inventory_id: row?.inventory_id,
+  item_name: row?.item_name,
+  priority: row?.priority,
+})));
 
 const forecastPeriod = computed(() => forecastResult.value?.forecast_period || 'Not available');
 
