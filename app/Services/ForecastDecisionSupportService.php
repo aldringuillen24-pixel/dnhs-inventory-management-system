@@ -22,11 +22,13 @@ class ForecastDecisionSupportService
     public const PROMPT_PURCHASE_FIRST = 'purchase_first';
     public const PROMPT_DEFERRABLE = 'deferrable';
     public const PROMPT_VERIFY_FIRST = 'verify_first';
+    public const PROMPT_NEXT_STEPS = 'next_steps';
 
     public const PROMPT_TYPES = [
         self::PROMPT_PURCHASE_FIRST,
         self::PROMPT_DEFERRABLE,
         self::PROMPT_VERIFY_FIRST,
+        self::PROMPT_NEXT_STEPS,
     ];
 
     /** Maximum rows returned to the caller or listed on the exported PDF. */
@@ -60,6 +62,7 @@ class ForecastDecisionSupportService
         return match ($promptType) {
             self::PROMPT_DEFERRABLE => 'What can wait?',
             self::PROMPT_VERIFY_FIRST => 'Which rows need verification first?',
+            self::PROMPT_NEXT_STEPS => 'What step should I do next?',
             default => 'What should we purchase first?',
         };
     }
@@ -230,6 +233,15 @@ class ForecastDecisionSupportService
     public function selectRows(Collection $rows, string $promptType): Collection
     {
         return match ($promptType) {
+            // The actionable items: everything with a gap, most urgent first.
+            // Identical to purchase_first on purpose — the next-steps answer
+            // reasons about these rows and exports them to the PDF.
+            self::PROMPT_NEXT_STEPS => $rows
+                ->filter(fn (array $row): bool => ($row['needs_procurement'] ?? false) === true)
+                ->sortByDesc(fn (array $row): int => (int) ($row['priority_rank'] ?? 0) * 1000000
+                    + (int) ($row['suggested_procurement'] ?? 0))
+                ->values()
+                ->take(self::MAX_SELECTED_ITEMS),
             self::PROMPT_DEFERRABLE => $rows
                 ->filter(fn (array $row): bool => ($row['status'] ?? null) === 'success'
                     && ($row['needs_procurement'] ?? false) === false
@@ -301,12 +313,59 @@ class ForecastDecisionSupportService
                 .'Answer only about them, in the order given. Do not introduce items that are not listed.';
         }
 
+        $facts['cycle_state'] = $this->cycleState(collect($forecast['rows'] ?? []));
+
         return $facts;
+    }
+
+    /**
+     * Aggregate counts the next-steps answer is built from.
+     *
+     * These are computed here rather than narrated by the provider, so every
+     * step and every number in a "what do I do next" answer traces to the model
+     * output instead of being improvised.
+     *
+     * @return array<string, int>
+     */
+    private function cycleState(Collection $rows): array
+    {
+        $gaps = $rows->filter(fn (array $row): bool => ($row['needs_procurement'] ?? false) === true);
+
+        return [
+            'items_forecasted' => $rows->where('status', 'success')->count(),
+            'items_with_gap' => $gaps->count(),
+            'urgent' => $gaps->where('priority', 'Urgent')->count(),
+            'high' => $gaps->where('priority', 'High')->count(),
+            'medium' => $gaps->where('priority', 'Medium')->count(),
+            'deferrable' => $rows->filter(fn (array $row): bool => ($row['status'] ?? null) === 'success'
+                && ($row['needs_procurement'] ?? false) === false)->count(),
+            'insufficient_history' => $rows->where('status', 'insufficient_history')->count(),
+            // Rows that would be acted on but rest on weak history. These are the
+            // ones worth a verification step; counting every Low/Medium row,
+            // including items nobody is buying, produced a warning about all 99.
+            'gaps_needing_verification' => $gaps->filter(fn (array $row): bool => ($row['status'] ?? null) !== 'success'
+                || in_array($row['confidence'] ?? null, ['Low', 'Medium'], true))->count(),
+            'suggested_units' => (int) $gaps->sum(fn (array $row): int => (int) ($row['suggested_procurement'] ?? 0)),
+        ];
     }
 
     private function systemPrompt(string $promptType): string
     {
         $label = self::questionLabel($promptType);
+
+        if ($promptType === self::PROMPT_NEXT_STEPS) {
+            return "You are the decision support layer on top of a locally calculated inventory demand forecast.\n\n"
+                ."The approved facts include a 'cycle_state' block of counts the server already computed, and an 'items' list "
+                ."of the actionable rows with their exact quantities.\n\n"
+                ."Answer the custodian's question: \"What step should I do next?\"\n\n"
+                ."Rules:\n"
+                ."1. Give a short numbered list of concrete next steps, most urgent first.\n"
+                ."2. Every count and quantity you write must already appear in cycle_state or the items. Do not compute or estimate.\n"
+                ."3. Order the work: Urgent items, then High, then verification of weak-history suggestions, then deferring items with no gap.\n"
+                ."4. State that the final step is approval by the Property Custodian and the School Head, and that this does not create an order.\n"
+                ."5. Do not invent a price, budget, supplier, delivery date, or any step outside this workflow.\n"
+                ."6. Keep it under 160 words.\n";
+        }
 
         return "You are the decision support layer on top of a locally calculated inventory demand forecast.\n\n"
             ."The approved facts below were computed by the server from verified completed stock-out history. "
@@ -431,6 +490,17 @@ class ForecastDecisionSupportService
             }
         }
 
+        // The server-computed cycle counts (urgent, high, items_with_gap,
+        // suggested_units, …) are approved facts too. A next-steps reply that
+        // quotes "the 62 High priority items" is restating a count this class
+        // calculated, and rejecting it pushed every well-formed guidance answer
+        // back to the local template.
+        foreach ((array) ($facts['cycle_state'] ?? []) as $count) {
+            if (is_int($count) || is_float($count)) {
+                $approved->push((string) $count);
+            }
+        }
+
         // The size of the list this layer selected, so a reply may count its own
         // items without that count being read as fabricated data.
         foreach (['selected_count', 'max_items_shown'] as $size) {
@@ -479,6 +549,10 @@ class ForecastDecisionSupportService
     private function localAnswer(array $facts): string
     {
         $items = $facts['items'] ?? [];
+        if (($facts['prompt_type'] ?? null) === self::PROMPT_NEXT_STEPS) {
+            return $this->localNextSteps($facts);
+        }
+
         if (! is_array($items) || $items === []) {
             return match ($facts['prompt_type'] ?? self::PROMPT_PURCHASE_FIRST) {
                 self::PROMPT_DEFERRABLE => 'No item currently has stock and pending demand covering its forecast demand and safety stock, so nothing can be deferred from this forecast cycle.',
@@ -495,6 +569,84 @@ class ForecastDecisionSupportService
         }
 
         $lines[] = 'This is advisory only and does not create orders. Refresh model training before acting on a new result.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * The "what do I do next" answer.
+     *
+     * Every step and every count comes from cycleState(), which is derived from
+     * the forecast rows, so the guidance cannot invent a workflow step or
+     * miscount. The final step describes the approval path that actually exists
+     * in this application (custodian prepares, School Head approves) and states
+     * plainly that nothing here creates an order.
+     */
+    private function localNextSteps(array $facts): string
+    {
+        $state = $facts['cycle_state'] ?? [];
+        $items = $facts['items'] ?? [];
+        $period = is_string($facts['forecast_period'] ?? null) ? $facts['forecast_period'] : 'this cycle';
+
+        $withGap = (int) ($state['items_with_gap'] ?? 0);
+        $urgent = (int) ($state['urgent'] ?? 0);
+        $high = (int) ($state['high'] ?? 0);
+        $medium = (int) ($state['medium'] ?? 0);
+        $deferrable = (int) ($state['deferrable'] ?? 0);
+        $verify = (int) ($state['gaps_needing_verification'] ?? 0);
+        $insufficient = (int) ($state['insufficient_history'] ?? 0);
+        $units = (int) ($state['suggested_units'] ?? 0);
+
+        if ($withGap === 0) {
+            return "Nothing needs purchasing for {$period}: no item has a procurement gap this cycle.\n"
+                ."Next step: leave purchasing as is, and let the model retrain next cycle. "
+                .'Model training runs on a schedule; this panel does not create orders.';
+        }
+
+        $lines = ["Next steps for {$period} ({$withGap} item".($withGap === 1 ? '' : 's')." with a gap, {$units} units):"];
+        $step = 0;
+
+        if ($urgent > 0) {
+            $step++;
+            $names = collect(is_array($items) ? $items : [])
+                ->filter(fn (array $item): bool => ($item['priority'] ?? null) === 'Urgent')
+                ->take(3)
+                ->pluck('item_name')
+                ->filter()
+                ->implode(', ');
+            $lines[] = $step.'. Purchase the '.$urgent.' Urgent item'.($urgent === 1 ? '' : 's').' first'
+                .($names !== '' ? ': '.$names : '')
+                .'. These have no stock left against forecast demand.';
+        }
+
+        if ($high > 0) {
+            $step++;
+            $lines[] = $step.'. Then work through the '.$high.' High priority item'.($high === 1 ? '' : 's')
+                .'. These have a gap but still have some stock, so they are not as time-critical.'
+                .($medium > 0 ? ' The remaining '.$medium.' Medium item'.($medium === 1 ? '' : 's').' can follow last.' : '');
+        }
+
+        if ($verify > 0) {
+            $step++;
+            $lines[] = $step.'. Before ordering, verify the '.$verify.' suggestion'.($verify === 1 ? '' : 's')
+                .' that rest on fewer verified months than the others. Check current usage and stock first.';
+        }
+
+        if ($insufficient > 0) {
+            $step++;
+            $lines[] = $step.'. Do not procure the '.$insufficient.' item'.($insufficient === 1 ? '' : 's')
+                .' with insufficient history. They show no estimate; wait for more completed months.';
+        }
+
+        if ($deferrable > 0) {
+            $step++;
+            $lines[] = $step.'. Defer the '.$deferrable.' item'.($deferrable === 1 ? '' : 's')
+                .' with no procurement gap. Stock already covers forecast demand, so they can wait for next cycle.';
+        }
+
+        $step++;
+        $lines[] = $step.'. Send the resulting list for approval: the Property Custodian prepares it and the School Head approves it. '
+            .'Export the list as PDF for the signature page. This panel is advisory only and does not create orders.';
 
         return implode("\n", $lines);
     }

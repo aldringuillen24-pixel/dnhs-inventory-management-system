@@ -431,6 +431,138 @@ test('the PDF export is refused for a role without procurement capability', func
         ->assertStatus(403);
 });
 
+test('next steps are ordered by urgency and counted from the forecast', function () {
+    config(['services.gemini.api_key' => null]);
+
+    $payload = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_NEXT_STEPS)
+        ->assertOk()
+        ->json();
+
+    expect($payload['question'])->toBe('What step should I do next?')
+        ->and($payload['answer'])->toContain('Next steps for')
+        // The approval path must be stated, and the limits of this panel too.
+        ->and($payload['answer'])->toContain('School Head')
+        ->and($payload['answer'])->toContain('does not create orders');
+
+    // Steps must appear in priority order: urgent before high before deferring.
+    $urgentAt = strpos($payload['answer'], 'Urgent');
+    $highAt = strpos($payload['answer'], 'High priority');
+    $deferAt = strpos($payload['answer'], 'Defer the');
+
+    if ($urgentAt !== false && $highAt !== false) {
+        expect($urgentAt)->toBeLessThan($highAt);
+    }
+    if ($highAt !== false && $deferAt !== false) {
+        expect($highAt)->toBeLessThan($deferAt);
+    }
+});
+
+test('next steps cite only counts the forecast calculated', function () {
+    config(['services.gemini.api_key' => null]);
+
+    $payload = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_NEXT_STEPS)
+        ->assertOk()
+        ->json();
+
+    $rows = collect($this->forecastRows);
+    $gaps = $rows->filter(fn (array $row): bool => $row['needs_procurement'] === true);
+
+    $expected = [
+        'items with a gap' => $gaps->count(),
+        'urgent' => $gaps->where('priority', 'Urgent')->count(),
+        'high' => $gaps->where('priority', 'High')->count(),
+        'medium' => $gaps->where('priority', 'Medium')->count(),
+        'deferrable' => $rows->filter(fn (array $row): bool => $row['status'] === 'success'
+            && $row['needs_procurement'] === false)->count(),
+        'suggested_units' => (int) $gaps->sum('suggested_procurement'),
+    ];
+
+    foreach ($expected as $label => $count) {
+        if ($count > 0) {
+            expect($payload['answer'])->toContain((string) $count);
+        }
+    }
+
+    // And nothing may appear that is not a real count. Step numbers ("1.", "2.")
+    // are list positions, not claims, so they are stripped as the service does.
+    $scannable = preg_replace('/^\s*\d{1,3}[.)]\s+/m', '', $payload['answer']);
+
+    preg_match_all('/(?<![\pL\d])\d+(?:[,.]\d+)*(?!\d)(?![\pL])/u', (string) $scannable, $matches);
+    $allowed = collect($expected)->push(10)->map(fn ($n): string => (string) $n)
+        ->merge(['2026', '10', '3', '4', '25'])
+        ->unique();
+
+    foreach ($matches[0] as $number) {
+        expect($allowed->contains(str_replace(',', '', $number)))->toBeTrue(
+            "Next-steps answer used unapproved number {$number}."
+        );
+    }
+});
+
+test('next steps return the actionable items so the list can be exported', function () {
+    $payload = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_NEXT_STEPS)
+        ->assertOk()
+        ->json();
+
+    $gapped = collect($this->forecastRows)
+        ->filter(fn (array $row): bool => $row['needs_procurement'] === true)
+        ->keyBy('inventory_id');
+
+    expect($payload['inventory_ids'])->not->toBeEmpty();
+
+    foreach ($payload['inventory_ids'] as $inventoryId) {
+        expect($gapped->has($inventoryId))->toBeTrue(
+            "Next steps returned {$inventoryId}, which has no procurement gap."
+        );
+    }
+
+    $this->actingAs($this->custodian)
+        ->post(route('api.custodian.reports.forecast.procurement-list-pdf'), [
+            'inventory_ids' => $payload['inventory_ids'],
+            'prompt_type' => $payload['prompt_type'],
+        ])
+        ->assertOk();
+});
+
+test('the grounding check approves server-computed cycle counts', function () {
+    // The next-steps answer quotes counts like "the 62 High priority items".
+    // Those come from cycle_state(), so quoting them must not be treated as an
+    // invented figure.
+    $service = new ForecastDecisionSupportService(
+        app(\App\Services\AiCapabilityPolicy::class),
+        app(\App\Services\GeminiApiService::class),
+        app(StoredDemandForecastService::class),
+    );
+
+    $facts = [
+        'forecast_period' => 'October 2026',
+        'generated_at' => '2026-10-01T00:00:00+00:00',
+        'forecast_summary' => ['items_forecasted' => 99, 'items_needing_procurement' => 79],
+        'selected_count' => 1,
+        'max_items_shown' => 10,
+        'cycle_state' => [
+            'items_with_gap' => 79,
+            'urgent' => 1,
+            'high' => 62,
+            'suggested_units' => 798,
+        ],
+        'items' => [[
+            'item_name' => 'Bond Paper',
+            'forecast_demand' => 36,
+            'safety_stock' => 9,
+            'available_stock' => 5,
+            'pending_demand' => 0,
+            'suggested_procurement' => 40,
+        ]],
+    ];
+
+    $reply = 'Review the 62 High priority items of 79 with a gap; 798 units in total. '
+        .'Bond Paper leads with demand 36 and a suggested 40.';
+
+    expect((new \ReflectionMethod($service, 'isGroundedReply'))->invoke($service, $reply, $facts))
+        ->toBeTrue('Quoting server-computed cycle counts must be accepted.');
+});
+
 test('a follow-up narrows the previous answer to the items it named', function () {
     $first = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST)
         ->assertOk()

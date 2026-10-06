@@ -152,6 +152,11 @@ const props = defineProps({
     hasForecast: { type: Boolean, default: false },
     itemsNeedingProcurement: { type: Number, default: 0 },
     lowConfidenceCount: { type: Number, default: 0 },
+    // Suggestions (rows with a procurement gap) resting on weak history, and
+    // rows with no estimate at all. Both are scoped so the warning describes
+    // actionable work rather than every row in the forecast.
+    gapsNeedingVerification: { type: Number, default: 0 },
+    insufficientHistoryCount: { type: Number, default: 0 },
     totalItems: { type: Number, default: 0 },
     // True when the table's filter panel has narrowed the visible rows. The
     // assistant still reads the whole forecast, and says so rather than
@@ -163,12 +168,14 @@ const props = defineProps({
 });
 
 const quickPrompts = [
+    { type: 'next_steps', label: 'What next?' },
     { type: 'purchase_first', label: 'Purchase first?' },
     { type: 'deferrable', label: 'What can wait?' },
     { type: 'verify_first', label: 'Needs verification?' },
 ];
 
 const questions = {
+    next_steps: 'What step should I do next?',
     purchase_first: 'What should we purchase first?',
     deferrable: 'What can wait?',
     verify_first: 'Which rows need verification first?',
@@ -196,11 +203,24 @@ const openerDetail = computed(() => {
         return 'Decision support answers only from a trained ML forecast.';
     }
 
-    if (props.lowConfidenceCount > 0) {
-        return `${props.lowConfidenceCount} row${props.lowConfidenceCount === 1 ? '' : 's'} rest on limited verified history — confirm before ordering. Pick a question below.`;
+    // Counted only over rows that would actually be ordered. Counting every
+    // Low/Medium row, including items nobody is buying, produced a warning about
+    // all 99 rows and read as a fault rather than guidance.
+    const parts = [];
+
+    if (props.gapsNeedingVerification > 0) {
+        parts.push(`${props.gapsNeedingVerification} of the suggestions rest on fewer verified months — confirm usage before ordering`);
     }
 
-    return 'Pick a question below, or ask about a specific item. Every answer cites forecast values only.';
+    if (props.insufficientHistoryCount > 0) {
+        parts.push(`${props.insufficientHistoryCount} item${props.insufficientHistoryCount === 1 ? '' : 's'} have too little history to estimate and are excluded from procurement`);
+    }
+
+    if (parts.length === 0) {
+        return 'Every suggestion rests on sufficient verified history. Pick a question below, or ask about a specific item.';
+    }
+
+    return `${parts.join('. ')}. Pick a question below, or ask about a specific item.`;
 });
 
 watch(
@@ -450,6 +470,9 @@ function submitQuestion() {
  * it is not recognisably a decision question.
  */
 function classify(lowered) {
+    // "What should I do next?" is asked before any list exists, so it is
+    // matched first and answered from the whole forecast.
+    if (/what (?:should|do|can) i do|what'?s? next|next step|what step|where do i (?:start|begin)|how do i (?:start|begin|proceed)|what are my (?:options|next)|guide me|help me (?:start|decide)|procedure|workflow/.test(lowered)) return 'next_steps';
     if (/wait|defer|later|skip|postpone|can i delay/.test(lowered)) return 'deferrable';
     if (/verif|trust|confiden|reliable|uncertain|insufficient/.test(lowered)) return 'verify_first';
     if (/first|priorit|urgent|top|buy|purchase|need to order|recommend|why|explain|how come|reason/.test(lowered)) return 'purchase_first';

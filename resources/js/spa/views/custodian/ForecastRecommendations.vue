@@ -108,6 +108,8 @@
               :has-forecast="hasForecastRows"
               :items-needing-procurement="itemsNeedingProcurement"
               :low-confidence-count="lowConfidenceCount"
+              :gaps-needing-verification="gapsNeedingVerification"
+              :insufficient-history-count="insufficientHistoryCount"
               :total-items="forecastRowCount"
               :table-filtered="activeFilterCount > 0"
               :items="forecastItemIdentity"
@@ -386,10 +388,19 @@ const availabilityWarning = computed(() => forecastResult.value?.summary?.availa
 const itemsNeedingProcurement = computed(() => forecastResult.value?.summary?.items_needing_procurement ?? 0);
 
 // Confidence is no longer a table column, so the chat opener is where the
-// "verify before ordering" risk gets surfaced.
+// "verify before ordering" risk gets surfaced. Scoped to rows with a
+// procurement gap, because a warning about rows nobody is buying is noise.
 const lowConfidenceCount = computed(() => (forecastResult.value?.rows ?? []).filter((row) => (
   row?.status !== 'success' || row?.confidence === 'Low' || row?.confidence === 'Medium'
 )).length);
+
+const gapsNeedingVerification = computed(() => (forecastResult.value?.rows ?? []).filter((row) => (
+  row?.needs_procurement === true
+  && (row?.status !== 'success' || row?.confidence === 'Low' || row?.confidence === 'Medium')
+)).length);
+
+const insufficientHistoryCount = computed(() => (forecastResult.value?.rows ?? [])
+  .filter((row) => row?.status !== 'success').length);
 
 // Item identity only, so the chat can recognise "why is <item> urgent?" and
 // send it to the single-item explanation endpoint.
