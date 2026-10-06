@@ -17,13 +17,6 @@
       </div>
 
       <div class="flex shrink-0 items-center gap-2">
-        <RouterLink
-          to="/reports"
-          class="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-        >
-          <LucideIcon :icon="ArrowLeft" class="h-4 w-4" />
-          Reports
-        </RouterLink>
         <button
           type="button"
           :disabled="reloading"
@@ -342,7 +335,7 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { ArrowLeft, PackageSearch, RefreshCw } from 'lucide';
+import { PackageSearch, RefreshCw } from 'lucide';
 import api from '../../lib/axios';
 import InventoryTableSkeleton from '../../components/ui/skeletons/InventoryTableSkeleton.vue';
 import ForecastDecisionChat from '../../components/forecast/ForecastDecisionChat.vue';
