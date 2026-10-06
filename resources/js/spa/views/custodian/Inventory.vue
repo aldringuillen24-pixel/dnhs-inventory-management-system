@@ -354,16 +354,42 @@
                         >
                           {{ row.item_name }}
                         </button>
-                        <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          <span v-if="row.ics_no" class="font-mono font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.2 rounded-md">
-                            ICS: {{ row.ics_no }}
+                        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                          <span
+                            v-if="row.ics_no"
+                            class="rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+                          >
+                            {{ row.ics_no }}
                           </span>
-                          <span v-else class="text-gray-400 dark:text-gray-500">No ICS</span>
-                          <span class="text-gray-300 dark:text-gray-600">·</span>
-                          <span>Acquired {{ formatDate(row.date_acquired) }}</span>
+                          <span v-else class="text-[11px] text-gray-400 dark:text-gray-500">No ICS</span>
+                          <span class="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
+                          <span class="text-[11px] text-gray-500 dark:text-gray-400">
+                            Acquired {{ formatDate(row.date_acquired) }}
+                          </span>
                         </div>
-                        <div v-if="groupSubtitle(row)" class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                          <span class="font-mono font-semibold text-gray-700 dark:text-gray-300">{{ groupSubtitle(row) }}</span>
+                        <div
+                          v-for="meta in [groupMeta(row)]"
+                          :key="meta.key"
+                          class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]"
+                        >
+                          <span
+                            v-if="meta.count > 1"
+                            class="rounded-md bg-gray-100 px-1.5 py-0.5 font-semibold text-gray-600 dark:bg-white/5 dark:text-gray-300"
+                          >
+                            {{ meta.count }} units
+                          </span>
+                          <span
+                            v-if="meta.invNo"
+                            class="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-gray-700 dark:bg-white/5 dark:text-gray-300"
+                          >
+                            {{ meta.invNo }}
+                          </span>
+                          <span
+                            v-if="meta.serial"
+                            class="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-gray-600 dark:bg-white/5 dark:text-gray-400"
+                          >
+                            SN {{ meta.serial }}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1702,18 +1728,36 @@ function toggleGroupSelection(row, checked) {
   selection.value = [...ids];
 }
 
+// Structured identifiers for a collapsed row. Returning an object instead of a
+// pre-joined string lets each chip be styled on its own; the template evaluates
+// this once per row via a single-element v-for.
+function groupMeta(row) {
+  const sourceItems = row?.sourceItems ?? [];
+  const source = sourceItems[0] ?? null;
+  const count = Number(row?.source_count ?? sourceItems.length ?? 0);
+
+  return {
+    key: `${row?.item_name ?? ''}|${row?.ics_no ?? ''}|${row?.status ?? ''}|${count}`,
+    count,
+    // Only show a single unit's identifiers; a collapsed row spans many units and
+    // the per-unit values live in the Records modal.
+    invNo: count > 1 ? '' : (source?.inventory_item_no ?? row?.inventory_item_no ?? ''),
+    serial: count > 1 ? '' : (source?.serial_number ?? ''),
+  };
+}
+
 function groupSubtitle(row) {
-  const count = Number(row?.source_count ?? row?.sourceItems?.length ?? 0);
+  const { count, invNo, serial } = groupMeta(row);
+
   if (count > 1) {
     return `${count} unit records`;
   }
-  const source = (row?.sourceItems ?? [])[0];
-  const invNo = source?.inventory_item_no ?? row?.inventory_item_no;
-  const serial = source?.serial_number;
+
   if (invNo && serial) {
     return `${invNo} · SN: ${serial}`;
   }
-  return invNo ?? (serial ? `SN: ${serial}` : '');
+
+  return invNo || (serial ? `SN: ${serial}` : '');
 }
 
 function hasQrCodes(row) {
