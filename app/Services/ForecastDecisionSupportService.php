@@ -389,7 +389,10 @@ class ForecastDecisionSupportService
             ."verified before use. Do not produce a suggested quantity for it.\n"
             ."7. Prefer a short ranked list. State the reasoning for the first few items: the arithmetic "
             ."(forecast demand + safety stock - available stock - pending demand) and the priority and confidence behind it.\n"
-            ."8. Close with one line noting the forecast is advisory only.\n";
+            ."8. Format each item as ONE line, with no blank line between items: "
+            ."**Item name** — buy N unit, Priority, Confidence confidence; basis: demand X + buffer Y - stock Z - pending W. "
+            ."Extra blank lines turn the chat panel into an unreadable wall of text.\n"
+            ."9. Close with one line noting the forecast is advisory only.\n";
     }
 
     /**

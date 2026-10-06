@@ -399,11 +399,23 @@ async function askAboutItem(item) {
 
 const GREETING = /^(hi|hey|hello|hola|good\s+(morning|afternoon|evening)|kumusta|howdy|thanks|thank\s+you|ty|ok|okay|test|ping)\b/i;
 
+// A question word with no subject. "why?", "what?", "how" cannot be answered,
+// and previously fell through to the ranked-list branch, so a bare "why?"
+// returned ten purchase recommendations instead of asking what was meant.
+const BARE_QUESTION = /^(why|what|how|when|which|who|whom|whose|where)\b[\s?.!]*$/i;
+
+const ASKS_WHY = /why|explain|how come|reason|justify/i;
+
+function guidance(text, message) {
+    messages.value = [...messages.value, { key: nextKey(), role: 'user', text }];
+    pushAssistant(message);
+}
+
 /**
  * Free text is classified, then answered by the same forecast-grounded
  * endpoints the quick prompts use. There is deliberately no general chat path:
- * anything that is not recognisably about this forecast gets guidance rather
- * than a guessed answer, so a greeting never returns a procurement list.
+ * anything not recognisably about this forecast gets guidance rather than a
+ * guessed answer, so a greeting never returns a procurement list.
  */
 function submitQuestion() {
     const text = question.value.trim();
@@ -412,34 +424,48 @@ function submitQuestion() {
 
     question.value = '';
 
-    if (GREETING.test(text.trim()) || text.trim().length < 4) {
-        messages.value = [...messages.value, { key: nextKey(), role: 'user', text }];
-        pushAssistant(
-            'I answer procurement questions from the current demand forecast only. '
-            + 'Tap a question below, or name an item (for example "why is Bond Paper urgent?").',
-        );
+    if (BARE_QUESTION.test(text)) {
+        guidance(text, 'What would you like explained? Name an item (for example "why is Bond Paper urgent?"), '
+            + 'or pick a question below.');
 
         return;
     }
 
+    if (GREETING.test(text) || text.length < 4) {
+        guidance(text, 'I answer procurement questions from the current demand forecast only. '
+            + 'Tap a question below, or name an item (for example "why is Bond Paper urgent?").');
+
+        return;
+    }
+
+    const lowered = text.toLowerCase();
+
     const named = props.items.find((item) => (
-        item.item_name && text.toLowerCase().includes(String(item.item_name).toLowerCase())
+        item.item_name && lowered.includes(String(item.item_name).toLowerCase())
     ));
 
-    if (named && /why|explain|how come|reason|justify|urgent|high|priority/.test(text.toLowerCase())) {
+    if (named && /why|explain|how come|reason|justify|urgent|high|priority/.test(lowered)) {
         messages.value = [...messages.value, { key: nextKey(), role: 'user', text }];
         askAboutItem(named);
 
         return;
     }
 
-    const lowered = text.toLowerCase();
-    const promptType = classify(lowered);
-
     // A follow-up narrows the previous answer instead of re-ranking the whole
     // forecast. The ids sent are only ever ones the server already returned, so
     // "the second one" cannot reach an item the custodian was never shown.
     const followUpIds = resolveFollowUp(lowered);
+
+    // "Why?" needs a subject. With no named item and nothing to refer back to,
+    // ask which item rather than answering with a ranked list.
+    if (ASKS_WHY.test(lowered) && followUpIds === null) {
+        guidance(text, 'Which item should I explain? Name one from the list above, or refer to it '
+            + '(for example "why is the second one urgent?").');
+
+        return;
+    }
+
+    const promptType = classify(lowered);
 
     if (promptType !== null) {
         run(promptType, text, followUpIds);
@@ -456,12 +482,9 @@ function submitQuestion() {
     }
 
     {
-        messages.value = [...messages.value, { key: nextKey(), role: 'user', text }];
-        pushAssistant(
-            'That question is outside what this panel can answer. I can rank what to purchase first, '
+        guidance(text, 'That question is outside what this panel can answer. I can rank what to purchase first, '
             + 'show what can wait, flag rows that need verification, explain one named item, '
-            + 'or follow up on the last list (for example "why is the second one urgent?").',
-        );
+            + 'or follow up on the last list (for example "why is the second one urgent?").');
     }
 }
 
