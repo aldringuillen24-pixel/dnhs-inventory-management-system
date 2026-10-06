@@ -29,7 +29,12 @@ class GeminiApiService
                         'role' => 'user',
                         'parts' => [['text' => $input]],
                     ]],
-                    'generationConfig' => $generationConfig,
+                    // Must be a JSON object, never an array. An empty PHP array
+                    // encodes as `[]`, and Gemini rejects that outright:
+                    // "Unknown name generationConfig: Proto field is not
+                    // repeating, cannot start list." (HTTP 400). Callers that
+                    // pass no options would otherwise silently get no text.
+                    'generationConfig' => $generationConfig === [] ? new \stdClass : $generationConfig,
                 ]);
 
             if (! $response->successful()) {
