@@ -1703,7 +1703,7 @@ test('a missing provider key returns local grounded facts without a request', fu
     Http::assertNothingSent();
 });
 
-test('factual intent does not call the explanation provider', function () {
+test('factual intent narrates through the provider under the bounded grounding rule', function () {
     config()->set([
         'services.gemini.api_key' => 'test-key',
         'services.gemini.model' => 'test/model',
@@ -1723,7 +1723,76 @@ test('factual intent does not call the explanation provider', function () {
         'explanation_data' => ['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces'],
     ]);
 
-    expect($reply)->toBe('Laptop; 2 pieces available.');
+    // A factual turn now reaches the provider, and a reply that invents no
+    // numbers and names nothing outside the facts is accepted.
+    expect($reply)->toBe('Explained.');
+    Http::assertSentCount(1);
+});
+
+test('a factual reply that invents a number falls back to the deterministic answer', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+    Http::fake(function () {
+        return Http::response(geminiGenerateContentResponse('Laptop has 47 pieces available.'));
+    });
+
+    $reply = app(AiInventoryService::class)->ask(explanationTestUser(), 'How many?', [
+        'status' => 'success',
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY,
+        'answer' => ['items' => [['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces']]],
+        'explanation_data' => ['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces'],
+    ]);
+
+    expect($reply)->toBe('- Laptop: 2 pieces');
+});
+
+test('a factual reply naming an item outside the facts falls back', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+    Http::fake(function () {
+        return Http::response(geminiGenerateContentResponse('Eraser Sharpeners are also in stock.'));
+    });
+
+    $reply = app(AiInventoryService::class)->ask(explanationTestUser(), 'How many?', [
+        'status' => 'success',
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY,
+        'answer' => ['items' => [['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces']]],
+        'explanation_data' => ['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces'],
+    ]);
+
+    expect($reply)->toBe('- Laptop: 2 pieces');
+});
+
+test('a factual reply making an unevidenced causal claim falls back', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+    Http::fake(function () {
+        return Http::response(geminiGenerateContentResponse('Laptop is low because of the recent audit.'));
+    });
+
+    $reply = app(AiInventoryService::class)->ask(explanationTestUser(), 'How many?', [
+        'status' => 'success',
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY,
+        'answer' => ['items' => [['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces']]],
+        'explanation_data' => ['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces'],
+    ]);
+
+    expect($reply)->toBe('- Laptop: 2 pieces');
+});
+
+test('a missing provider key still answers a factual turn without a request', function () {
+    config()->set('services.gemini.api_key', null);
+    Http::fake();
+
+    $reply = app(AiInventoryService::class)->ask(explanationTestUser(), 'How many?', [
+        'status' => 'success',
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY,
+        'answer' => ['items' => [['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces']]],
+        'explanation_data' => ['item_name' => 'Laptop', 'available_quantity' => 2, 'unit' => 'pieces'],
+    ]);
+
+    expect($reply)->toBe('- Laptop: 2 pieces');
     Http::assertNothingSent();
 });
 
@@ -1824,8 +1893,11 @@ test('structured topic continuation carries only the active item to the new capa
         'response_type' => 'detail',
     ]);
     Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::sequence()
+        // Turn one is classified by the parser; the "Where is it?" follow-up
+        // resolves from the active topic without a parse, so it spends its one
+        // call on generation and must stay grounded in the location facts.
         ->push(geminiGenerateContentResponse(json_encode(structuredAssistantParse())))
-        ->push(geminiGenerateContentResponse(json_encode($locationParse)))]);
+        ->push(geminiGenerateContentResponse('Projector is kept in the Media Desk of the Library.'))]);
     $user = persistedAssistantUser();
     $inventory = createAssistantInventory($user, 'Projector', 3);
     $inventory->update(['building' => 'Library', 'room' => 'Media Desk']);
@@ -1835,23 +1907,28 @@ test('structured topic continuation carries only the active item to the new capa
         ->assertJsonPath('reply', 'Projector has 3 pieces available.');
     $this->postJson(route('ai.chat'), ['message' => 'Where is it?'])
         ->assertOk()
-        ->assertJsonPath('reply', fn (string $reply): bool => str_contains($reply, 'Library') && str_contains($reply, 'Media Desk'));
+        ->assertJsonPath('reply', 'Projector is kept in the Media Desk of the Library.');
 });
 
 test('structured new topic replaces the previous item before its follow-up', function () {
     useRealAssistantIntentParser();
     config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
-    $bondPaperParse = structuredAssistantParse(['item_name' => 'Bond Paper']);
     $locationParse = structuredAssistantParse([
         'intent' => 'location',
         'topic_action' => 'continue_topic',
         'item_name' => null,
         'response_type' => 'detail',
     ]);
+    $paperParse = structuredAssistantParse(['item_name' => 'Bond Paper']);
     Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::sequence()
+        // projectors and Bond Paper are both warehouse-availability questions:
+        // one parse each, and warehouse availability is outside the generation
+        // allowlist so neither spends a second call.
         ->push(geminiGenerateContentResponse(json_encode(structuredAssistantParse())))
-        ->push(geminiGenerateContentResponse(json_encode($bondPaperParse)))
-        ->push(geminiGenerateContentResponse(json_encode($locationParse)))]);
+        ->push(geminiGenerateContentResponse(json_encode($paperParse)))
+        // "Where is it?" resolves from the active topic, so it spends its one
+        // call on generation and must name only Bond Paper's own location.
+        ->push(geminiGenerateContentResponse('Bond Paper is kept in Supply Room 202.'))]);
     $user = persistedAssistantUser();
     $projector = createAssistantInventory($user, 'Projector', 3);
     $projector->update(['building' => 'Old Wing', 'room' => '101']);
@@ -1865,12 +1942,12 @@ test('structured new topic replaces the previous item before its follow-up', fun
         ->assertJsonPath('reply', 'Bond Paper has 4 pieces available.');
     $this->postJson(route('ai.chat'), ['message' => 'Where is it?'])
         ->assertOk()
-        ->assertJsonPath('reply', fn (string $reply): bool => str_contains($reply, 'Supply Room') && str_contains($reply, '202'))
+        ->assertJsonPath('reply', 'Bond Paper is kept in Supply Room 202.')
         ->assertDontSee('Old Wing');
 });
 
 test('deterministic location questions use validated room targets and database inventory', function () {
-    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+    config()->set('services.gemini.api_key', null);
     $user = persistedAssistantUser();
     $inventory = createAssistantInventory($user, 'Projector', 1);
     $inventory->update(['building' => 'Library', 'room' => 'Media Desk']);
@@ -1881,6 +1958,24 @@ test('deterministic location questions use validated room targets and database i
     ])->assertOk()->assertJsonPath('reply', "- Projector (Inventory ID {$inventory->item_id}): Holder: not recorded; Building: Library; Room: Media Desk; Status: available");
 
     Http::assertNothingSent();
+});
+
+test('a location reply that invents a holder falls back to the database record', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+    $user = persistedAssistantUser();
+    $inventory = createAssistantInventory($user, 'Projector', 1);
+    $inventory->update(['building' => 'Library', 'room' => 'Media Desk']);
+    Http::fake(function () {
+        // "assigned" is not in the facts, and the invented holder is not in
+        // the database, so the reply must not be shown.
+        return Http::response(geminiGenerateContentResponse(
+            'Projector is held by Maria Santos in Room 999.'
+        ));
+    });
+
+    $this->actingAs($user)->postJson(route('ai.chat'), [
+        'message' => 'Which items are in the Media Desk?',
+    ])->assertOk()->assertJsonPath('reply', "- Projector (Inventory ID {$inventory->item_id}): Holder: not recorded; Building: Library; Room: Media Desk; Status: available");
 });
 
 test('unsupported questions use local role guidance without calling the provider', function () {
@@ -1941,7 +2036,7 @@ test('provider failure falls back to verified maintenance facts', function () {
     expect($reply)->toContain('Projector', 'reported', 'Lens is loose');
 });
 
-test('maintenance facts stay local and only the explanation follow-up uses the provider', function () {
+test('maintenance answers are grounded in records and never mutate inventory', function () {
     config()->set([
         'services.gemini.api_key' => 'test-key',
         'services.gemini.model' => 'test/model',
@@ -1962,15 +2057,16 @@ test('maintenance facts stay local and only the explanation follow-up uses the p
         return Http::response(geminiGenerateContentResponse('Projector has recorded maintenance status reported.'));
     });
 
+    // The factual turn now narrates as well, so both turns reach the provider.
     $this->actingAs($user)->postJson(route('ai.chat'), [
         'message' => 'Is the projector under maintenance?',
-    ])->assertOk()->assertJsonPath('reply', "- Maintenance: Projector; Inventory ID {$inventory->item_id}; Status: reported; Issue: Lens is loose");
+    ])->assertOk()->assertJsonPath('reply', 'Projector has recorded maintenance status reported.');
     $this->postJson(route('ai.chat'), ['message' => 'Why?'])
         ->assertOk()
         ->assertJsonPath('reply', 'Projector has recorded maintenance status reported.');
 
     expect($inventory->fresh()->status)->toBe('available')
-        ->and($payloads)->toHaveCount(1)
+        ->and($payloads)->toHaveCount(2)
         ->and($payloads[0]['contents'])->toHaveCount(1)
         ->and($payloads[0]['contents'][0]['parts'][0]['text'])->toContain('Lens is loose', 'reported')
         ->and($payloads[0]['contents'][0]['parts'][0]['text'])->not->toContain('SELECT', 'unit_cost', 'repair queue');

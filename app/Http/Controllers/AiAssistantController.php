@@ -8,6 +8,7 @@ use App\Services\AiCapabilityPolicy;
 use App\Services\Conversation\ConversationContextManager;
 use App\Services\Forecast\ForecastChatHandoff;
 use App\Services\InventoryAnswerService;
+use App\Services\Response\AnswerComposer;
 use App\Services\Tools\CompoundPlanExecutor;
 use App\Services\AiIntentParserService;
 use App\Services\InventoryComparisonService;
@@ -27,6 +28,7 @@ class AiAssistantController extends Controller
         protected ForecastChatHandoff $forecastHandoff,
         protected ConversationContextManager $conversationContext,
         protected CompoundPlanExecutor $compoundPlanExecutor,
+        protected AnswerComposer $answerComposer,
     ) {}
 
     /**
@@ -203,22 +205,12 @@ class AiAssistantController extends Controller
                 ];
             }
 
-            $providerMayExplain = in_array($routedQuestion['capability'] ?? null, [
-                \App\Services\AiCapabilityPolicy::VIEW_DEMAND_FORECAST,
-                \App\Services\AiCapabilityPolicy::VIEW_PROCUREMENT_PRIORITIES,
-                \App\Services\AiCapabilityPolicy::VIEW_EXECUTIVE_REPORTS,
-                \App\Services\AiCapabilityPolicy::VIEW_INVENTORY_STOCK,
-                \App\Services\AiCapabilityPolicy::VIEW_ITEM_STATUS,
-                \App\Services\AiCapabilityPolicy::VIEW_ASSIGNMENTS,
-                \App\Services\AiCapabilityPolicy::VIEW_MAINTENANCE,
-                \App\Services\AiCapabilityPolicy::VIEW_DISPOSAL,
-                \App\Services\AiCapabilityPolicy::VIEW_READY_TO_DISPOSE,
-                \App\Services\AiCapabilityPolicy::VIEW_INVENTORY_LOCATION,
-                \App\Services\AiCapabilityPolicy::VIEW_PURCHASE_HISTORY,
-            ], true);
-            $reply = (($routedQuestion['needs_external_explanation'] ?? false)
-                && $providerMayExplain
-                && ($result['status'] ?? null) === 'success')
+            // Whether the provider may phrase this turn's answer is decided by
+            // AnswerComposer::mayGenerateFor(), next to the grounding rule that
+            // backs it up. Factual turns attempt generation too and fall back to
+            // localReply() whenever generation is refused or rejected.
+            $reply = $this->answerComposer->mayGenerateFor($routedQuestion['capability'] ?? null)
+                && ($result['status'] ?? null) === 'success'
                 ? $this->aiService->ask($user, $validated['message'], $result)
                 : $this->answerService->localReply($result, $user);
 

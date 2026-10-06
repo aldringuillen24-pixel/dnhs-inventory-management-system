@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Inventory;
 use App\Models\User;
+use App\Services\Response\LocalAnswerComposer;
 use App\Services\Tools\Concerns\InteractsWithInventory;
 use App\Services\Tools\ToolRouter;
 use Illuminate\Support\Str;
@@ -25,6 +26,7 @@ class InventoryAnswerService
     public function __construct(
         protected AiCapabilityPolicy $policy,
         protected ToolRouter $toolRouter,
+        protected LocalAnswerComposer $localComposer,
     ) {
     }
 
@@ -859,6 +861,20 @@ public function mergeReplies(array $results, ?User $user = null): string
         }
 
         return ! empty($item['description']) ? $details . ' ' . $item['description'] : $details;
+    }
+
+    /**
+     * Render an answer packet as plain language, deterministically.
+     *
+     * Public because LocalAnswerComposer is the deterministic fallback for
+     * every turn the provider does not phrase, and it formats without owning
+     * the formatter's rules.
+     *
+     * @param  array<string, mixed>  $packet
+     */
+    public function localExplanation(array $packet): string
+    {
+        return $this->localComposer->compose($packet);
     }
 
     protected function stockExplanation(array $item): string

@@ -83,7 +83,7 @@ test('each supported parsed intent maps to one allowlisted application capabilit
 });
 
 test('procurement questions are redirected to AI Decision Support', function () {
-    $service = new AiInventoryService(new AiCapabilityPolicy(), new GeminiApiService());
+    $service = app(AiInventoryService::class);
 
     $redirected = [
         'What should we purchase first?',
@@ -107,7 +107,7 @@ test('procurement questions are redirected to AI Decision Support', function () 
 });
 
 test('the assistant still answers stock and forecast questions', function () {
-    $service = new AiInventoryService(new AiCapabilityPolicy(), new GeminiApiService());
+    $service = app(AiInventoryService::class);
 
     // The redirect must not swallow ordinary questions this assistant owns.
     foreach (['How many bond papers are in stock?', 'What is the demand forecast?'] as $question) {
