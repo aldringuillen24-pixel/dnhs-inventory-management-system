@@ -707,16 +707,43 @@ class AiAssistantController extends Controller
             return 'No validated forecast rows are available for this scope.';
         }
 
-        $total = count($rows);
-        $shown = array_slice($rows, 0, self::MAX_TABLE_ROWS);
+        // Always present the rows in decision order, never in inventory-id
+        // order. A "full forecast list" previously came back sorted by ID, so
+        // Normal rows were interleaved with High ones and the summary looked
+        // arbitrary even though it was complete.
+        //
+        // Sorted as three stable passes rather than one multi-key sortBy array:
+        // that form expects nested [property, direction] pairs, so a flat list
+        // of closures is silently treated as a single comparison.
+        $ordered = collect($rows)
+            ->sortBy(fn (array $row): string => (string) ($row['item_name'] ?? ''))
+            ->sortByDesc(fn (array $row): int => (int) ($row['suggested_procurement'] ?? 0))
+            ->sortByDesc(fn (array $row): int => (int) ($row['priority_rank'] ?? 0))
+            ->values()
+            ->all();
+
+        $total = count($ordered);
+        $shown = array_slice($ordered, 0, self::MAX_TABLE_ROWS);
 
         $title = $ranked ? 'Advisory forecast priorities' : 'Validated ML demand forecast';
         $lines = [
             "{$title} for ".($period ?: 'the stored forecast period').'. Advisory only; no inventory changes or purchase orders are created.',
         ];
 
+        // A one-line breakdown so the ranking below it reads at a glance.
+        $counts = collect($ordered)
+            ->groupBy(fn (array $row): string => (string) ($row['priority'] ?? 'Normal'))
+            ->map(fn ($group): int => $group->count())
+            ->sortDesc()
+            ->map(fn (int $count, string $label): string => $count.' '.$label)
+            ->implode(' · ');
+
+        if ($counts !== '') {
+            $lines[] = $counts.' — '.$total.($total === 1 ? ' item' : ' items').' in the forecast.';
+        }
+
         if ($total > count($shown)) {
-            $lines[] = 'Showing '.count($shown).' of '.$total.' items.';
+            $lines[] = 'Showing the '.count($shown).' highest priority of '.$total.' items.';
         }
 
         // Narrowed to the decision columns. The removed ones (available stock,
@@ -735,7 +762,7 @@ class AiAssistantController extends Controller
 
         if ($total > count($shown)) {
             $lines[] = '';
-            $lines[] = 'That is a summary, not the full list. Open **Demand Forecast** in the sidebar to filter and sort all '
+            $lines[] = 'That is the top '.count($shown).', not the full list. Open **Demand Forecast** in the sidebar to filter and sort all '
                 .$total.' items and export them as a PDF, or use **AI Decision Support** there to ask what to buy first.';
         }
 

@@ -263,10 +263,28 @@ test('live chat ranks Laravel recommendations and reports use the identical rows
     if ($rowCount > 10) {
         $reply = (string) $chat->json('reply');
 
-        expect($reply)->toContain('Showing 10 of '.$rowCount.' items')
+        expect($reply)->toContain('Showing the 10 highest priority of '.$rowCount.' items')
             ->and($reply)->toContain('Demand Forecast')
             ->and(substr_count($reply, "\n| "))->toBe(10)
             ->and(strlen($reply))->toBeLessThan(4000);
+
+        // Rows must be in decision order, not inventory-id order. Previously a
+        // "full forecast list" came back sorted by ID, so the summary looked
+        // arbitrary.
+        preg_match_all('/^\| (?!Item)(.+?) \(ID \d+\) \|.*?\| (\w+) \|$/m', $reply, $rows, PREG_SET_ORDER);
+
+        $ranks = array_map(fn (string $label): int => match (strtolower($label)) {
+            'urgent' => 4,
+            'high' => 3,
+            'medium' => 2,
+            default => 1,
+        }, array_column($rows, 2));
+
+        expect($ranks)->not->toBeEmpty();
+
+        $sorted = $ranks;
+        rsort($sorted);
+        expect($ranks)->toBe($sorted, 'Forecast rows are not ordered by priority.');
     }
 
     $this->getJson(route('api.custodian.reports'))
