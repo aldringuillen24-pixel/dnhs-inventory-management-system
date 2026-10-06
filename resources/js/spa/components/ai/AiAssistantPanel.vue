@@ -432,10 +432,10 @@ function loadWelcomeMessage() {
   }
 
   const roleHelpText = {
-    'Property Custodian': 'I can help with inventory availability, assigned items, requests, inventory locations, low-stock items, forecasts, procurement priorities, assignment records, maintenance, disposal, purchase history, item status, reports, system summaries, and inventory valuation.',
+    'Property Custodian': 'I can help with inventory availability, assigned items, requests, inventory locations, low-stock items, forecasts, assignment records, maintenance, disposal, purchase history, item status, reports, system summaries, and inventory valuation. For what to buy first, open Demand Forecast and use AI Decision Support.',
     'School Head': 'I can help with approved inventory summaries and reports.',
     'End User': 'I can help you check your assigned items, your requests, pending requests, and available inventory.',
-    'Administrator': 'I can help with inventory availability, assigned items, requests, inventory locations, low-stock items, forecasts, procurement priorities, assignment records, maintenance, disposal, purchase history, item status, reports, system summaries, and inventory valuation.',
+    'Administrator': 'I can help with inventory availability, assigned items, requests, inventory locations, low-stock items, forecasts, assignment records, maintenance, disposal, purchase history, item status, reports, system summaries, and inventory valuation. For what to buy first, open Demand Forecast and use AI Decision Support.',
   };
 
   welcomeMessage.value = roleHelpText[role] || 'Ask about stock, assignments, maintenance, or the demand forecast. The server enforces what your role may see.';

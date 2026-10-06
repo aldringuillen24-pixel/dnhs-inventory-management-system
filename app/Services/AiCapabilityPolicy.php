@@ -90,7 +90,6 @@ class AiCapabilityPolicy
             'pending_requests' => self::VIEW_PENDING_REQUESTS,
             'low_stock' => self::VIEW_LOW_STOCK,
             'forecast' => self::VIEW_DEMAND_FORECAST,
-            'procurement_priorities' => self::VIEW_PROCUREMENT_PRIORITIES,
             'executive_reports' => self::VIEW_EXECUTIVE_REPORTS,
             'system_summary' => self::VIEW_SYSTEM_SUMMARY,
             'inventory_valuation' => self::VIEW_INVENTORY_VALUATION,
@@ -142,7 +141,7 @@ class AiCapabilityPolicy
         if (isset($capabilities[self::VIEW_OWN_ASSIGNMENTS])
             && isset($capabilities[self::VIEW_SYSTEM_SUMMARY])
             && isset($capabilities[self::VIEW_INVENTORY_VALUATION])) {
-            return 'I can help with inventory availability, assigned items, requests, inventory locations, low-stock items, forecasts, procurement priorities, assignment records, maintenance, disposal, purchase history, item status, reports, system summaries, and inventory valuation.';
+            return 'I can help with inventory availability, assigned items, requests, inventory locations, low-stock items, forecasts, assignment records, maintenance, disposal, purchase history, item status, reports, system summaries, and inventory valuation. For what to buy first, open Demand Forecast and use AI Decision Support.';
         }
 
         if (isset($capabilities[self::VIEW_EXECUTIVE_REPORTS]) && count($capabilities) === 1) {
@@ -171,9 +170,11 @@ class AiCapabilityPolicy
         if (isset($capabilities[self::VIEW_DEMAND_FORECAST])) {
             $help[] = 'demand forecasts';
         }
-        if (isset($capabilities[self::VIEW_PROCUREMENT_PRIORITIES])) {
-            $help[] = 'procurement priorities';
-        }
+        // Procurement priorities are intentionally absent from this list. They
+        // are answered by AI Decision Support on the Demand Forecast page, so
+        // advertising them here would send users to a panel that no longer
+        // handles the question. The capability itself is retained because that
+        // panel authorises against it.
         if (isset($capabilities[self::VIEW_EXECUTIVE_REPORTS])) {
             $help[] = 'reports';
         }

@@ -245,14 +245,29 @@ test('live chat ranks Laravel recommendations and reports use the identical rows
     ]);
     $inventoryBefore = Inventory::query()->orderBy('item_id')->get()->toArray();
     $movementCount = StockMovement::count();
+    $rowCount = count($forecast['forecasts'] ?? []) + count($forecast['insufficient_history'] ?? []);
 
     $chat = $this->actingAs($user)
         ->postJson(route('ai.chat'), ['message' => 'What are more urgent?'])
         ->assertOk()
         ->assertJsonPath('success', true);
+    // The chat renders a capped, decision-focused table. Available stock,
+    // pending demand, confidence and advisory status moved to the Demand
+    // Forecast page and AI Decision Support, so they are no longer asserted here.
     expect($chat->json('reply'))
-        ->toContain('Advisory forecast priorities', 'Predicted demand', 'Available stock', 'Pending demand', 'Safety stock', 'Suggested quantity', 'Urgent Notebook', '20 boxes', '4 boxes', '5 boxes', '21 boxes', 'Urgent', 'Low', 'Review recommended')
+        ->toContain('Advisory forecast priorities', 'Predicted demand', 'Safety stock', 'Suggested quantity', 'Urgent Notebook', '20 boxes', '5 boxes', '21 boxes', 'Urgent')
         ->toContain('Reserve Binder');
+
+    // A long list must not flood the chat panel: only a capped summary is
+    // rendered, and the complete list is pointed at the Demand Forecast page.
+    if ($rowCount > 10) {
+        $reply = (string) $chat->json('reply');
+
+        expect($reply)->toContain('Showing 10 of '.$rowCount.' items')
+            ->and($reply)->toContain('Demand Forecast')
+            ->and(substr_count($reply, "\n| "))->toBe(10)
+            ->and(strlen($reply))->toBeLessThan(4000);
+    }
 
     $this->getJson(route('api.custodian.reports'))
         ->assertOk()

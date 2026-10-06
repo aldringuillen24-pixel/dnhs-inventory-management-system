@@ -12,7 +12,6 @@ class AiIntentParserService
         'pending_requests',
         'low_stock',
         'forecast',
-        'procurement_priorities',
         'executive_reports',
         'system_summary',
         'inventory_valuation',
@@ -38,7 +37,6 @@ class AiIntentParserService
         'pending_requests',
         'low_stock',
         'forecast',
-        'procurement_priorities',
         'executive_reports',
         'system_summary',
         'inventory_valuation',
@@ -279,7 +277,6 @@ class AiIntentParserService
         $intent = match (true) {
             $parsed['intent'] === 'explanation' => 'explanation',
             $parsed['intent'] === 'forecast' => 'forecast',
-            $parsed['intent'] === 'procurement_priorities' => 'recommendation',
             $usesActiveAction => $activeTopic['prior_intent'] ?? 'factual',
             default => 'factual',
         };
@@ -438,7 +435,7 @@ class AiIntentParserService
     private function systemPrompt(): string
     {
         return 'Classify the user question only. Do not answer it, access data, or propose actions. Return one JSON object with exactly these keys: intent, topic_action, item_name, inventory_id, serial_number, location_query, filters, query, response_type, explanation, explanation_topic. '
-            .'intent must be availability, stock, pending_requests, low_stock, forecast, procurement_priorities, executive_reports, system_summary, inventory_valuation, own_assignments, own_requests, item_status, assignments, maintenance, disposal, ready_to_dispose, location, purchase_history, explanation, continue, inherit, unsupported, or unclear. '
+            .'intent must be availability, stock, pending_requests, low_stock, forecast, executive_reports, system_summary, inventory_valuation, own_assignments, own_requests, item_status, assignments, maintenance, disposal, ready_to_dispose, location, purchase_history, explanation, continue, inherit, unsupported, or unclear. Procurement and restock questions are not handled here; classify them as unsupported. '
             .'topic_action must be continue_topic, new_topic, or unclear. Use continue when the message only refers to the active topic and inherit when a new named item continues the active topic action. Use an active topic only for follow-ups or action inheritance; otherwise classify the new request independently. '
             .'Map explanation questions to intent explanation and set explanation_topic to the supported fact topic; otherwise explanation_topic must be null. Use only item names, inventory IDs, serial numbers, location names, units, and category IDs explicitly stated in the question; use null when absent. '
             .'filters must contain exactly category_id and unit. query must be null, pending_count, inventory_identifiers, or product_name. Use pending_count only when explicitly counting pending requests; use inventory_identifiers only when asking for an inventory number, ID, or asset tag; use product_name only when asking for the product name. For ordinary availability or stock questions, query must be null, including count questions. '

@@ -15,6 +15,17 @@ class AiInventoryService
 
     public function ask(User $user, string $question, array $result, array $history = []): string
     {
+        // Procurement and restock questions are answered by AI Decision Support
+        // on the Demand Forecast page. This assistant no longer routes them, so
+        // it points users there instead of returning an unrelated or empty
+        // answer. Checked first so it does not depend on how the question was
+        // classified.
+        if ($this->isProcurementQuestion($question)) {
+            return 'Procurement questions are handled by AI Decision Support on the Demand Forecast page. '
+                .'Open Demand Forecast in the sidebar and ask "What should we purchase first?" there. '
+                .'This assistant covers stock, assignments, requests, locations, low-stock items, maintenance, disposal, and reports.';
+        }
+
         if (($result['status'] ?? null) !== 'success') {
             return ($result['status'] ?? null) === 'forbidden'
                 ? 'That information is not available for your role.'
@@ -50,6 +61,35 @@ class AiInventoryService
         }
 
         return $this->localExplanation($localPacket);
+    }
+
+    /**
+     * Recognises questions about what to buy or reorder.
+     *
+     * Deliberately narrow: it must catch restock and procurement-priority
+     * wording without swallowing ordinary stock or forecast questions, which
+     * this assistant still answers.
+     */
+    private function isProcurementQuestion(string $question): bool
+    {
+        $patterns = [
+            '/\bwhat (?:should|do) (?:we|i) (?:buy|purchase|order|restock|procure)\b/i',
+            '/\b(?:purchase|procure|restock|re-?order|replenish)\s+(?:priorit|list|first|plan)/i',
+            '/\bprocurement\s+(?:priorit|list|plan|recommend)/i',
+            '/\bshould (?:we|i) (?:buy|order|restock)\b/i',
+            '/\bwhich items? (?:should|do) (?:we|i) (?:buy|order|restock|procure)\b/i',
+            '/\b(?:top|highest)\s+procurement\b/i',
+            '/\bwhat can (?:wait|defer)\b/i',
+            '/\bdefer(?:able)?\s+purchase/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $question) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function explainComparison(User $user, array $result): string

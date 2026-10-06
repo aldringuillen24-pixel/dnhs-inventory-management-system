@@ -6,6 +6,7 @@ use App\Models\Inventory;
 use App\Models\User;
 use App\Services\AiCapabilityPolicy;
 use App\Services\AiInventoryService;
+use App\Services\GeminiApiService;
 use App\Services\InventoryAnswerService;
 use Tests\Support\LegacyAssistantTestRouter as InventoryQuestionRouter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -52,7 +53,6 @@ test('each supported parsed intent maps to one allowlisted application capabilit
         'pending_requests' => AiCapabilityPolicy::VIEW_PENDING_REQUESTS,
         'low_stock' => AiCapabilityPolicy::VIEW_LOW_STOCK,
         'forecast' => AiCapabilityPolicy::VIEW_DEMAND_FORECAST,
-        'procurement_priorities' => AiCapabilityPolicy::VIEW_PROCUREMENT_PRIORITIES,
         'executive_reports' => AiCapabilityPolicy::VIEW_EXECUTIVE_REPORTS,
         'system_summary' => AiCapabilityPolicy::VIEW_SYSTEM_SUMMARY,
         'inventory_valuation' => AiCapabilityPolicy::VIEW_INVENTORY_VALUATION,
@@ -74,15 +74,59 @@ test('each supported parsed intent maps to one allowlisted application capabilit
 
     expect($policy->capabilityForIntent('unsupported'))->toBeNull()
         ->and($policy->capabilityForIntent('sql'))->toBeNull();
+
+    // Procurement priorities moved to AI Decision Support on the Demand Forecast
+    // page. The capability still exists, because that panel authorises against
+    // it, but the generic assistant must no longer route the intent.
+    expect($policy->capabilityForIntent('procurement_priorities'))->toBeNull()
+        ->and($policy->isKnownCapability(AiCapabilityPolicy::VIEW_PROCUREMENT_PRIORITIES))->toBeTrue();
 });
 
-test('the assistant welcome message matches each role capability set', function () {
-    $policy = new AiCapabilityPolicy();
+test('procurement questions are redirected to AI Decision Support', function () {
+    $service = new AiInventoryService(new AiCapabilityPolicy(), new GeminiApiService());
+
+    $redirected = [
+        'What should we purchase first?',
+        'what should we buy first',
+        'which items should we order',
+        'Should we restock Bond Paper?',
+        'give me a procurement priority list',
+        'what can wait?',
+    ];
+
+    foreach ($redirected as $question) {
+        $reply = $service->ask(
+            roleScopeUser('Property Custodian'),
+            $question,
+            ['status' => 'success', 'intent' => 'unsupported', 'capability' => null, 'answer' => []],
+        );
+
+        expect($reply)->toContain('AI Decision Support')
+            ->and($reply)->toContain('Demand Forecast');
+    }
+});
+
+test('the assistant still answers stock and forecast questions', function () {
+    $service = new AiInventoryService(new AiCapabilityPolicy(), new GeminiApiService());
+
+    // The redirect must not swallow ordinary questions this assistant owns.
+    foreach (['How many bond papers are in stock?', 'What is the demand forecast?'] as $question) {
+        $reply = $service->ask(
+            roleScopeUser('Property Custodian'),
+            $question,
+            ['status' => 'success', 'intent' => 'stock', 'capability' => AiCapabilityPolicy::VIEW_INVENTORY_STOCK, 'answer' => []],
+        );
+
+        expect($reply)->not->toContain('AI Decision Support');
+    }
+});
+
+test('the assistant welcome message matches each role capability set', function () {    $policy = new AiCapabilityPolicy();
 
     expect($policy->assistantHelpText(roleScopeUser('End User')))->toBe(
         'I can only provide information available for your role.'
     )->and($policy->assistantHelpText(roleScopeUser('Property Custodian')))->toBe(
-        'I can help with stock availability, inventory stock, inventory locations, pending requests, low-stock items, demand forecasts, procurement priorities, reports, inventory valuation, assignment records, maintenance records, disposal records, items ready for disposal, purchase history, item status, requests, and assigned items.'
+        'I can help with stock availability, inventory stock, inventory locations, pending requests, low-stock items, demand forecasts, reports, inventory valuation, assignment records, maintenance records, disposal records, items ready for disposal, purchase history, item status, requests, and assigned items.'
     )->and($policy->assistantHelpText(roleScopeUser('School Head')))->toBe(
         'I can only provide information available for your role.'
     )->and($policy->assistantHelpText(roleScopeUser('Administrator')))->toBe(

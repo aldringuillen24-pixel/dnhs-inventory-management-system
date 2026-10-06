@@ -56,7 +56,6 @@ class InventoryAnswerService
             AiCapabilityPolicy::VIEW_PENDING_REQUESTS => $this->pendingRequests($routedQuestion),
             AiCapabilityPolicy::VIEW_LOW_STOCK => $this->lowStock($routedQuestion),
             AiCapabilityPolicy::VIEW_DEMAND_FORECAST => $this->forecast($routedQuestion),
-            AiCapabilityPolicy::VIEW_PROCUREMENT_PRIORITIES => $this->procurementPriorities(),
             AiCapabilityPolicy::VIEW_EXECUTIVE_REPORTS => $this->executiveSummary(),
             AiCapabilityPolicy::VIEW_SYSTEM_SUMMARY => $this->systemSummary(),
             AiCapabilityPolicy::VIEW_INVENTORY_VALUATION => $this->inventoryValuation($routedQuestion),
@@ -1067,21 +1066,6 @@ class InventoryAnswerService
         }
 
         return $this->result('success', $request['intent'], $request['capability'], ['items' => $items]);
-    }
-
-    protected function procurementPriorities(): array
-    {
-        $stock = $this->stockRows();
-        $pending = AssignmentRequest::query()->where('status', 'waiting for approval')->get(['item_id', 'quantity'])
-            ->load('item:item_id,item_name')->groupBy(fn (AssignmentRequest $request): string => $request->item?->item_name ?? 'Item')
-            ->map(fn ($group): int => (int) $group->sum('quantity'));
-        $items = collect($stock)->map(function (array $item) use ($pending): array {
-            $item['pending_quantity'] = $pending[$item['item_name']] ?? 0;
-            $item['priority_score'] = max(0, 3 - $item['available_quantity']) + $item['pending_quantity'];
-            return $item;
-        })->sortByDesc('priority_score')->values()->all();
-
-        return $this->result('success', 'recommendation', AiCapabilityPolicy::VIEW_PROCUREMENT_PRIORITIES, ['items' => $items]);
     }
 
     protected function forecast(array $request): array

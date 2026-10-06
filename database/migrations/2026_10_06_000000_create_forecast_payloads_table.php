@@ -23,7 +23,10 @@ return new class extends Migration
             // 'live' is the trained production forecast; 'demo' is the isolated
             // sample run. One row per source: retraining replaces the row.
             $table->string('source_type', 16)->unique();
-            $table->longText('payload');
+            // Nullable because a failed or in-flight training run records its
+            // state without producing a document. Making this NOT NULL meant a
+            // failed run could not be recorded at all, which hid the failure.
+            $table->longText('payload')->nullable();
             $table->timestamp('generated_at')->nullable();
             // 'running' | 'success' | 'failed', mirroring the previous
             // training-status.json file. Kept here so a failed or in-flight run

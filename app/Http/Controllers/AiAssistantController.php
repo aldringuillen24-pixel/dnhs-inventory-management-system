@@ -21,6 +21,14 @@ class AiAssistantController extends Controller
     private const COMPARISON_CONTEXT_SESSION_PREFIX = 'ai.inventory_comparison_context.user.';
     private const FORECAST_CONTEXT_SESSION_PREFIX = 'ai.demand_forecast_context.user.';
 
+    /**
+     * Maximum forecast rows rendered into a single chat message.
+     *
+     * The assistant is a conversational surface, not a data grid. Anything
+     * longer belongs on the Demand Forecast page.
+     */
+    private const MAX_TABLE_ROWS = 10;
+
     public function __construct(
         protected AiIntentParserService $intentParser,
         protected InventoryAnswerService $answerService,
@@ -685,23 +693,50 @@ class AiAssistantController extends Controller
             : $rows->filter(fn (array $row): bool => stripos($question, $row['item_name']) !== false)->values();
     }
 
+    /**
+     * Renders forecast rows as a markdown table, capped and summarised.
+     *
+     * The full forecast runs to 99 rows across 9 columns. Emitting all of it
+     * produced a message that overwhelmed the chat panel and was unreadable, so
+     * only the most useful rows appear and the complete list is pointed at the
+     * Demand Forecast page, which paginates, filters and exports it properly.
+     */
     private function formatForecastTable(array $rows, ?string $period, bool $ranked): string
     {
         if ($rows === []) {
             return 'No validated forecast rows are available for this scope.';
         }
 
+        $total = count($rows);
+        $shown = array_slice($rows, 0, self::MAX_TABLE_ROWS);
+
         $title = $ranked ? 'Advisory forecast priorities' : 'Validated ML demand forecast';
         $lines = [
             "{$title} for ".($period ?: 'the stored forecast period').'. Advisory only; no inventory changes or purchase orders are created.',
-            '| Item | Predicted demand | Available stock | Pending demand | Safety stock | Suggested quantity | Priority | Confidence | Advisory status |',
-            '|---|---:|---:|---:|---:|---:|---|---|---|',
         ];
-        foreach ($rows as $row) {
-            $lines[] = '| '.$row['item_name'].' (ID '.$row['inventory_id'].') | '.$row['forecast_demand'].' '.$row['unit']
-                .' | '.$row['available_stock'].' '.$row['unit'].' | '.$row['pending_demand'].' '.$row['unit']
-                .' | '.$row['safety_stock'].' '.$row['unit'].' | '.$row['suggested_procurement'].' '.$row['unit']
-                .' | '.$row['priority'].' | '.$row['confidence'].' | '.$row['advisory_status'].' |';
+
+        if ($total > count($shown)) {
+            $lines[] = 'Showing '.count($shown).' of '.$total.' items.';
+        }
+
+        // Narrowed to the decision columns. The removed ones (available stock,
+        // pending demand, confidence, advisory status) are still shown on the
+        // Demand Forecast page and explained by AI Decision Support.
+        $lines[] = '| Item | Predicted demand | Safety stock | Suggested quantity | Priority |';
+        $lines[] = '|---|---:|---:|---:|---|';
+
+        foreach ($shown as $row) {
+            $lines[] = '| '.$row['item_name'].' (ID '.$row['inventory_id'].') | '
+                .($row['forecast_demand'] ?? 'N/A').' '.($row['unit'] ?? '')
+                .' | '.($row['safety_stock'] ?? 'N/A').' '.($row['unit'] ?? '')
+                .' | '.($row['suggested_procurement'] ?? 'N/A').' '.($row['unit'] ?? '')
+                .' | '.($row['priority'] ?? '—').' |';
+        }
+
+        if ($total > count($shown)) {
+            $lines[] = '';
+            $lines[] = 'That is a summary, not the full list. Open **Demand Forecast** in the sidebar to filter and sort all '
+                .$total.' items and export them as a PDF, or use **AI Decision Support** there to ask what to buy first.';
         }
 
         return implode("\n", $lines);

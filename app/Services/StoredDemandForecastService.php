@@ -333,6 +333,17 @@ class StoredDemandForecastService
         $record = ForecastPayload::query()->where('source_type', ForecastPayload::SOURCE_LIVE)->first();
 
         if ($record !== null) {
+            // A row exists but may hold no document yet: a run that is in
+            // progress or failed before writing output. The training status is
+            // what matters there, and read() refuses to serve it.
+            if (! is_string($record->payload) || trim($record->payload) === '') {
+                return [
+                    'payload' => '{}',
+                    'training_status' => (string) $record->training_status,
+                    'source' => 'database',
+                ];
+            }
+
             return [
                 'payload' => (string) $record->payload,
                 'training_status' => (string) $record->training_status,

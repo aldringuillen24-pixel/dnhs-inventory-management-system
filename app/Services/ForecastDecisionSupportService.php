@@ -340,6 +340,12 @@ class ForecastDecisionSupportService
             'deferrable' => $rows->filter(fn (array $row): bool => ($row['status'] ?? null) === 'success'
                 && ($row['needs_procurement'] ?? false) === false)->count(),
             'insufficient_history' => $rows->where('status', 'insufficient_history')->count(),
+            // Rows matching the verify-first filter across the WHOLE forecast,
+            // not just this selection. Without it the provider states this total
+            // itself, which the grounding check then rejects as an invented
+            // figure, so a correct reply was silently downgraded.
+            'verify_first_total' => $rows->filter(fn (array $row): bool => ($row['status'] ?? null) !== 'success'
+                || in_array($row['confidence'] ?? null, ['Low', 'Medium'], true))->count(),
             // Rows that would be acted on but rest on weak history. These are the
             // ones worth a verification step; counting every Low/Medium row,
             // including items nobody is buying, produced a warning about all 99.
