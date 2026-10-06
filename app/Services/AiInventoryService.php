@@ -6,11 +6,17 @@ use App\Models\User;
 
 class AiInventoryService
 {
+    protected ProcurementQuestionMatcher $procurementMatcher;
+
     public function __construct(
         protected AiCapabilityPolicy $policy,
         protected GeminiApiService $geminiApi,
+        ?ProcurementQuestionMatcher $procurementMatcher = null,
     )
     {
+        // Nullable so existing direct construction (tests, and any future
+        // caller) keeps working; the container always supplies the singleton.
+        $this->procurementMatcher = $procurementMatcher ?? new ProcurementQuestionMatcher();
     }
 
     public function ask(User $user, string $question, array $result, array $history = []): string
@@ -20,7 +26,7 @@ class AiInventoryService
         // it points users there instead of returning an unrelated or empty
         // answer. Checked first so it does not depend on how the question was
         // classified.
-        if ($this->isProcurementQuestion($question)) {
+        if ($this->procurementMatcher->matches($question)) {
             return 'Procurement questions are handled by AI Decision Support on the Demand Forecast page. '
                 .'Open Demand Forecast in the sidebar and ask "What should we purchase first?" there. '
                 .'This assistant covers stock, assignments, requests, locations, low-stock items, maintenance, disposal, and reports.';
@@ -66,32 +72,12 @@ class AiInventoryService
     /**
      * Recognises questions about what to buy or reorder.
      *
-     * Deliberately narrow: it must catch restock and procurement-priority
-     * wording without swallowing ordinary stock or forecast questions, which
-     * this assistant still answers.
+     * Procurement questions are delegated to AI Decision Support, so this is
+     * now the shared ProcurementQuestionMatcher rather than a second private
+     * copy of a narrower pattern list.
+     *
+     * @see ProcurementQuestionMatcher
      */
-    private function isProcurementQuestion(string $question): bool
-    {
-        $patterns = [
-            '/\bwhat (?:should|do) (?:we|i) (?:buy|purchase|order|restock|procure)\b/i',
-            '/\b(?:purchase|procure|restock|re-?order|replenish)\s+(?:priorit|list|first|plan)/i',
-            '/\bprocurement\s+(?:priorit|list|plan|recommend)/i',
-            '/\bshould (?:we|i) (?:buy|order|restock)\b/i',
-            '/\bwhich items? (?:should|do) (?:we|i) (?:buy|order|restock|procure)\b/i',
-            '/\b(?:top|highest)\s+procurement\b/i',
-            '/\bwhat can (?:wait|defer)\b/i',
-            '/\bdefer(?:able)?\s+purchase/i',
-        ];
-
-        foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $question) === 1) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     public function explainComparison(User $user, array $result): string
     {
         $fallback = is_string($result['explanation'] ?? null)
