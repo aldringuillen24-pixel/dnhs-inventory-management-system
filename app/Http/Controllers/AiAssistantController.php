@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\AiInventoryService;
 use App\Services\AiCapabilityPolicy;
+use App\Services\Conversation\ConversationContextManager;
 use App\Services\ForecastExplanationService;
 use App\Services\InventoryAnswerService;
 use App\Services\AiIntentParserService;
@@ -16,11 +17,6 @@ use Illuminate\Support\Facades\Log;
 
 class AiAssistantController extends Controller
 {
-    private const CONTEXT_SESSION_PREFIX = 'ai.inventory_context.user.';
-    private const CLARIFICATION_SESSION_PREFIX = 'ai.inventory_clarification.user.';
-    private const COMPARISON_CONTEXT_SESSION_PREFIX = 'ai.inventory_comparison_context.user.';
-    private const FORECAST_CONTEXT_SESSION_PREFIX = 'ai.demand_forecast_context.user.';
-
     /**
      * Maximum forecast rows rendered into a single chat message.
      *
@@ -36,7 +32,8 @@ class AiAssistantController extends Controller
         protected AiCapabilityPolicy $capabilityPolicy,
         protected InventoryComparisonService $comparisonService,
         protected StoredDemandForecastService $storedForecastService,
-        protected ForecastExplanationService $forecastExplanationService
+        protected ForecastExplanationService $forecastExplanationService,
+        protected ConversationContextManager $conversationContext,
     ) {}
 
     /**
@@ -64,10 +61,7 @@ class AiAssistantController extends Controller
         // Check if the user has permission to use the AI assistant
         if (!$this->capabilityPolicy->canUseAssistant($user)) {
             if ($request->hasSession()) {
-                $request->session()->forget($this->contextSessionKey((int) $user->getAuthIdentifier()));
-                $request->session()->forget($this->clarificationSessionKey((int) $user->getAuthIdentifier()));
-                $request->session()->forget($this->comparisonContextSessionKey((int) $user->getAuthIdentifier()));
-                $request->session()->forget($this->forecastContextSessionKey((int) $user->getAuthIdentifier()));
+                $this->conversationContext->forgetAll($request, $user);
             }
 
             return response()->json([
@@ -79,11 +73,7 @@ class AiAssistantController extends Controller
         // Process the user's message and generate a response
         try {
             if ($this->comparisonService->isComparisonRequest($validated['message'])) {
-                $userId = (int) $user->getAuthIdentifier();
-                $request->session()->forget($this->contextSessionKey($userId));
-                $request->session()->forget($this->clarificationSessionKey($userId));
-                $request->session()->forget($this->comparisonContextSessionKey($userId));
-                $request->session()->forget($this->forecastContextSessionKey($userId));
+                $this->conversationContext->forgetAll($request, $user);
 
                 return response()->json([
                     'success' => true,
@@ -93,43 +83,37 @@ class AiAssistantController extends Controller
                 ]);
             }
 
-            $forecastContextKey = $this->forecastContextSessionKey((int) $user->getAuthIdentifier());
-            $forecastContext = $this->loadForecastContext($request, $user, $forecastContextKey);
+            $state = $this->conversationContext->loadState($request, $user);
+            $forecastContext = $state->forecast;
             $explicitDemoRequest = $this->isDemoForecastRequest($validated['message']);
             $forecastRequest = $this->isForecastRequest($validated['message']);
             $forecastFollowUp = $forecastContext !== null && $this->isForecastFollowUp($validated['message']);
             if ($explicitDemoRequest || $forecastRequest || $this->isUrgencyQuestion($validated['message'])
                 || $this->isProcurementQuestion($validated['message']) || $forecastFollowUp) {
-                $request->session()->forget($this->contextSessionKey((int) $user->getAuthIdentifier()));
-                $request->session()->forget($this->clarificationSessionKey((int) $user->getAuthIdentifier()));
-                $request->session()->forget($this->comparisonContextSessionKey((int) $user->getAuthIdentifier()));
+                $this->conversationContext->forgetNonForecastContext($request, $user);
 
                 return $this->forecastChatReply(
                     $request,
                     $user,
                     $validated['message'],
-                    $forecastContextKey,
+                    $this->conversationContext->forecastContextKey((int) $user->getAuthIdentifier()),
                     $forecastContext,
                     $explicitDemoRequest,
                 );
             }
             if ($forecastContext !== null) {
-                $request->session()->forget($forecastContextKey);
+                $request->session()->forget($this->conversationContext->forecastContextKey((int) $user->getAuthIdentifier()));
             }
 
-            // Generate session keys for context and clarification based on the user's ID
-            $sessionKey = $this->contextSessionKey((int) $user->getAuthIdentifier());
-            $comparisonContextKey = $this->comparisonContextSessionKey((int) $user->getAuthIdentifier());
-
-            $comparisonContext = $this->loadComparisonContext($request, $user, $comparisonContextKey);
+            $comparisonContext = $state->comparison;
             if ($comparisonContext !== null) {
                 if ($this->comparisonService->isComparisonFollowUp($validated['message'], $comparisonContext)) {
                     if ($this->comparisonService->comparisonFollowUpMentionsOtherPeriods($validated['message'], $comparisonContext)) {
                         $reply = 'That question mentions different months from the latest confirmed comparison. Please name a new comparison to check those periods.';
-                        $request->session()->forget($comparisonContextKey);
+                        $request->session()->forget($this->conversationContext->comparisonContextKey((int) $user->getAuthIdentifier()));
                     } else {
                         $reply = $this->aiService->explainComparisonFollowUp($user, $comparisonContext);
-                        $this->storeComparisonContext($request, $user, $comparisonContextKey, $comparisonContext);
+                        $this->conversationContext->storeComparisonContext($request, $user, $comparisonContext);
                     }
 
                     return response()->json([
@@ -139,20 +123,17 @@ class AiAssistantController extends Controller
                     ]);
                 }
 
-                $request->session()->forget($comparisonContextKey);
+                $request->session()->forget($this->conversationContext->comparisonContextKey((int) $user->getAuthIdentifier()));
             }
 
-            // Generate a session key for clarification context
-            $clarificationKey = $this->clarificationSessionKey((int) $user->getAuthIdentifier());
-
             // Load the current conversation context from the session, if available
-            $context = $this->loadContext($request, $user, $sessionKey);
+            $context = $state->topic;
 
             // If a context exists, attempt to resolve it using the answer service
             if ($context !== null) {
                 $resolvedContext = $this->answerService->resolveConversationContext($user, $context);
                 if ($resolvedContext === null) {
-                    $request->session()->forget($sessionKey);
+                    $request->session()->forget($this->conversationContext->contextKey((int) $user->getAuthIdentifier()));
                     $context = null;
                 } else {
                     $context = $resolvedContext;
@@ -160,16 +141,11 @@ class AiAssistantController extends Controller
             }
 
             // Load any pending clarification context from the session
-            $pendingRecord = $this->loadSessionRecord($request, $user, $clarificationKey);
-
-            // Determine if there is a pending clarification and extract it
-            $pendingClarification = is_array($pendingRecord['context'] ?? null)
-                ? $pendingRecord['context']
-                : null;
+            $pendingClarification = $state->pendingClarification;
             if ($pendingClarification !== null) {
                 $pendingClarification = $this->answerService->refreshClarificationContext($user, $pendingClarification);
                 if ($pendingClarification === null) {
-                    $request->session()->forget($clarificationKey);
+                    $request->session()->forget($this->conversationContext->clarificationKey((int) $user->getAuthIdentifier()));
                 }
             }
             $routedQuestion = null;
@@ -178,9 +154,9 @@ class AiAssistantController extends Controller
             if ($pendingClarification !== null) {
                 $routedQuestion = $this->answerService->resolveClarification($user, $pendingClarification, $validated['message']);
                 if ($routedQuestion !== null) {
-                    $request->session()->forget($clarificationKey);
+                    $request->session()->forget($this->conversationContext->clarificationKey((int) $user->getAuthIdentifier()));
                     $context = null;
-                    $request->session()->forget($sessionKey);
+                    $request->session()->forget($this->conversationContext->contextKey((int) $user->getAuthIdentifier()));
                 } else {
                     $clarificationAction = [
                         'prior_intent' => $pendingClarification['intent'] ?? null,
@@ -194,7 +170,7 @@ class AiAssistantController extends Controller
                     $startsNewUnsupportedQuestion = ($newQuestion['intent'] ?? null) === 'unsupported';
 
                     if ($startsNewSupportedQuestion || $startsNewUnsupportedQuestion) {
-                        $request->session()->forget($clarificationKey);
+                        $request->session()->forget($this->conversationContext->clarificationKey((int) $user->getAuthIdentifier()));
                         $routedQuestion = $newQuestion;
                     } else {
                         $routedQuestion = [
@@ -217,7 +193,7 @@ class AiAssistantController extends Controller
                     }
                 }
             } elseif ($pendingClarification !== null) {
-                $request->session()->forget($clarificationKey);
+                $request->session()->forget($this->conversationContext->clarificationKey((int) $user->getAuthIdentifier()));
                 $pendingClarification = null;
             }
 
@@ -231,7 +207,7 @@ class AiAssistantController extends Controller
             }
 
             if (($routedQuestion['follow_up'] ?? false) && ($result['status'] ?? null) === 'forbidden') {
-                $request->session()->forget($sessionKey);
+                $request->session()->forget($this->conversationContext->contextKey((int) $user->getAuthIdentifier()));
                 $result = [
                     'status' => 'clarification',
                     'intent' => 'clarification',
@@ -259,8 +235,8 @@ class AiAssistantController extends Controller
                 ? $this->aiService->ask($user, $validated['message'], $result)
                 : $this->answerService->localReply($result, $user);
 
-            $this->updateContext($request, $user, $sessionKey, $routedQuestion, $result);
-            $this->updateClarification($request, $user, $clarificationKey, $routedQuestion, $result);
+            $this->conversationContext->updateContext($request, $user, $routedQuestion, $result);
+            $this->conversationContext->updateClarification($request, $user, $routedQuestion, $result);
 
             return response()->json([
                 'success' => true,
@@ -282,12 +258,12 @@ class AiAssistantController extends Controller
         $result = $this->comparisonService->compare($request->comparisonData());
         $user = $request->user();
         $userId = (int) $user->getAuthIdentifier();
-        $contextKey = $this->comparisonContextSessionKey($userId);
-        $request->session()->forget($this->contextSessionKey($userId));
-        $request->session()->forget($this->clarificationSessionKey($userId));
+        $contextKey = $this->conversationContext->comparisonContextKey($userId);
+        $request->session()->forget($this->conversationContext->contextKey($userId));
+        $request->session()->forget($this->conversationContext->clarificationKey($userId));
         $summary = $this->comparisonService->comparisonContextSummary($result);
         if ($summary !== null) {
-            $this->storeComparisonContext($request, $user, $contextKey, $summary);
+            $this->conversationContext->storeComparisonContext($request, $user, $summary);
         } else {
             $request->session()->forget($contextKey);
         }
@@ -302,34 +278,13 @@ class AiAssistantController extends Controller
     public function reset(Request $request): JsonResponse
     {
         if ($request->hasSession()) {
-            $userId = (int) $request->user()->getAuthIdentifier();
-            $request->session()->forget($this->contextSessionKey($userId));
-            $request->session()->forget($this->clarificationSessionKey($userId));
-            $request->session()->forget($this->comparisonContextSessionKey($userId));
-            $request->session()->forget($this->forecastContextSessionKey($userId));
+            $user = $request->user();
+            if ($user !== null) {
+                $this->conversationContext->forgetAll($request, $user);
+            }
         }
 
         return response()->json(['success' => true]);
-    }
-
-    private function contextSessionKey(int $userId): string
-    {
-        return self::CONTEXT_SESSION_PREFIX . $userId;
-    }
-
-    private function clarificationSessionKey(int $userId): string
-    {
-        return self::CLARIFICATION_SESSION_PREFIX . $userId;
-    }
-
-    private function comparisonContextSessionKey(int $userId): string
-    {
-        return self::COMPARISON_CONTEXT_SESSION_PREFIX . $userId;
-    }
-
-    private function forecastContextSessionKey(int $userId): string
-    {
-        return self::FORECAST_CONTEXT_SESSION_PREFIX . $userId;
     }
 
     private function isForecastRequest(string $message): bool
@@ -367,46 +322,12 @@ class AiAssistantController extends Controller
 
     private function loadForecastContext(Request $request, \App\Models\User $user, string $sessionKey): ?array
     {
-        if (! $request->hasSession()) {
-            return null;
-        }
-        if (! $this->capabilityPolicy->allows($user, AiCapabilityPolicy::VIEW_DEMAND_FORECAST)) {
-            $request->session()->forget($sessionKey);
-
-            return null;
-        }
-
-        $stored = $this->loadSessionRecord($request, $user, $sessionKey);
-        $context = $stored['context'] ?? null;
-        if (! is_array($context)
-            || ! in_array($context['source_type'] ?? null, ['live', 'demo'], true)
-            || ! is_array($context['inventory_ids'] ?? null)
-            || ! is_string($context['forecast_period'] ?? null)
-            || (isset($context['selected_inventory_id'])
-                && (! is_int($context['selected_inventory_id'])
-                    || ! in_array($context['selected_inventory_id'], $context['inventory_ids'], true)))) {
-            if ($stored !== null) {
-                $request->session()->forget($sessionKey);
-            }
-
-            return null;
-        }
-
-        return $context;
+        return $this->conversationContext->loadForecastContext($request, $user);
     }
 
     private function storeForecastContext(Request $request, \App\Models\User $user, string $sessionKey, array $context): void
     {
-        if (! $request->hasSession() || ! $this->capabilityPolicy->allows($user, AiCapabilityPolicy::VIEW_DEMAND_FORECAST)) {
-            return;
-        }
-
-        $ttlMinutes = max(1, (int) config('inventory.ai_context_ttl_minutes', 15));
-        $request->session()->put($sessionKey, [
-            'user_id' => (int) $user->getAuthIdentifier(),
-            'expires_at' => now()->addMinutes($ttlMinutes)->timestamp,
-            'context' => $context,
-        ]);
+        $this->conversationContext->storeForecastContext($request, $user, $context);
     }
 
     private function forecastChatReply(
@@ -788,46 +709,6 @@ class AiAssistantController extends Controller
         return preg_match('/\b(?:sample|demo)\b.*\b(?:demand|forecast)\b|\b(?:demand|forecast)\b.*\b(?:sample|demo)\b/iu', $message) === 1;
     }
 
-    private function loadComparisonContext(Request $request, \App\Models\User $user, string $sessionKey): ?array
-    {
-        if (! $request->hasSession()) {
-            return null;
-        }
-        if ($user->role?->role_name !== 'Property Custodian') {
-            $request->session()->forget($sessionKey);
-
-            return null;
-        }
-
-        $stored = $this->loadSessionRecord($request, $user, $sessionKey);
-        if ($stored === null) {
-            return null;
-        }
-
-        $summary = $this->comparisonService->validateComparisonContextSummary($stored['context']);
-        if ($summary === null) {
-            $request->session()->forget($sessionKey);
-
-            return null;
-        }
-
-        return $summary;
-    }
-
-    private function storeComparisonContext(Request $request, \App\Models\User $user, string $sessionKey, array $summary): void
-    {
-        if (! $request->hasSession() || $user->role?->role_name !== 'Property Custodian') {
-            return;
-        }
-
-        $ttlMinutes = max(1, (int) config('inventory.ai_context_ttl_minutes', 15));
-        $request->session()->put($sessionKey, [
-            'user_id' => (int) $user->getAuthIdentifier(),
-            'expires_at' => now()->addMinutes($ttlMinutes)->timestamp,
-            'context' => $summary,
-        ]);
-    }
-
     private function applicationFollowUp(string $question, ?array $context): ?array
     {
         $normalized = mb_strtolower(trim($question));
@@ -938,111 +819,5 @@ class AiAssistantController extends Controller
             'entity_candidate' => $context['item_name'] ?? null,
             'entity_candidate_status' => 'resolved',
         ];
-    }
-
-    private function loadContext(Request $request, \App\Models\User $user, string $sessionKey): ?array
-    {
-        if (! $request->hasSession()) {
-            return null;
-        }
-
-        $stored = $this->loadSessionRecord($request, $user, $sessionKey);
-        if ($stored === null) {
-            return null;
-        }
-
-        return $stored['context'];
-    }
-
-    private function loadSessionRecord(Request $request, \App\Models\User $user, string $sessionKey): ?array
-    {
-        if (! $request->hasSession()) {
-            return null;
-        }
-
-        $stored = $request->session()->get($sessionKey);
-        if ($stored === null) {
-            return null;
-        }
-
-        if (
-            ! is_array($stored)
-            || (int) ($stored['user_id'] ?? 0) !== (int) $user->getAuthIdentifier()
-            || ! is_int($stored['expires_at'] ?? null)
-            || $stored['expires_at'] <= now()->timestamp
-            || ! is_array($stored['context'] ?? null)
-        ) {
-            $request->session()->forget($sessionKey);
-
-            return null;
-        }
-
-        return $stored;
-    }
-
-    private function updateContext(
-        Request $request,
-        \App\Models\User $user,
-        string $sessionKey,
-        array $routedQuestion,
-        array $result,
-    ): void {
-        if (! $request->hasSession()) {
-            return;
-        }
-
-        if (($result['status'] ?? null) === 'success') {
-            $context = $this->answerService->conversationContext($user, $routedQuestion, $result);
-            if ($context !== null) {
-                $ttlMinutes = max(1, (int) config('inventory.ai_context_ttl_minutes', 15));
-                $request->session()->put($sessionKey, [
-                    'user_id' => (int) $user->getAuthIdentifier(),
-                    'expires_at' => now()->addMinutes($ttlMinutes)->timestamp,
-                    'context' => $context,
-                ]);
-
-                return;
-            }
-        }
-
-        $request->session()->forget($sessionKey);
-    }
-
-    private function updateClarification(
-        Request $request,
-        \App\Models\User $user,
-        string $sessionKey,
-        array $routedQuestion,
-        array $result,
-    ): void {
-        if (! $request->hasSession()) {
-            return;
-        }
-
-        if (($result['status'] ?? null) === 'unsupported'
-            || (($routedQuestion['intent'] ?? null) === 'unsupported' && ($routedQuestion['capability'] ?? null) === null)) {
-            $request->session()->forget($sessionKey);
-
-            return;
-        }
-
-        $pending = ($result['status'] ?? null) === 'clarification'
-            ? $this->answerService->clarificationContext($user, $routedQuestion, $result)
-            : null;
-
-        if ($pending === null) {
-            if (($routedQuestion['intent'] ?? null) !== 'unsupported' || ($routedQuestion['capability'] ?? null) !== null) {
-                $request->session()->forget($sessionKey);
-            }
-
-            return;
-        }
-
-        $ttlMinutes = max(1, (int) config('inventory.ai_context_ttl_minutes', 15));
-        $request->session()->put($sessionKey, [
-            'user_id' => (int) $user->getAuthIdentifier(),
-            'expires_at' => now()->addMinutes($ttlMinutes)->timestamp,
-            'context' => $pending,
-        ]);
     }
 }
