@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Models\ForecastPayload;
 use App\Models\StockMovement;
+use App\Services\StoredDemandForecastService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +21,22 @@ class TrainDemandForecast extends Command
 
     private const LIVE_TRAINING_STATUS_PATH = 'forecast/training-status.json';
 
-    private const DEMAND_CATEGORY_TERMS = [
+    public function __construct(
+        protected StoredDemandForecastService $storedForecastService,
+    )
+    {
+        parent::__construct();
+    }
+
+    /**
+     * Category-name substrings that identify demand-forecastable stock.
+     *
+     * Public so sample-data tooling (SampleForecastHistorySeeder) resolves
+     * eligible categories from this exact list instead of duplicating the
+     * terms, which would let the two drift apart and silently train on
+     * categories the exporter later drops.
+     */
+    public const DEMAND_CATEGORY_TERMS = [
         'consumable', 'supply', 'supplies', 'learning resource', 'office material', 'stationery', 'paper', 'ink', 'marker',
     ];
 
@@ -56,12 +73,23 @@ class TrainDemandForecast extends Command
                 throw new \RuntimeException(trim($process->getErrorOutput()) ?: trim($process->getOutput()) ?: 'Python training process failed.');
             }
 
+            // The file is still written for local work and for the export used
+            // by the training CSV, but the database copy is what any other
+            // instance (a Render cron job, or the web service after a redeploy)
+            // will actually read.
+            $this->storedForecastService->persistTraining(
+                ForecastPayload::SOURCE_LIVE,
+                'success',
+                $disk->get('forecast/forecast.json'),
+            );
+
             $this->writeLiveTrainingStatus($disk, 'success');
             $this->info('Demand forecast trained and saved.');
 
             return self::SUCCESS;
         } catch (\Throwable $exception) {
             $this->writeLiveTrainingStatus($disk, 'failed');
+            $this->storedForecastService->persistTraining(ForecastPayload::SOURCE_LIVE, 'failed');
             Log::error('Demand forecast training failed.', [
                 'exception' => $exception,
                 'csv_path' => $csvPath,

@@ -348,6 +348,21 @@ class ForecastDecisionSupportService
             }
         }
 
+        // Digits inside supplied item and category names are approved facts too.
+        // "Crayon Set 24 Colors" contains a standalone 24, and a reply quoting
+        // that name correctly must not be rejected for it. Only digit runs
+        // glued to a letter (300ml) are excluded, by QUANTITY_PATTERN.
+        foreach (collect(is_array($items) ? $items : []) as $item) {
+            foreach (['item_name', 'category'] as $field) {
+                if (! is_string($item[$field] ?? null)) {
+                    continue;
+                }
+
+                preg_match_all('/\d+/', $item[$field], $nameNumbers);
+                $approved = $approved->merge($nameNumbers[0]);
+            }
+        }
+
         $approved = $approved->unique()->values();
 
         preg_match_all(self::QUANTITY_PATTERN, $this->stripListOrdinals($reply), $matches);

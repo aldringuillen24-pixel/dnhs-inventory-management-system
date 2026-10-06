@@ -3,14 +3,18 @@
 namespace App\Services;
 
 use App\Models\AssignmentRequest;
+use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 class StoredDemandForecastService
 {
     private const FORECAST_PATH = 'forecast/forecast.json';
+
+    private const TRAINING_STATUS_PATH = 'forecast/training-status.json';
 
     public function readDemo(User $user): array
     {
@@ -238,26 +242,24 @@ class StoredDemandForecastService
             return $this->resultWithStatus('forbidden');
         }
 
-        $disk = Storage::disk('forecast');
-
         try {
-            $trainingStatusPath = 'forecast/training-status.json';
-            if ($disk->exists($trainingStatusPath)) {
-                $trainingStatus = json_decode($disk->get($trainingStatusPath), true, 512, JSON_THROW_ON_ERROR);
-                if (! is_array($trainingStatus) || ! in_array($trainingStatus['status'] ?? null, ['running', 'success', 'failed'], true)) {
-                    throw new \UnexpectedValueException('Live forecast training state is invalid.');
-                }
-                if ($trainingStatus['status'] !== 'success') {
-                    return $this->resultWithStatus('failed');
-                }
-            }
-            if (! $disk->exists(self::FORECAST_PATH)) {
+            $resolved = $this->resolveLiveDocument();
+
+            if ($resolved === null) {
                 return $this->resultWithStatus('missing');
             }
 
-            $payload = json_decode($disk->get(self::FORECAST_PATH), true, 512, JSON_THROW_ON_ERROR);
+            // A run that is still in progress, or that failed, must not be
+            // presented as a current result. This is deliberately not a
+            // fallback to the previous good forecast: serving an old result as
+            // if it were fresh would be worse than showing nothing.
+            if ($resolved['training_status'] !== 'success') {
+                return $this->resultWithStatus('failed');
+            }
+
+            $payload = json_decode($resolved['payload'], true, 512, JSON_THROW_ON_ERROR);
             $generatedAt = $this->validateLivePayload($payload);
-        } catch (\Throwable $exception) {
+        } catch (Throwable $exception) {
             report($exception);
 
             return $this->errorResult();
@@ -314,6 +316,86 @@ class StoredDemandForecastService
                 'confidence' => $this->summaryConfidence($successfulRows->pluck('confidence')->all()),
             ],
         ];
+    }
+
+    /**
+     * Locates the trained forecast document and its training state.
+     *
+     * The database is preferred because a Render Cron Job that trains runs in a
+     * different container from the web service, and container filesystems are
+     * ephemeral. The local file is still consulted as a fallback so existing
+     * installs and the test suite keep working unchanged.
+     *
+     * @return array{payload: string, training_status: string, source: string}|null
+     */
+    private function resolveLiveDocument(): ?array
+    {
+        $record = ForecastPayload::query()->where('source_type', ForecastPayload::SOURCE_LIVE)->first();
+
+        if ($record !== null) {
+            return [
+                'payload' => (string) $record->payload,
+                'training_status' => (string) $record->training_status,
+                'source' => 'database',
+            ];
+        }
+
+        $disk = Storage::disk('forecast');
+        $status = 'success';
+
+        if ($disk->exists(self::TRAINING_STATUS_PATH)) {
+            $decoded = json_decode($disk->get(self::TRAINING_STATUS_PATH), true, 512, JSON_THROW_ON_ERROR);
+
+            if (! is_array($decoded) || ! in_array($decoded['status'] ?? null, ['running', 'success', 'failed'], true)) {
+                throw new \UnexpectedValueException('Live forecast training state is invalid.');
+            }
+
+            $status = (string) $decoded['status'];
+        }
+
+        if (! $disk->exists(self::FORECAST_PATH)) {
+            // No stored document at all. If a run is mid-flight or failed, that
+            // is the state to report, not "missing".
+            return $status === 'success' ? null : [
+                'payload' => '{}',
+                'training_status' => $status,
+                'source' => 'filesystem',
+            ];
+        }
+
+        return [
+            'payload' => $disk->get(self::FORECAST_PATH),
+            'training_status' => $status,
+            'source' => 'filesystem',
+        ];
+    }
+
+    /**
+     * Stores a freshly trained forecast and its outcome so any instance can
+     * read it back, including after a redeploy.
+     */
+    public function persistTraining(string $sourceType, string $status, ?string $payload = null): void
+    {
+        $attributes = [
+            'training_status' => $status,
+            'training_status_updated_at' => now(),
+        ];
+
+        if ($payload !== null) {
+            $attributes['payload'] = $payload;
+            // Generated-at is authoritative from the document itself, so it is
+            // read the same way the read path validates it.
+            $decoded = json_decode($payload, true);
+
+            if (is_array($decoded) && is_string($decoded['generated_at'] ?? null)) {
+                $attributes['generated_at'] = Carbon::parse($decoded['generated_at']);
+            }
+        }
+
+        ForecastPayload::query()->updateOrCreate(
+            ['source_type' => $sourceType],
+            $attributes,
+        );
     }
 
     private function validateLivePayload(mixed $payload): Carbon

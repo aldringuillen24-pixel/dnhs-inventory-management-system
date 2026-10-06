@@ -209,11 +209,19 @@ test('the local answer restates only values the forecast calculated', function (
         ->filter(fn (mixed $value): bool => is_int($value) || is_float($value))
         ->map(fn (int|float $value): string => (string) $value);
 
-    // The period and its timestamp are approved facts, so the year inside
-    // "October 2026" must not be read as an invented quantity.
+    // The period, its timestamp and the supplied item names are approved facts:
+    // the year inside "October 2026" and the 24 inside "Crayon Set 24 Colors"
+    // are not invented quantities.
     foreach ([$payload['forecast_period'] ?? null, $payload['generated_at'] ?? null] as $stamp) {
         preg_match_all('/\d+/', (string) $stamp, $stampNumbers);
         $approved = $approved->merge($stampNumbers[0]);
+    }
+
+    foreach ($payload['items'] as $item) {
+        foreach (['item_name', 'category'] as $field) {
+            preg_match_all('/\d+/', (string) ($item[$field] ?? ''), $nameNumbers);
+            $approved = $approved->merge($nameNumbers[0]);
+        }
     }
 
     $approved = $approved->unique()->values();
