@@ -96,14 +96,21 @@ function icon(name) {
 }
 
 /**
- * Marks a nav item active for its own path and anything nested under it.
+ * The single nav entry that should be highlighted for the current path.
  *
- * Exact matching alone left the sidebar blank on nested routes such as
- * /reports/forecast, because Reports is the only entry for that section and its
- * path is the parent. The comparison is anchored to a trailing slash so a
- * sibling like "/reports-archive" can never be swept in.
+ * Matching is prefix-aware so a section stays active on its nested pages, but
+ * the deepest match wins. Without that, "/reports" and "/reports/forecast" would
+ * both match the forecast page and two items would light up at once.
  */
+const activeNavPath = computed(() => {
+  const items = menuGroups.value.flatMap((group) => group.items);
+
+  return items
+    .filter((item) => route.path === item.to || route.path.startsWith(`${item.to}/`))
+    .sort((a, b) => b.to.length - a.to.length)[0]?.to ?? null;
+});
+
 function isActive(path) {
-  return route.path === path || route.path.startsWith(`${path}/`);
+  return activeNavPath.value === path;
 }
 </script>

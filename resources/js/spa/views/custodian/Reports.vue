@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="space-y-6">
     <!-- Header with Quick Date Presets & Filter Bar -->
     <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -168,113 +168,6 @@
           </template>
         </MetricCard>
       </div>
-
-      <!-- Demand Forecasting & Predictive ML Panel -->
-      <section class="custodian-panel overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <!-- Banner Header -->
-        <div class="flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-emerald-900 via-teal-900 to-indigo-950 p-3.5 text-white">
-          <div class="flex items-center gap-2.5">
-            <div class="flex h-8 w-8 items-center justify-center rounded-md bg-white/10 text-emerald-300 backdrop-blur-sm">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <div>
-              <div class="flex items-center gap-1.5">
-                <h2 class="text-sm font-bold">Predictive Demand Forecast</h2>
-                <span class="rounded-md bg-emerald-400/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300 border border-emerald-400/30">
-                  AI Model
-                </span>
-              </div>
-              <p class="text-[11px] leading-tight text-emerald-100/70">Machine learning inventory forecast based on historical school requisitions.</p>
-            </div>
-          </div>
-
-          <RouterLink
-            to="/reports/forecast"
-            class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-white/15 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur-sm transition-all hover:bg-white/25"
-          >
-            Full recommendations
-          </RouterLink>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-white/15 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur-sm transition-all hover:bg-white/25 disabled:opacity-50"
-            :disabled="forecastLoading"
-            @click="refreshForecast"
-          >
-            <svg
-              class="h-3.5 w-3.5"
-              :class="{ 'animate-spin': forecastLoading }"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            {{ forecastLoading ? 'Computing ML Forecast…' : 'Refresh Forecast' }}
-          </button>
-        </div>
-
-        <div v-if="loading" class="space-y-3 p-3.5" aria-hidden="true">
-          <div class="h-9 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
-          <div class="h-3.5 w-1/3 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
-          <div class="h-8 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
-        </div>
-        <div v-else class="space-y-3 p-3.5">
-          <!-- Summary info badge -->
-          <div class="flex items-center gap-1.5 rounded-md bg-gray-50 p-2 text-[11px] text-gray-700 dark:bg-white/5 dark:text-gray-300 border border-gray-100 dark:border-white/5">
-            <svg class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span>{{ forecastSummary }}</span>
-          </div>
-
-          <!-- Explain Item AI Search -->
-          <div>
-            <label class="block text-[11px] font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300 mb-1" for="explain-input">
-              Ask AI to Explain Item Demand
-            </label>
-            <form class="flex flex-wrap gap-2" @submit.prevent="explainItem">
-              <input
-                id="explain-input"
-                v-model="explainInput"
-                type="text"
-                placeholder="Enter item name or inventory ID (e.g. Science Beaker, Projector)…"
-                class="min-w-0 flex-1 rounded-md border border-gray-200 bg-gray-50/60 px-3 py-1.5 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-200"
-              />
-              <button
-                type="submit"
-                class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50"
-                :disabled="explainLoading"
-              >
-                <svg v-if="explainLoading" class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <circle cx="12" cy="12" r="10" stroke-width="4" class="opacity-25" />
-                  <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75" />
-                </svg>
-                <svg v-else class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-                {{ explainLoading ? 'Analyzing…' : 'Explain Demand' }}
-              </button>
-            </form>
-          </div>
-
-          <!-- Explanation Result Card -->
-          <div
-            v-if="explanation"
-            class="rounded-md border border-emerald-200/80 bg-emerald-50/40 p-4 text-sm text-gray-800 shadow-sm dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-gray-200"
-          >
-            <div class="flex items-center gap-2 mb-2">
-              <span class="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-200 text-emerald-900 text-xs font-bold dark:bg-emerald-800 dark:text-emerald-100">
-                ✓
-              </span>
-              <strong class="text-xs uppercase tracking-wider text-emerald-800 dark:text-emerald-300">Model Insights</strong>
-            </div>
-            <p class="whitespace-pre-line leading-relaxed text-xs">{{ explanation }}</p>
-          </div>
-        </div>
-      </section>
 
       <!-- Charts Section -->
       <div class="compact-grid-2">
@@ -464,11 +357,6 @@ const categoryData = ref([]);
 const statusData = ref([]);
 const lowStock = ref([]);
 const attention = ref([]);
-const forecast = ref(null);
-const forecastLoading = ref(false);
-const explainInput = ref('');
-const explanation = ref('');
-const explainLoading = ref(false);
 
 const isDark = computed(() => theme.theme === 'dark');
 const foreColor = computed(() => (isDark.value ? '#98a2b3' : '#475467'));
@@ -575,14 +463,6 @@ const statusOptions = computed(() => ({
   noData: { text: 'No status data recorded' },
 }));
 
-const forecastSummary = computed(() => {
-  const result = forecast.value;
-  if (!result) return 'Forecast model is ready for analysis.';
-  if ((result.status ?? null) === 'forbidden') return 'Forecast information is restricted.';
-  const rows = result.rows ?? [];
-  return `Forecast status: ${result.status ?? 'active'} · ${rows.length} item projection(s) calculated${result.forecast_period ? ` for ${result.forecast_period}` : ''}.`;
-});
-
 function format(value) {
   return Number(value ?? 0).toLocaleString();
 }
@@ -641,7 +521,6 @@ async function load(options = {}) {
       statusData.value = data.statusData ?? [];
       lowStock.value = data.lowStockData ?? [];
       attention.value = data.attentionData ?? [];
-      forecast.value = data.liveForecastResult ?? null;
       if (data.reportFilters) {
         dateFrom.value = data.reportFilters.date_from ?? dateFrom.value;
         dateTo.value = data.reportFilters.date_to ?? dateTo.value;
@@ -659,33 +538,6 @@ async function load(options = {}) {
       error.value = requestError?.response?.data?.message ?? 'Could not load reports.';
     },
   });
-}
-
-async function refreshForecast() {
-  forecastLoading.value = true;
-  try {
-    const { data } = await api.post('/custodian/reports/forecast');
-    forecast.value = data;
-    forgetPageCache('custodian-reports');
-  } finally {
-    forecastLoading.value = false;
-  }
-}
-
-async function explainItem() {
-  const query = explainInput.value.trim();
-  if (!query) return;
-  explainLoading.value = true;
-  explanation.value = '';
-  try {
-    const payload = /^\d+$/.test(query) ? { inventory_id: Number(query) } : { item_name: query };
-    const { data } = await api.post('/custodian/reports/forecast/explanation', payload);
-    explanation.value = data.explanation ?? '';
-  } catch (requestError) {
-    explanation.value = requestError?.response?.data?.message ?? 'Could not explain that item.';
-  } finally {
-    explainLoading.value = false;
-  }
 }
 
 onMounted(() => load());
