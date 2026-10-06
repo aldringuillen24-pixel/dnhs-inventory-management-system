@@ -148,6 +148,8 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::get('/reports/forecast/recommendations', fn () => redirect('/spa/reports/forecast'))->name('reports.forecast.recommendations');
     Route::post('/reports/forecast', [PropertyCustodianController::class, 'runForecast'])->name('reports.forecast');
     Route::post('/reports/forecast/explanation', [PropertyCustodianController::class, 'explainForecast'])->name('reports.forecast.explanation');
+    Route::post('/reports/forecast/decision-support', [PropertyCustodianController::class, 'forecastDecisionSupport'])->name('reports.forecast.decision-support');
+    Route::post('/reports/forecast/procurement-list-pdf', [PropertyCustodianController::class, 'forecastProcurementListPdf'])->name('reports.forecast.procurement-list-pdf');
 
     Route::get('/profile', fn () => redirect('/spa/profile'))->name('profile');
 
@@ -266,6 +268,8 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::get('/reports/forecast/recommendations', [PropertyCustodianController::class, 'forecastRecommendations'])->name('reports.forecast.recommendations');
         Route::post('/reports/forecast', [PropertyCustodianController::class, 'runForecast'])->name('reports.forecast');
         Route::post('/reports/forecast/explanation', [PropertyCustodianController::class, 'explainForecast'])->name('reports.forecast.explanation');
+        Route::post('/reports/forecast/decision-support', [PropertyCustodianController::class, 'forecastDecisionSupport'])->name('reports.forecast.decision-support');
+        Route::post('/reports/forecast/procurement-list-pdf', [PropertyCustodianController::class, 'forecastProcurementListPdf'])->name('reports.forecast.procurement-list-pdf');
         Route::patch('/profile', [PropertyCustodianController::class, 'updateProfile'])->name('profile.update');
     });
 
