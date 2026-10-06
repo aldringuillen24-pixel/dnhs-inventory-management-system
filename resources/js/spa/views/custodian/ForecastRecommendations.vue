@@ -30,102 +30,7 @@
     </div>
 
     <!-- Loading -->
-    <!-- Loading: mirrors the real two-column card exactly — same panel shell,
-         same grid tracks, same table box cap — so the card does not change
-         height or lose its left column the moment data arrives. The previous
-         full-width table skeleton also had the Inventory page's 8-column shape. -->
-    <div
-      v-if="loading"
-      class="custodian-panel overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
-      aria-hidden="true"
-    >
-      <div class="grid grid-cols-1 lg:grid-cols-[25rem_minmax(0,1fr)] xl:grid-cols-[27rem_minmax(0,1fr)]">
-        <div class="min-h-0 max-h-[70vh] border-b border-gray-200/80 dark:border-gray-800 lg:max-h-none lg:border-b-0 lg:border-r">
-          <div class="flex h-full min-h-0 flex-col">
-            <div class="shrink-0 border-b border-gray-200/80 px-3.5 py-2.5 dark:border-gray-800">
-              <div class="flex items-center gap-2">
-                <span class="h-6 w-6 shrink-0 animate-pulse rounded bg-gray-200 dark:bg-white/10"></span>
-                <div class="min-w-0 flex-1 space-y-1.5">
-                  <div class="h-3 w-36 animate-pulse rounded bg-gray-200 dark:bg-white/10"></div>
-                  <div class="h-2.5 w-44 animate-pulse rounded bg-gray-100 dark:bg-white/5"></div>
-                </div>
-              </div>
-            </div>
-
-            <div class="min-h-0 flex-1 space-y-2.5 overflow-hidden px-3 py-3">
-              <div class="rounded-md border border-gray-200 px-3 py-2.5 dark:border-gray-800">
-                <div class="h-3 w-2/5 animate-pulse rounded bg-gray-200 dark:bg-white/10"></div>
-                <div class="mt-2 h-2.5 w-4/5 animate-pulse rounded bg-gray-100 dark:bg-white/5"></div>
-              </div>
-              <div
-                v-for="placeholder in 6"
-                :key="`skeleton-chat-${placeholder}`"
-                class="rounded-md border border-gray-200 px-3 py-2 dark:border-gray-800"
-              >
-                <div class="h-2.5 w-3/5 animate-pulse rounded bg-gray-100 dark:bg-white/5"></div>
-              </div>
-            </div>
-
-            <div class="shrink-0 border-t border-gray-200/80 px-3 py-2.5 dark:border-gray-800">
-              <div class="mb-2 flex flex-wrap gap-1.5">
-                <span
-                  v-for="placeholder in 4"
-                  :key="`skeleton-prompt-${placeholder}`"
-                  class="h-6 w-20 animate-pulse rounded-full bg-gray-100 dark:bg-white/5"
-                ></span>
-              </div>
-              <div class="flex items-end gap-1.5">
-                <div class="min-h-[2.5rem] flex-1 animate-pulse rounded-md bg-gray-100 dark:bg-white/5"></div>
-                <span class="h-9 w-9 shrink-0 animate-pulse rounded-md bg-gray-200 dark:bg-white/10"></span>
-              </div>
-              <div class="mt-1.5 h-2 w-2/3 animate-pulse rounded bg-gray-100 dark:bg-white/5"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="flex min-w-0 flex-col">
-          <div class="flex flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-2.5 dark:border-white/5">
-            <span class="h-7 w-20 animate-pulse rounded-md bg-gray-100 dark:bg-white/5"></span>
-            <span class="ml-auto h-3 w-40 animate-pulse rounded bg-gray-100 dark:bg-white/5"></span>
-          </div>
-
-          <div class="max-h-[70vh] overflow-auto">
-            <table class="w-full min-w-[46rem] text-left text-sm">
-              <thead class="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wider text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                <tr>
-                  <th class="px-4 py-3">Item</th>
-                  <th class="px-3 py-3">Category</th>
-                  <th class="px-3 py-3 text-right">Predicted demand</th>
-                  <th class="px-3 py-3 text-right">Safety stock</th>
-                  <th class="px-3 py-3 text-right">Suggested quantity</th>
-                  <th class="px-3 py-3">Priority</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-white/5">
-                <tr v-for="placeholder in skeletonRows" :key="`skeleton-row-${placeholder}`" class="align-top">
-                  <td class="px-4 py-3"><span class="block h-4 w-40 animate-pulse rounded bg-gray-200/70 dark:bg-white/10"></span></td>
-                  <td class="px-3 py-3"><span class="block h-4 w-24 animate-pulse rounded bg-gray-200/70 dark:bg-white/10"></span></td>
-                  <td class="px-3 py-3 text-right"><span class="ml-auto block h-4 w-14 animate-pulse rounded bg-gray-200/70 dark:bg-white/10"></span></td>
-                  <td class="px-3 py-3 text-right"><span class="ml-auto block h-4 w-12 animate-pulse rounded bg-gray-200/70 dark:bg-white/10"></span></td>
-                  <td class="px-3 py-3 text-right"><span class="ml-auto block h-4 w-16 animate-pulse rounded bg-gray-200/70 dark:bg-white/10"></span></td>
-                  <td class="px-3 py-3"><span class="block h-5 w-12 animate-pulse rounded-full bg-gray-200/70 dark:bg-white/10"></span></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="border-t border-gray-200/80 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-900/50">
-            <div class="ml-auto flex items-center gap-1.5">
-              <span
-                v-for="placeholder in 6"
-                :key="`skeleton-page-${placeholder}`"
-                class="h-10 w-7 animate-pulse rounded-md bg-gray-200/70 dark:bg-white/10"
-              ></span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <InventoryTableSkeleton v-if="loading" />
 
     <!-- Error -->
     <div
@@ -187,7 +92,7 @@
       <div v-else class="custodian-panel overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <div class="grid grid-cols-1 lg:grid-cols-[25rem_minmax(0,1fr)] xl:grid-cols-[27rem_minmax(0,1fr)]">
           <div
-            class="min-h-0 max-h-[70vh] border-b border-gray-200/80 dark:border-gray-800 lg:max-h-none lg:border-b-0 lg:border-r"
+            class="min-h-0 max-h-[86vh] border-b border-gray-200/80 dark:border-gray-800 lg:border-b-0 lg:border-r"
             :class="showChatMobile ? 'block' : 'hidden lg:block'"
           >
             <ForecastDecisionChat
@@ -432,6 +337,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { PackageSearch, RefreshCw } from 'lucide';
 import api from '../../lib/axios';
+import InventoryTableSkeleton from '../../components/ui/skeletons/InventoryTableSkeleton.vue';
 import ForecastDecisionChat from '../../components/forecast/ForecastDecisionChat.vue';
 import LucideIcon from '../../components/ui/data-display/LucideIcon.vue';
 import Pagination from '../../components/ui/data-display/Pagination.vue';
