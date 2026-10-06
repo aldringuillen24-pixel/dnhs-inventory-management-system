@@ -58,3 +58,31 @@ function geminiGenerateContentResponse(string $text): array
         ]],
     ];
 }
+
+/**
+ * Whether a live-provider test must be skipped, and why.
+ *
+ * Tests that reach Gemini for real spend the project's request quota, which is
+ * a shared, finite resource. A full suite run must therefore never call the
+ * provider by accident: `.env` supplies a real GEMINI_API_KEY, so key
+ * presence alone is not a safe signal that someone meant to run these.
+ *
+ * Return null to proceed, or a reason string to skip with.
+ */
+function liveGeminiSkipReason(): ?string
+{
+    $flag = getenv('GEMINI_LIVE_CHECK');
+    if ($flag === false || $flag === '') {
+        $flag = $_ENV['GEMINI_LIVE_CHECK'] ?? $_SERVER['GEMINI_LIVE_CHECK'] ?? '';
+    }
+
+    if ((string) $flag !== '1') {
+        return 'Live Gemini checks are opt-in. Re-run with GEMINI_LIVE_CHECK=1 to spend provider quota.';
+    }
+
+    if (! is_string(config('services.gemini.api_key')) || trim((string) config('services.gemini.api_key')) === '') {
+        return 'No Gemini key configured.';
+    }
+
+    return null;
+}

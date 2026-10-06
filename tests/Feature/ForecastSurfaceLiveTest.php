@@ -17,6 +17,12 @@ uses(RefreshDatabase::class);
  */
 
 beforeEach(function () {
+    // Opt-in only: the AI chat assertions below reach the real provider and
+    // spend quota. A plain `php artisan test` must not bill the account.
+    if ($reason = liveGeminiSkipReason()) {
+        $this->markTestSkipped($reason);
+    }
+
     // Copy the artifacts produced by the real local `forecast:train` run so the
     // endpoints serve genuine data rather than a hand-written fixture.
     Storage::fake('forecast');

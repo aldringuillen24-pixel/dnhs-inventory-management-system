@@ -18,8 +18,11 @@ use Illuminate\Support\Facades\Storage;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    if (! is_string(config('services.gemini.api_key')) || trim((string) config('services.gemini.api_key')) === '') {
-        $this->markTestSkipped('No Gemini key configured.');
+    // Opt-in only: these tests call the real provider and spend quota. The
+    // guard is GEMINI_LIVE_CHECK=1, not merely "a key happens to be present",
+    // because .env supplies a real key to every test run.
+    if ($reason = liveGeminiSkipReason()) {
+        $this->markTestSkipped($reason);
     }
 
     Storage::fake('forecast');
