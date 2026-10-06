@@ -724,6 +724,68 @@ class InventoryAnswerService
     }
 
     /**
+ * Merge the answers of a compound turn into one reply.
+ *
+ * Each part is formatted by the same localReply() used for a single question,
+ * so the wording of any individual answer is unchanged. Only the joining is
+ * new: parts are labelled by their subject and separated, because a compound
+ * question has no single item to hang a heading on.
+ *
+ * @param  array<int, array<string, mixed>>  $results
+ */
+public function mergeReplies(array $results, ?User $user = null): string
+    {
+        if ($results === []) {
+            return $this->localReply(['status' => 'unsupported'], $user);
+        }
+        if (count($results) === 1) {
+            return $this->localReply($results[0], $user);
+        }
+
+        $parts = [];
+        foreach ($results as $result) {
+            $label = $this->subRequestLabel($result);
+            $body = $this->localReply($result, $user);
+            if ($body === '') {
+                continue;
+            }
+            $parts[] = $label === null ? $body : $label . ': ' . $body;
+        }
+
+        if ($parts === []) {
+            return $this->localReply(['status' => 'unsupported'], $user);
+        }
+
+        return implode("\n\n", $parts);
+    }
+
+    /**
+     * The subject of one sub-request, used as a heading in a merged reply.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function subRequestLabel(array $result): ?string
+    {
+        $subRequest = $result['sub_request'] ?? [];
+        if (! is_array($subRequest)) {
+            return null;
+        }
+
+        foreach (['item_name', 'location_query'] as $key) {
+            $value = $subRequest[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+        }
+
+        if (is_int($subRequest['inventory_id'] ?? null)) {
+            return 'Inventory ID '.$subRequest['inventory_id'];
+        }
+
+        return null;
+    }
+
+    /**
      * NOTE: retained verbatim from the original answer service. It has no
      * callers — it was already dead before this refactor — so it is moved
      * rather than deleted. Removing it is a separate change.

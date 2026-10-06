@@ -122,7 +122,137 @@ class AiIntentParserService
         }
     }
 
-    public function route(string $question, array $activeTopic = [], array $turns = []): array
+    /**
+ * Route a question to a capability, plus an execution plan.
+ *
+ * The plan is additive: every pre-existing key is exactly what it was, and the
+ * `plan` key simply states whether this turn is one request or several. A
+ * single-intent turn therefore still produces one ToolResult through one
+ * authorisation, and nothing downstream has to change to keep working.
+ *
+ * @return array<string, mixed>
+ */
+public function route(string $question, array $activeTopic = [], array $turns = []): array
+    {
+        $route = $this->resolveRoute($question, $activeTopic, $turns);
+        $route['plan'] = $this->buildPlan($route, $question, $activeTopic, $turns);
+
+        return $route;
+    }
+
+    /**
+     * Build the execution plan for a routed question.
+     *
+     * A compound turn is expanded into one fully routed sub-request per
+     * decomposed part. Each is resolved through the same capability mapping and
+     * selector rules as a top-level parse, so a sub-request cannot invent a
+     * capability, a selector, or an intent the parser would not have allowed
+     * on its own.
+     *
+     * @param  array<string, mixed>  $route
+     * @return array<string, mixed>
+     */
+    private function buildPlan(array $route, string $question, array $activeTopic, array $turns): array
+    {
+        if (($route['plan_requests'] ?? null) === null) {
+            return [
+                'kind' => 'single',
+                'requests' => [$this->asPlanRequest($route)],
+            ];
+        }
+
+        $requests = [];
+        foreach ($route['plan_requests'] as $subRequest) {
+            $resolved = $this->routeSubRequest($subRequest, $question, $activeTopic);
+            if ($resolved !== null) {
+                $requests[] = $this->asPlanRequest($resolved);
+            }
+        }
+
+        // If decomposition produced nothing usable, fall back to the single
+        // top-level route rather than answering a compound turn with no data.
+        if (count($requests) < 2) {
+            return [
+                'kind' => 'single',
+                'requests' => [$this->asPlanRequest($route)],
+            ];
+        }
+
+        return [
+            'kind' => 'compound',
+            'requests' => $requests,
+        ];
+    }
+
+    /**
+     * Project a routed question onto the plan-request shape.
+     *
+     * @param  array<string, mixed>  $route
+     * @return array<string, mixed>
+     */
+    private function asPlanRequest(array $route): array
+    {
+        unset($route['plan'], $route['plan_requests']);
+
+        return $route;
+    }
+
+    /**
+     * Route one decomposed sub-request with the same rules as a whole question.
+     *
+     * @param  array<string, mixed>  $subRequest
+     * @return array<string, mixed>|null
+     */
+    private function routeSubRequest(array $subRequest, string $question, array $activeTopic): ?array
+    {
+        $intent = $subRequest['intent'];
+        $capability = $this->capabilityPolicy->capabilityForIntent($intent);
+        if (! is_string($capability) || ! $this->capabilityPolicy->isKnownCapability($capability)) {
+            return null;
+        }
+
+        // forecast and recommendation are delegated to the Forecast page and
+        // must never fan out into the factual tools.
+        if ($capability === \App\Services\AiCapabilityPolicy::VIEW_DEMAND_FORECAST
+            || $capability === \App\Services\AiCapabilityPolicy::VIEW_PROCUREMENT_PRIORITIES) {
+            return null;
+        }
+
+        $filters = $subRequest['filters'];
+
+        return [
+            'original_question' => $question,
+            'normalized_question' => mb_strtolower(trim($question)),
+            'canonical_question_key' => hash('sha256', mb_strtolower(trim($question))),
+            'classification_confidence' => 'ai_validated',
+            'intent' => 'factual',
+            'capability' => $capability,
+            'item_name' => $subRequest['item_name'],
+            'inventory_id' => $subRequest['inventory_id'],
+            'serial_number' => $subRequest['serial_number'],
+            'location_query' => $subRequest['location_query'],
+            'category_id' => $filters['category_id'],
+            'unit' => $filters['unit'],
+            'query' => $subRequest['query'],
+            'filters' => $filters,
+            'response_type' => $subRequest['response_type'],
+            'needs_external_explanation' => false,
+            'needs_clarification' => false,
+            'vague' => false,
+            'follow_up' => false,
+            'starts_new_topic' => false,
+            'topic_action' => 'new_topic',
+            'request_type' => $intent,
+            'entity_candidate' => $subRequest['item_name'] ?? $subRequest['location_query'] ?? null,
+            'entity_candidate_status' => ($subRequest['item_name'] ?? $subRequest['location_query'] ?? null) === null ? 'missing' : 'unresolved',
+            'ambiguous' => false,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function resolveRoute(string $question, array $activeTopic, array $turns): array
     {
         $normalized = mb_strtolower(trim($question));
         $common = [
@@ -313,6 +443,9 @@ class AiIntentParserService
             'entity_candidate' => $topicEntity,
             'entity_candidate_status' => $topicEntity === null ? 'missing' : 'unresolved',
             'ambiguous' => false,
+            // Carried only so buildPlan() can expand a compound turn; stripped
+            // from the plan requests before they leave this class.
+            'plan_requests' => $parsed['is_compound'] ? $parsed['sub_requests'] : null,
         ];
 
         return $route;
@@ -378,7 +511,7 @@ class AiIntentParserService
 
     private function validate(array $parsed, string $question): ?array
     {
-        $expectedKeys = ['intent', 'topic_action', 'item_name', 'inventory_id', 'serial_number', 'location_query', 'filters', 'query', 'response_type', 'explanation', 'explanation_topic'];
+        $expectedKeys = ['intent', 'topic_action', 'item_name', 'inventory_id', 'serial_number', 'location_query', 'filters', 'query', 'response_type', 'explanation', 'explanation_topic', 'is_compound', 'sub_requests'];
         if (array_diff(array_keys($parsed), $expectedKeys) !== []
             || array_diff($expectedKeys, array_keys($parsed)) !== []) {
             return null;
@@ -395,6 +528,8 @@ class AiIntentParserService
         $responseType = $parsed['response_type'];
         $explanation = $parsed['explanation'];
         $explanationTopic = $parsed['explanation_topic'];
+        $isCompound = $parsed['is_compound'];
+        $subRequests = $parsed['sub_requests'];
 
         if (! is_string($intent) || ! in_array($intent, self::INTENTS, true)
             || ! is_string($topicAction) || ! in_array($topicAction, self::TOPIC_ACTIONS, true)
@@ -409,8 +544,17 @@ class AiIntentParserService
             || ! (is_null($filters['unit']) || (is_string($filters['unit']) && trim($filters['unit']) !== '' && mb_strlen(trim($filters['unit'])) <= 100))
             || ! (is_null($query) || in_array($query, ['pending_count', 'inventory_identifiers', 'product_name'], true))
             || ! is_string($responseType) || ! in_array($responseType, self::RESPONSE_TYPES, true)
-            || ! is_bool($explanation)) {
+            || ! is_bool($explanation)
+            || ! is_bool($isCompound)
+            || ! is_array($subRequests)
+            || (($isCompound ? count($subRequests) < 2 : $subRequests !== []) === true)) {
             return null;
+        }
+
+        foreach ($subRequests as $subRequest) {
+            if ($this->validateSubRequest($subRequest, $question, $isCompound) === null) {
+                return null;
+            }
         }
 
         if (($intent === 'continue' && $topicAction !== 'continue_topic')
@@ -464,17 +608,110 @@ class AiIntentParserService
             'response_type' => $responseType,
             'explanation' => $explanation,
             'explanation_topic' => $explanationTopic,
+            'is_compound' => $isCompound,
+            'sub_requests' => array_values(array_map(
+                fn (array $subRequest): array => $this->validateSubRequest($subRequest, $question, $isCompound),
+                $subRequests,
+            )),
+        ];
+    }
+
+    /**
+     * Validate one decomposed sub-request.
+     *
+     * A sub-request is held to exactly the same standard as a top-level parse:
+     * a known intent, a selector that really appears in the question, and no
+     * extra keys. Anything the provider invents here is rejected wholesale
+     * rather than silently repaired, because a sub-request that slipped through
+     * would be authorised and queried on its own terms.
+     *
+     * Compound turns must never decompose into a forecast sub-request: demand
+     * forecasting is delegated to the handoff, which is single-intent.
+     *
+     * @param  array<string, mixed>  $subRequest
+     * @return array<string, mixed>|null
+     */
+    private function validateSubRequest(array $subRequest, string $question, bool $isCompound): ?array
+    {
+        $expectedKeys = ['intent', 'item_name', 'inventory_id', 'serial_number', 'location_query', 'filters', 'query', 'response_type'];
+        if (array_diff(array_keys($subRequest), $expectedKeys) !== []
+            || array_diff($expectedKeys, array_keys($subRequest)) !== []) {
+            return null;
+        }
+
+        $intent = $subRequest['intent'];
+        $itemName = $subRequest['item_name'];
+        $inventoryId = $subRequest['inventory_id'];
+        $serialNumber = $subRequest['serial_number'];
+        $locationQuery = $subRequest['location_query'];
+        $filters = $subRequest['filters'];
+        $query = $subRequest['query'];
+        $responseType = $subRequest['response_type'];
+
+        if (! is_string($intent) || ! in_array($intent, self::INTENTS, true)
+            || in_array($intent, ['forecast', 'explanation', 'continue', 'inherit', 'unsupported', 'unclear'], true)
+            || ! (is_null($itemName) || (is_string($itemName) && trim($itemName) !== '' && mb_strlen(trim($itemName)) <= 255))
+            || ! (is_null($inventoryId) || (is_int($inventoryId) && $inventoryId > 0))
+            || ! (is_null($serialNumber) || (is_string($serialNumber) && trim($serialNumber) !== '' && mb_strlen(trim($serialNumber)) <= 255))
+            || ! (is_null($locationQuery) || (is_string($locationQuery) && trim($locationQuery) !== '' && mb_strlen(trim($locationQuery)) <= 255))
+            || ! is_array($filters)
+            || array_diff(array_keys($filters), ['category_id', 'unit']) !== []
+            || array_diff(['category_id', 'unit'], array_keys($filters)) !== []
+            || ! (is_null($filters['category_id']) || (is_int($filters['category_id']) && $filters['category_id'] > 0))
+            || ! (is_null($filters['unit']) || (is_string($filters['unit']) && trim($filters['unit']) !== '' && mb_strlen(trim($filters['unit'])) <= 100))
+            || ! (is_null($query) || in_array($query, ['pending_count', 'inventory_identifiers', 'product_name'], true))
+            || ! is_string($responseType) || ! in_array($responseType, self::RESPONSE_TYPES, true)
+            || $responseType === 'same_as_topic') {
+            return null;
+        }
+
+        if ($query !== null && $query === 'pending_count' && ! in_array($intent, ['pending_requests', 'own_requests'], true)) {
+            return null;
+        }
+        if ($query !== null && in_array($query, ['inventory_identifiers', 'product_name'], true) && $intent !== 'stock') {
+            return null;
+        }
+
+        if ($this->capabilityPolicy->capabilityForIntent($intent) === null) {
+            return null;
+        }
+
+        foreach ([$itemName, $serialNumber, $locationQuery, $filters['unit']] as $selector) {
+            if (is_string($selector) && ! $this->selectorAppearsInQuestion($selector, $question)) {
+                return null;
+            }
+        }
+        foreach ([$inventoryId, $filters['category_id']] as $identifier) {
+            if (is_int($identifier)
+                && preg_match('/(?<!\d)'.preg_quote((string) $identifier, '/').'(?!\d)/u', $question) !== 1) {
+                return null;
+            }
+        }
+
+        return [
+            'intent' => $intent,
+            'item_name' => is_string($itemName) ? trim($itemName) : null,
+            'inventory_id' => $inventoryId,
+            'serial_number' => is_string($serialNumber) ? trim($serialNumber) : null,
+            'location_query' => is_string($locationQuery) ? trim($locationQuery) : null,
+            'filters' => [
+                'category_id' => $filters['category_id'],
+                'unit' => is_string($filters['unit']) ? trim($filters['unit']) : null,
+            ],
+            'query' => $query,
+            'response_type' => $responseType,
         ];
     }
 
     private function systemPrompt(): string
     {
-        return 'Classify the user question only. Do not answer it, access data, or propose actions. Return one JSON object with exactly these keys: intent, topic_action, item_name, inventory_id, serial_number, location_query, filters, query, response_type, explanation, explanation_topic. '
+        return 'Classify the user question only. Do not answer it, access data, or propose actions. Return one JSON object with exactly these keys: intent, topic_action, item_name, inventory_id, serial_number, location_query, filters, query, response_type, explanation, explanation_topic, is_compound, sub_requests. '
             .'intent must be availability, stock, pending_requests, low_stock, forecast, executive_reports, system_summary, inventory_valuation, own_assignments, own_requests, item_status, assignments, maintenance, disposal, ready_to_dispose, location, purchase_history, explanation, continue, inherit, unsupported, or unclear. Procurement and restock questions are not handled here; classify them as unsupported. '
             .'topic_action must be continue_topic, new_topic, or unclear. Use continue when the message only refers to the active topic and inherit when a new named item continues the active topic action. Use an active topic only for follow-ups or action inheritance; otherwise classify the new request independently. '
             .'Map explanation questions to intent explanation and set explanation_topic to the supported fact topic; otherwise explanation_topic must be null. Use only item names, inventory IDs, serial numbers, location names, units, and category IDs explicitly stated in the question; use null when absent. '
             .'filters must contain exactly category_id and unit. query must be null, pending_count, inventory_identifiers, or product_name. Use pending_count only when explicitly counting pending requests; use inventory_identifiers only when asking for an inventory number, ID, or asset tag; use product_name only when asking for the product name. For ordinary availability or stock questions, query must be null, including count questions. '
-            .'response_type must be detail, count, list, explanation, or same_as_topic. explanation must be a boolean and true only for intent explanation. Never return SQL, permissions, database instructions, answers, or additional keys.';
+            .'response_type must be detail, count, list, explanation, or same_as_topic. explanation must be a boolean and true only for intent explanation. '
+            .'is_compound must be true only when the question asks for two or more separate inventory facts that can be answered independently. When it is false, sub_requests must be an empty array. When it is true, sub_requests must hold one entry per separate question in the order asked, each with exactly the keys intent, item_name, inventory_id, serial_number, location_query, filters, query, response_type; the top-level fields must then describe the first sub-request and topic_action must be new_topic. A sub-request intent must never be forecast, explanation, continue, inherit, unsupported or unclear, and its response_type must never be same_as_topic. Never return SQL, permissions, database instructions, answers, or additional keys.';
     }
 
     private function structuredResponseSchema(): array
@@ -506,6 +743,37 @@ class AiIntentParserService
                 'type' => 'STRING',
                 'nullable' => true,
                 'enum' => self::EXPLANATION_TOPICS,
+            ],
+            'is_compound' => ['type' => 'BOOLEAN'],
+            'sub_requests' => [
+                'type' => 'ARRAY',
+                'items' => [
+                    'type' => 'OBJECT',
+                    'properties' => [
+                        'intent' => ['type' => 'STRING', 'enum' => array_values(array_diff(self::INTENTS, ['forecast', 'explanation', 'continue', 'inherit', 'unsupported', 'unclear']))],
+                        'item_name' => ['type' => 'STRING', 'nullable' => true, 'maxLength' => 255],
+                        'inventory_id' => ['type' => 'INTEGER', 'nullable' => true, 'minimum' => 1],
+                        'serial_number' => ['type' => 'STRING', 'nullable' => true, 'maxLength' => 255],
+                        'location_query' => ['type' => 'STRING', 'nullable' => true, 'maxLength' => 255],
+                        'filters' => [
+                            'type' => 'OBJECT',
+                            'properties' => [
+                                'category_id' => ['type' => 'INTEGER', 'nullable' => true, 'minimum' => 1],
+                                'unit' => ['type' => 'STRING', 'nullable' => true, 'maxLength' => 100],
+                            ],
+                            'required' => ['category_id', 'unit'],
+                            'additionalProperties' => false,
+                        ],
+                        'query' => [
+                            'type' => 'STRING',
+                            'nullable' => true,
+                            'enum' => ['pending_count', 'inventory_identifiers', 'product_name'],
+                        ],
+                        'response_type' => ['type' => 'STRING', 'enum' => array_values(array_diff(self::RESPONSE_TYPES, ['same_as_topic']))],
+                    ],
+                    'required' => ['intent', 'item_name', 'inventory_id', 'serial_number', 'location_query', 'filters', 'query', 'response_type'],
+                    'additionalProperties' => false,
+                ],
             ],
         ];
 

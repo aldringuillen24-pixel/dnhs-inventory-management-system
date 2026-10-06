@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use App\Services\AiInventoryService;
 use App\Services\AiCapabilityPolicy;
 use App\Services\Conversation\ConversationContextManager;
 use App\Services\Forecast\ForecastChatHandoff;
 use App\Services\InventoryAnswerService;
+use App\Services\Tools\CompoundPlanExecutor;
 use App\Services\AiIntentParserService;
 use App\Services\InventoryComparisonService;
 use App\Http\Requests\InventoryComparisonRequest;
@@ -24,6 +26,7 @@ class AiAssistantController extends Controller
         protected InventoryComparisonService $comparisonService,
         protected ForecastChatHandoff $forecastHandoff,
         protected ConversationContextManager $conversationContext,
+        protected CompoundPlanExecutor $compoundPlanExecutor,
     ) {}
 
     /**
@@ -178,6 +181,14 @@ class AiAssistantController extends Controller
             }
 
             $routedQuestion ??= $this->intentParser->route($validated['message'], $context ?? [], $state->turns);
+
+            // A compound turn fans out into one authorised sub-request per
+            // decomposed part. A single-intent turn takes the unchanged path
+            // below, so ordinary questions are unaffected.
+            if (($routedQuestion['plan']['kind'] ?? 'single') === 'compound') {
+                return $this->answerCompound($request, $user, $validated['message'], $routedQuestion);
+            }
+
             if ($result === null) {
                 $result = $this->answerService->answer($user, $routedQuestion);
             }
@@ -280,7 +291,39 @@ class AiAssistantController extends Controller
      * Demand Forecast page, which paginates, filters and exports it properly.
      */
 
-    private function applicationFollowUp(string $question, ?array $context): ?array
+    /**
+     * Answer a compound turn.
+     *
+     * Each sub-request is dispatched and authorised on its own, then the
+     * answers are merged into one conversational reply. A part the role cannot
+     * see is reported as unavailable rather than silently dropped, so the user
+     * learns the question was understood and refused, not ignored.
+     */
+private function answerCompound(Request $request, User $user, string $message, array $routedQuestion): JsonResponse
+    {
+        $results = $this->compoundPlanExecutor->execute($user, $routedQuestion['plan']);
+        $reply = $this->answerService->mergeReplies($results, $user);
+        $primary = $results[0] ?? ['status' => 'unsupported', 'intent' => null, 'capability' => null, 'answer' => []];
+
+        $this->conversationContext->updateContext($request, $user, $routedQuestion, $primary);
+        $this->conversationContext->updateClarification($request, $user, $routedQuestion, $primary);
+        $this->conversationContext->appendTurn(
+            $user,
+            $message,
+            $reply,
+            is_string($primary['intent'] ?? null) ? $primary['intent'] : null,
+            is_string($primary['capability'] ?? null) ? $primary['capability'] : null,
+            $request,
+        );
+
+        return response()->json([
+            'success' => true,
+            'reply' => $reply,
+            'role' => $user->role?->role_name ?? 'End User',
+        ]);
+    }
+
+private function applicationFollowUp(string $question, ?array $context): ?array
     {
         $normalized = mb_strtolower(trim($question));
         $normalized = trim(preg_replace('/[^\pL\pN\s?]/u', ' ', $normalized) ?? $normalized);

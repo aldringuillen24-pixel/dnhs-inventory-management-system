@@ -94,6 +94,8 @@ test('factual chat returns exact database facts after structured parsing without
             'response_type' => 'count',
             'explanation' => false,
             'explanation_topic' => null,
+            'is_compound' => false,
+            'sub_requests' => [],
         ])]]]]],
     ])]);
     $user = localFactsUser('Property Custodian');

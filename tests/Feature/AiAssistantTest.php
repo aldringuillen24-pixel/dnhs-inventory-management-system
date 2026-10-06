@@ -156,6 +156,8 @@ function structuredAssistantParse(array $overrides = []): array
         'response_type' => 'count',
         'explanation' => false,
         'explanation_topic' => null,
+        'is_compound' => false,
+        'sub_requests' => [],
     ], $overrides);
 }
 

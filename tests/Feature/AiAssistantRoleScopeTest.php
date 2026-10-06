@@ -183,6 +183,8 @@ test('roles outside property custody cannot access the assistant', function () {
         'response_type' => 'detail',
         'explanation' => false,
         'explanation_topic' => null,
+        'is_compound' => false,
+        'sub_requests' => [],
     ];
     Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response([
         'candidates' => [['content' => ['parts' => [['text' => json_encode($parsed)]]]]],
@@ -359,6 +361,8 @@ test('property custodians can use stock, low stock, pending, forecast, and procu
             'response_type' => 'detail',
             'explanation' => false,
             'explanation_topic' => null,
+            'is_compound' => false,
+            'sub_requests' => [],
         ];
         Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response([
             'candidates' => [['content' => ['parts' => [['text' => json_encode($parsed)]]]]],
