@@ -391,11 +391,14 @@ class ForecastDecisionSupportService
             ."not \"62 items in cycle state\" and never mention cycle_state, gaps_needing_verification or selected_count.\n"
             ."7. If status is not \"success\", say the item lacks enough verified history for an estimate and should be "
             ."verified before use. Do not produce a suggested quantity for it.\n"
-            ."8. Prefer a short ranked list. State the reasoning for the first few items: the arithmetic "
-            ."(forecast demand + safety stock - available stock - pending demand) and the priority and confidence behind it.\n"
-            ."9. Format each item as ONE line, with no blank line between items: "
-            ."**Item name** — buy N unit, Priority, Confidence confidence; basis: demand X + buffer Y - stock Z - pending W. "
-            ."Extra blank lines turn the chat panel into an unreadable wall of text.\n"
+            ."8. List the highest priority items first.\n"
+            ."9. Layout exactly, with no markdown table (the chat column is narrow):\n"
+            ."   - First line, once: \"Buy = demand + buffer - stock - pending\"\n"
+            ."   - Then two lines per item, no blank line between items:\n"
+            ."     **Item name** — N piece\n"
+            ."     Priority · Confidence confidence · X + Y - Z - W\n"
+            ."   The second line repeats the four numbers in the formula order. Do not spell out "
+            ."'demand', 'buffer', 'stock' or 'pending' again, and do not repeat the formula per item.\n"
             ."10. Close with one line noting the forecast is advisory only.\n";
     }
 
@@ -585,7 +588,10 @@ class ForecastDecisionSupportService
         }
 
         $period = is_string($facts['forecast_period'] ?? null) ? $facts['forecast_period'] : 'this cycle';
-        $lines = [$facts['question'].' ('.$period.')'];
+        $lines = [
+            $facts['question'].' ('.$period.')',
+            'Buy = demand + buffer − stock − pending',
+        ];
 
         foreach ($items as $index => $item) {
             $lines[] = ($index + 1).'. '.$this->localItemLine($item);
@@ -674,28 +680,35 @@ class ForecastDecisionSupportService
         return implode("\n", $lines);
     }
 
+    /**
+     * One entry in the deterministic ranked list.
+     *
+     * Uses the same two-line shape the provider is instructed to produce, so the
+     * fallback reads identically rather than switching to a wall of prose. The
+     * formula is stated once by the caller, not repeated per item.
+     */
     private function localItemLine(array $item): string
     {
         $name = $item['item_name'] ?? 'Item';
         $unit = $item['unit'] ?? 'units';
 
         if (($item['status'] ?? null) !== 'success') {
-            return "{$name} ({$item['category']}): insufficient verified history, so no ML estimate is available. Verify stock and usage before procuring.";
+            return "**{$name}** — no estimate\nInsufficient verified history · verify usage before procuring.";
         }
 
         $suggested = (int) ($item['suggested_procurement'] ?? 0);
-        $basis = sprintf(
-            'demand %s + buffer %s - stock %s - pending %s',
-            $item['forecast_demand'].' '.$unit,
-            $item['safety_stock'].' '.$unit,
-            $item['available_stock'].' '.$unit,
-            $item['pending_demand'].' '.$unit
+        $figures = sprintf(
+            '%s + %s - %s - %s',
+            $item['forecast_demand'],
+            $item['safety_stock'],
+            $item['available_stock'],
+            $item['pending_demand']
         );
 
         if ($suggested <= 0) {
-            return "{$name} ({$item['category']}): no procurement gap; {$basis}. Stock covers the forecast, so this can be deferred.";
+            return "**{$name}** — 0 {$unit}\n{$item['priority']} · {$item['confidence']} confidence · {$figures}";
         }
 
-        return "{$name} ({$item['category']}): suggested {$suggested} {$unit} on {$item['priority']} priority with {$item['confidence']} confidence. Basis: {$basis}.";
+        return "**{$name}** — {$suggested} {$unit}\n{$item['priority']} · {$item['confidence']} confidence · {$figures}";
     }
 }
