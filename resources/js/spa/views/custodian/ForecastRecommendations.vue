@@ -225,7 +225,7 @@
 
         <!-- Recommendations table -->
         <div class="max-h-[70vh] overflow-auto">
-          <table class="w-full min-w-[58rem] text-left text-sm">
+          <table class="w-full min-w-[46rem] text-left text-sm">
             <thead class="sticky top-0 z-10 bg-gray-50 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-800 dark:text-gray-400">
               <tr>
                 <th class="px-4 py-3">Item</th>
@@ -234,8 +234,6 @@
                 <th class="px-3 py-3 text-right">Safety stock</th>
                 <th class="px-3 py-3 text-right">Suggested quantity</th>
                 <th class="px-3 py-3">Priority</th>
-                <th class="px-3 py-3">Confidence</th>
-                <th class="px-3 py-3">Advisory status</th>
               </tr>
             </thead>
             <tbody
@@ -250,7 +248,7 @@
                   <td class="px-4 py-3">
                     <span class="block h-4 w-40 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
                   </td>
-                  <td v-for="column in 7" :key="`skeleton-cell-${column}`" class="px-3 py-3">
+                  <td v-for="column in 5" :key="`skeleton-cell-${column}`" class="px-3 py-3">
                     <span
                       class="block h-4 animate-pulse rounded bg-gray-200/70 dark:bg-white/10"
                       :class="column === 1 ? 'w-28' : 'w-16 ml-auto'"
@@ -268,12 +266,10 @@
                   <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.safety_stock ?? 'N/A' }} {{ row.unit }}</td>
                   <td class="px-3 py-3 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{{ row.suggested_procurement ?? 'N/A' }} {{ row.unit }}</td>
                   <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium" :class="priorityClass(row.priority)">{{ row.priority }}</span></td>
-                  <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium" :class="confidenceClass(row.confidence)">{{ row.confidence }}</span></td>
-                  <td class="px-3 py-3 text-xs text-gray-600 dark:text-gray-300">{{ row.advisory_status }}</td>
                 </tr>
               </template>
               <tr v-if="!rows.length">
-                <td colspan="8" class="px-4 py-12 text-center">
+                <td colspan="6" class="px-4 py-12 text-center">
                   <span
                     class="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-white/5 dark:text-gray-500"
                   >
@@ -369,14 +365,6 @@ function priorityClass(priority) {
     case 'High': return 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300';
     case 'Medium': return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300';
     default: return 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300';
-  }
-}
-
-function confidenceClass(confidence) {
-  switch (confidence) {
-    case 'High': return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300';
-    case 'Medium': return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300';
-    default: return 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300';
   }
 }
 
