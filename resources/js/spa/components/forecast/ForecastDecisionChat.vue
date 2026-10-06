@@ -444,7 +444,10 @@ function submitQuestion() {
         item.item_name && lowered.includes(String(item.item_name).toLowerCase())
     ));
 
-    if (named && /why|explain|how come|reason|justify|urgent|high|priority/.test(lowered)) {
+    // A named item plus any question about its figure or rationale is answered
+    // for that item alone. "How many bond papers do I need?" should not return
+    // a ten-item ranking.
+    if (named && /why|explain|how come|reason|justify|urgent|high|priority|how many|how much|do i need|do we need|how much should/.test(lowered)) {
         messages.value = [...messages.value, { key: nextKey(), role: 'user', text }];
         askAboutItem(named);
 
@@ -482,23 +485,41 @@ function submitQuestion() {
     }
 
     {
-        guidance(text, 'That question is outside what this panel can answer. I can rank what to purchase first, '
-            + 'show what can wait, flag rows that need verification, explain one named item, '
-            + 'or follow up on the last list (for example "why is the second one urgent?").');
+        guidance(text, 'I can only answer procurement questions about this forecast. Try: '
+            + '"what should we purchase first?", "what can wait?", "which rows need verification?", '
+            + '"what step should I do next?", or name an item ("how many Bond Paper do I need?").');
     }
 }
 
 /**
- * Maps free text onto one of the three supported question kinds, or null when
- * it is not recognisably a decision question.
+ * Maps free text onto one of the supported question kinds, or null when it is
+ * not recognisably a decision question.
+ *
+ * Matched generously but on word boundaries, because custodians phrase the same
+ * four questions many ways ("what is you suggestions?", "any advice?", "which
+ * ones?", "give me a list"). Genuinely unrelated questions still fall through
+ * to guidance rather than being forced into a ranking.
  */
 function classify(lowered) {
-    // "What should I do next?" is asked before any list exists, so it is
-    // matched first and answered from the whole forecast.
-    if (/what (?:should|do|can) i do|what'?s? next|next step|what step|where do i (?:start|begin)|how do i (?:start|begin|proceed)|what are my (?:options|next)|guide me|help me (?:start|decide)|procedure|workflow/.test(lowered)) return 'next_steps';
-    if (/wait|defer|later|skip|postpone|can i delay/.test(lowered)) return 'deferrable';
-    if (/verif|trust|confiden|reliable|uncertain|insufficient/.test(lowered)) return 'verify_first';
-    if (/first|priorit|urgent|top|buy|purchase|need to order|recommend|why|explain|how come|reason/.test(lowered)) return 'purchase_first';
+    const t = lowered.trim();
+
+    // Checked first: "what should I do next?" is asked before any list exists,
+    // so it must be answered from the whole forecast rather than a follow-up.
+    if (/\b(?:what'?s?\s+next|next\s+steps?|what\s+steps?|what\s+(?:should|do|can)\s+(?:i|we)\s+(?:do|buy|order)|where\s+do\s+i\s+(?:start|begin)|how\s+do\s+i\s+(?:start|begin|proceed|go\s+about)|what\s+are\s+my\s+(?:options|next)|guide\s+me|help\s+me\s+(?:start|decide)|procedure|workflow|what'?s?\s+the\s+plan|what\s+is\s+the\s+plan|give\s+me\s+a\s+plan|step\s+by\s+step|how\s+do\s+i\s+proceed)\b/.test(t)) {
+        return 'next_steps';
+    }
+
+    if (/\b(?:wait|waits|defer|deferred|deferable|later|skip|skipping|postpone|delay|hold\s+off|not\s+urgent|leave\s+(?:it\s+)?(?:for\s+)?next|can\s+wait|anything\s+else)\b/.test(t)) {
+        return 'deferrable';
+    }
+
+    if (/\b(?:verif\w*|confirm|trust\w*|reliab\w*|uncertain\w*|insufficient|not\s+sure|safe\s+to\s+buy|check\s+(?:these|it|first)|double[\s-]?check|risks?|weak)\b/.test(t)) {
+        return 'verify_first';
+    }
+
+    if (/\b(?:suggest\w*|recommend\w*|advice|guidance|advise|priorit\w*|urgent|top\s*\d*|most\s+(?:needed|important|urgent|critical)|biggest\s+gaps?|start\s+with|focus\s+on|first\s+on\s+the\s+list|which\s+(?:items?|ones?|should|to)|what\s+(?:to|do\s+i\s+to|should\s+i\s+to|do\s+we\s+to)\s+(?:buy|order|get|purchase|procure|restock)|what\s+do\s+we\s+need|list\s+of\s+items|give\s+me\s+a\s+list|summary|overview|tell\s+me\s+what)\b/.test(t)) {
+        return 'purchase_first';
+    }
 
     return null;
 }

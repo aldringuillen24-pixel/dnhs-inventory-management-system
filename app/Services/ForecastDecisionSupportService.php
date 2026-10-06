@@ -370,7 +370,9 @@ class ForecastDecisionSupportService
                 ."3. Order the work: Urgent items, then High, then verification of weak-history suggestions, then deferring items with no gap.\n"
                 ."4. State that the final step is approval by the Property Custodian and the School Head, and that this does not create an order.\n"
                 ."5. Do not invent a price, budget, supplier, delivery date, or any step outside this workflow.\n"
-                ."6. Keep it under 160 words.\n";
+                ."6. Never name the data fields you were given. Write plain English, so say \"62 High priority items\", "
+                ."not \"62 items in cycle state\" and never mention gaps_needing_verification or selected_count.\n"
+                ."7. Keep it under 160 words.\n";
         }
 
         return "You are the decision support layer on top of a locally calculated inventory demand forecast.\n\n"
@@ -385,14 +387,16 @@ class ForecastDecisionSupportService
             ."4. You may recommend what to procure and what to defer. That is your role.\n"
             ."5. Never claim an order was placed or approved, or that inventory or stock was changed. "
             ."You only advise; a custodian approves separately.\n"
-            ."6. If status is not \"success\", say the item lacks enough verified history for an estimate and should be "
+            ."6. Never name the data fields you were given. Write plain English, so say \"62 High priority items\", "
+            ."not \"62 items in cycle state\" and never mention cycle_state, gaps_needing_verification or selected_count.\n"
+            ."7. If status is not \"success\", say the item lacks enough verified history for an estimate and should be "
             ."verified before use. Do not produce a suggested quantity for it.\n"
-            ."7. Prefer a short ranked list. State the reasoning for the first few items: the arithmetic "
+            ."8. Prefer a short ranked list. State the reasoning for the first few items: the arithmetic "
             ."(forecast demand + safety stock - available stock - pending demand) and the priority and confidence behind it.\n"
-            ."8. Format each item as ONE line, with no blank line between items: "
+            ."9. Format each item as ONE line, with no blank line between items: "
             ."**Item name** — buy N unit, Priority, Confidence confidence; basis: demand X + buffer Y - stock Z - pending W. "
             ."Extra blank lines turn the chat panel into an unreadable wall of text.\n"
-            ."9. Close with one line noting the forecast is advisory only.\n";
+            ."10. Close with one line noting the forecast is advisory only.\n";
     }
 
     /**
@@ -428,9 +432,16 @@ class ForecastDecisionSupportService
             return 'forbidden_claim';
         }
 
-        $names = collect($items)->pluck('item_name')->filter(fn (mixed $name): bool => is_string($name) && $name !== '');
-        if ($names->isEmpty() || $names->first(fn (string $name): bool => stripos($reply, $name) !== false) === null) {
-            return 'no_item_named';
+        // A next-steps answer is about the workflow, not specific items, so it
+        // legitimately references counts alone ("address the 62 High priority
+        // items"). Requiring an item name there rejected correct guidance. Every
+        // other prompt still must name a real selected item, and the number and
+        // forbidden-claim checks apply to all of them.
+        if (($facts['prompt_type'] ?? null) !== self::PROMPT_NEXT_STEPS) {
+            $names = collect($items)->pluck('item_name')->filter(fn (mixed $name): bool => is_string($name) && $name !== '');
+            if ($names->isEmpty() || $names->first(fn (string $name): bool => stripos($reply, $name) !== false) === null) {
+                return 'no_item_named';
+            }
         }
 
         return $this->unapprovedNumbers($reply, $facts) === [] ? null : 'unapproved_number';
@@ -546,13 +557,16 @@ class ForecastDecisionSupportService
     }
 
     /**
-     * Removes "1." / "2)" markers at the start of a line before the number check.
-     * A list position is not a claim about a quantity, and both the local answer
-     * and a provider reply may legitimately number their items.
+     * Removes list position markers before the number check.
+     *
+     * A position ("1.", "2)") is not a claim about a quantity, and both the
+     * local answer and a provider reply may legitimately number their items.
+     * Handles markers at the start of a line and after a sentence break, since
+     * a numbered list is not always written one item per line.
      */
     private function stripListOrdinals(string $text): string
     {
-        return (string) preg_replace('/^\s*\d{1,3}[.)]\s+/m', '', $text);
+        return (string) preg_replace('/(?:(?<=\.)|^)\s*\d{1,3}[.)]\s+/m', '', $text);
     }
 
     private function localAnswer(array $facts): string

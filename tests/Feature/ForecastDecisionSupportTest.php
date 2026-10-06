@@ -226,10 +226,10 @@ test('the local answer restates only values the forecast calculated', function (
 
     $approved = $approved->unique()->values();
 
-    // "1." / "2)" at the start of a line is a list position, not a quantity.
-    // `(?!\d)` stops the scanner backtracking to a prefix, so a product name
-    // like "Air Freshener 300ml" is not read as the quantity 30.
-    $scannable = preg_replace('/^\s*\d{1,3}[.)]\s+/m', '', $payload['answer']);
+    // "1." / "2)" is a list position, not a quantity, and a numbered list is not
+    // always one item per line. `(?!\d)` stops the scanner backtracking to a
+    // prefix, so "Air Freshener 300ml" is not read as the quantity 30.
+    $scannable = preg_replace('/(?:(?<=\.)|^)\s*\d{1,3}[.)]\s+/m', '', $payload['answer']);
 
     preg_match_all('/(?<![\pL\d])\d+(?:[,.]\d+)*(?!\d)(?![\pL])/u', (string) $scannable, $matches);
 
@@ -485,7 +485,7 @@ test('next steps cite only counts the forecast calculated', function () {
 
     // And nothing may appear that is not a real count. Step numbers ("1.", "2.")
     // are list positions, not claims, so they are stripped as the service does.
-    $scannable = preg_replace('/^\s*\d{1,3}[.)]\s+/m', '', $payload['answer']);
+    $scannable = preg_replace('/(?:(?<=\.)|^)\s*\d{1,3}[.)]\s+/m', '', $payload['answer']);
 
     preg_match_all('/(?<![\pL\d])\d+(?:[,.]\d+)*(?!\d)(?![\pL])/u', (string) $scannable, $matches);
     $allowed = collect($expected)->push(10)->map(fn ($n): string => (string) $n)
@@ -561,6 +561,52 @@ test('the grounding check approves server-computed cycle counts', function () {
 
     expect((new \ReflectionMethod($service, 'isGroundedReply'))->invoke($service, $reply, $facts))
         ->toBeTrue('Quoting server-computed cycle counts must be accepted.');
+});
+
+test('a next-steps reply may reference counts without naming an item', function () {
+    // Guidance about the workflow legitimately talks about counts alone
+    // ("address the 62 High priority items"). Requiring an item name there
+    // rejected correct answers and silently downgraded them.
+    $service = new ForecastDecisionSupportService(
+        app(\App\Services\AiCapabilityPolicy::class),
+        app(\App\Services\GeminiApiService::class),
+        app(StoredDemandForecastService::class),
+    );
+
+    $facts = [
+        'prompt_type' => ForecastDecisionSupportService::PROMPT_NEXT_STEPS,
+        'forecast_period' => 'October 2026',
+        'generated_at' => '2026-10-01T00:00:00+00:00',
+        'forecast_summary' => ['items_forecasted' => 99, 'items_needing_procurement' => 79],
+        'selected_count' => 10,
+        'max_items_shown' => 10,
+        'cycle_state' => ['items_with_gap' => 79, 'high' => 62, 'medium' => 17, 'deferrable' => 20],
+        'items' => [[
+            'item_name' => 'Bond Paper',
+            'forecast_demand' => 36,
+            'safety_stock' => 9,
+            'available_stock' => 5,
+            'pending_demand' => 0,
+            'suggested_procurement' => 40,
+        ]],
+    ];
+
+    $countsOnly = '1. Address the 62 High priority items. 2. Defer the 20 items with no gap. '
+        .'3. Approval by the Property Custodian and School Head. This does not create an order.';
+
+    $inventedCount = '1. Address the 412 High priority items.';
+
+    // Facts are passed per call: an arrow function captures by value, so
+    // mutating $facts afterwards would silently have no effect.
+    $check = fn (string $reply, array $subject): bool => (new \ReflectionMethod($service, 'isGroundedReply'))
+        ->invoke($service, $reply, $subject);
+
+    expect($check($countsOnly, $facts))->toBeTrue('Count-only guidance must be accepted.')
+        ->and($check($inventedCount, $facts))->toBeFalse('A count the forecast never produced must be rejected.');
+
+    // The same reply routed to purchase_first must still name a real item.
+    $ranked = array_merge($facts, ['prompt_type' => ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST]);
+    expect($check($countsOnly, $ranked))->toBeFalse('A ranked list must still name a real item.');
 });
 
 test('a follow-up narrows the previous answer to the items it named', function () {
