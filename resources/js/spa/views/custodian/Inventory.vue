@@ -367,11 +367,22 @@
                             Acquired {{ formatDate(row.date_acquired) }}
                           </span>
                         </div>
-                        <div
-                          v-for="meta in [groupMeta(row)]"
-                          :key="meta.key"
-                          class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]"
-                        >
+                        <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <button
+                            v-if="lifespanChip(row)"
+                            type="button"
+                            class="rounded-md px-1.5 py-0.5 font-medium transition-colors"
+                            :class="lifespanChipClass(row)"
+                            title="Show lifespan details"
+                            @click="openRecordModal(row)"
+                          >
+                            {{ lifespanChip(row) }}
+                          </button>
+                          <span
+                            v-for="meta in [groupMeta(row)]"
+                            :key="meta.key"
+                            class="flex flex-wrap items-center gap-1.5"
+                          >
                           <span
                             v-if="meta.count > 1"
                             class="rounded-md bg-gray-100 px-1.5 py-0.5 font-semibold text-gray-600 dark:bg-white/5 dark:text-gray-300"
@@ -389,6 +400,7 @@
                             class="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-gray-600 dark:bg-white/5 dark:text-gray-400"
                           >
                             SN {{ meta.serial }}
+                          </span>
                           </span>
                         </div>
                       </div>
@@ -612,6 +624,16 @@
             <div>
               <dt class="text-[11px] text-gray-500 dark:text-gray-400">Total Cost</dt>
               <dd class="mt-0.5 font-semibold text-gray-800 dark:text-gray-200">₱{{ money(recordGroup.total_cost) }}</dd>
+            </div>
+            <div v-if="lifespanLabel(recordGroup) || lifespanEndLabel(recordGroup)">
+              <dt class="text-[11px] text-gray-500 dark:text-gray-400">Lifespan</dt>
+              <dd class="mt-0.5 font-semibold text-gray-800 dark:text-gray-200">
+                <span v-if="lifespanLabel(recordGroup)">{{ lifespanLabel(recordGroup) }}</span>
+                <span v-if="lifespanLabel(recordGroup) && lifespanEndLabel(recordGroup)" class="mx-1" aria-hidden="true">·</span>
+                <span v-if="lifespanEndLabel(recordGroup)" :class="lifespanEndClass(recordGroup)">
+                  {{ lifespanEndLabel(recordGroup) }}
+                </span>
+              </dd>
             </div>
           </dl>
           <div class="mt-3 flex shrink-0 flex-wrap gap-1.5 border-t border-gray-200 pt-2.5 dark:border-gray-700 xl:hidden">
@@ -1891,6 +1913,83 @@ function formatDate(value) {
     return String(value);
   }
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Lifespan helpers. Both fields already come from the grouped listing query
+// (MAX(lifespan_years) / MAX(expected_end_date)), so this is display only — no
+// backend change. The accessor-driven lifespan_status is not serialized to the
+// SPA, so the tone here is derived from the end date using the same thresholds
+// as Inventory::lifespanStatus (past = expired, within a year = approaching).
+function lifespanYears(row) {
+  const years = Number(row?.lifespan_years ?? 0);
+  return Number.isFinite(years) && years > 0 ? years : 0;
+}
+
+function lifespanEndDate(row) {
+  const value = row?.expected_end_date;
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function lifespanEndLabel(row) {
+  const end = lifespanEndDate(row);
+  if (!end) {
+    return '';
+  }
+
+  return `Ends ${end.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`;
+}
+
+function lifespanLabel(row) {
+  const years = lifespanYears(row);
+  return years ? `${years} yr${years === 1 ? '' : 's'}` : '';
+}
+
+function lifespanTone(row) {
+  const end = lifespanEndDate(row);
+  if (!end) {
+    return 'unknown';
+  }
+  if (end.getTime() < Date.now()) {
+    return 'expired';
+  }
+  if (end.getTime() <= Date.now() + 365 * 24 * 60 * 60 * 1000) {
+    return 'approaching';
+  }
+
+  return 'healthy';
+}
+
+function lifespanChip(row) {
+  const years = lifespanLabel(row);
+  const ends = lifespanEndLabel(row);
+  if (!years && !ends) {
+    return '';
+  }
+
+  return years && ends ? `${years} · ${ends}` : (years || ends);
+}
+
+function lifespanChipClass(row) {
+  switch (lifespanTone(row)) {
+    case 'expired':
+      return 'bg-rose-50 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300';
+    case 'approaching':
+      return 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300';
+    case 'healthy':
+      return 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300';
+    default:
+      return 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/5 dark:text-gray-300';
+  }
+}
+
+function lifespanEndClass(row) {
+  return lifespanTone(row) === 'expired'
+    ? 'text-rose-600 dark:text-rose-400'
+    : '';
 }
 
 function formatMovementDate(movement) {
