@@ -19,7 +19,14 @@ class AiInventoryService
         $this->procurementMatcher = $procurementMatcher ?? new ProcurementQuestionMatcher();
     }
 
-    public function ask(User $user, string $question, array $result, array $history = []): string
+    /**
+     * Generate or fall back to a reply for an answered turn.
+     *
+     * The facts come from $result, never from the conversation: the provider is
+     * given the authorised fact packet and nothing else, so it cannot be
+     * steered by earlier chat text.
+     */
+public function ask(User $user, string $question, array $result): string
     {
         // Procurement and restock questions are answered by AI Decision Support
         // on the Demand Forecast page. This assistant no longer routes them, so

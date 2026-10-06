@@ -31,7 +31,7 @@ beforeEach(function () {
             parent::__construct($policy, app(\App\Services\GeminiApiService::class));
         }
 
-        public function route(string $question, array $activeTopic = []): array
+        public function route(string $question, array $activeTopic = [], array $turns = []): array
         {
             return $this->testRouter->route($question, $activeTopic);
         }

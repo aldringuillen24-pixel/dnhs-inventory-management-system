@@ -23,6 +23,16 @@ class ConversationContextManager
     private const CLARIFICATION_SESSION_PREFIX = 'ai.inventory_clarification.user.';
     private const COMPARISON_CONTEXT_SESSION_PREFIX = 'ai.inventory_comparison_context.user.';
     private const FORECAST_CONTEXT_SESSION_PREFIX = 'ai.demand_forecast_context.user.';
+    private const TURNS_SESSION_PREFIX = 'ai.inventory_turns.user.';
+
+    /**
+     * How many recent exchanges are kept.
+     *
+     * Bounded so the turn log stays a conversational aid rather than an
+     * unbounded transcript: it is appended to on every turn and would
+     * otherwise grow with the session.
+     */
+    private const MAX_TURNS = 6;
 
     public function __construct(
         protected AiCapabilityPolicy $capabilityPolicy,
@@ -51,6 +61,11 @@ class ConversationContextManager
         return self::FORECAST_CONTEXT_SESSION_PREFIX . $userId;
     }
 
+    public function turnsKey(int $userId): string
+    {
+        return self::TURNS_SESSION_PREFIX . $userId;
+    }
+
     /**
      * Read the whole session state for a user in one pass.
      *
@@ -74,8 +89,65 @@ class ConversationContextManager
             pendingClarification: $pendingClarification,
             comparison: $this->loadComparisonContext($request, $user),
             forecast: $this->loadForecastContext($request, $user),
-            turns: [],
+            turns: $this->loadTurns($request, $user),
         );
+    }
+
+    /**
+     * Recent exchanges, oldest first.
+     *
+     * TTL-bounded on the same window as the rest of the assistant's context, so
+     * a stale log is discarded rather than replayed.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function loadTurns(Request $request, User $user): array
+    {
+        $stored = $this->loadSessionRecord($request, $user, $this->turnsKey((int) $user->getAuthIdentifier()));
+        $turns = $stored['context'] ?? null;
+
+        if (! is_array($turns) || ! array_is_list($turns)) {
+            if ($stored !== null) {
+                $request->session()->forget($this->turnsKey((int) $user->getAuthIdentifier()));
+            }
+
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_slice($turns, -self::MAX_TURNS),
+            fn (array $turn): bool => is_string($turn['question'] ?? null) && is_string($turn['reply'] ?? null),
+        ));
+    }
+
+    /**
+     * Record one answered exchange.
+     *
+     * The log is built from what the user asked and what the assistant actually
+     * replied, never from client-supplied history.
+     */
+    public function appendTurn(
+        User $user,
+        string $question,
+        string $reply,
+        ?string $intent,
+        ?string $capability,
+        ?Request $request = null,
+    ): void {
+        $request ??= request();
+        if (! $request->hasSession()) {
+            return;
+        }
+
+        $turns = $this->loadTurns($request, $user);
+        $turns[] = [
+            'question' => $question,
+            'reply' => $reply,
+            'intent' => $intent,
+            'capability' => $capability,
+        ];
+
+        $this->put($request, $user, $this->turnsKey((int) $user->getAuthIdentifier()), array_values(array_slice($turns, -self::MAX_TURNS)));
     }
 
     /**
@@ -89,6 +161,9 @@ class ConversationContextManager
         $request->session()->forget($this->clarificationKey($userId));
         $request->session()->forget($this->comparisonContextKey($userId));
         $request->session()->forget($this->forecastContextKey($userId));
+        // The turn log is dropped with everything else so a lost role cannot
+        // leave earlier exchanges available to the next one.
+        $request->session()->forget($this->turnsKey($userId));
     }
 
     /**

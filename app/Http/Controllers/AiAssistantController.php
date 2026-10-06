@@ -139,7 +139,7 @@ class AiAssistantController extends Controller
                         'capability' => $pendingClarification['capability'] ?? null,
                         'response_type' => $pendingClarification['response_type'] ?? null,
                     ];
-                    $newQuestion = $this->intentParser->route($validated['message'], $clarificationAction);
+                    $newQuestion = $this->intentParser->route($validated['message'], $clarificationAction, $state->turns);
                     $startsNewSupportedQuestion = ($newQuestion['follow_up'] ?? false) === false
                         && ($newQuestion['capability'] ?? null) !== null
                         && ($newQuestion['needs_clarification'] ?? false) === false;
@@ -177,7 +177,7 @@ class AiAssistantController extends Controller
                 $routedQuestion = $this->applicationFollowUp($validated['message'], $context);
             }
 
-            $routedQuestion ??= $this->intentParser->route($validated['message'], $context ?? []);
+            $routedQuestion ??= $this->intentParser->route($validated['message'], $context ?? [], $state->turns);
             if ($result === null) {
                 $result = $this->answerService->answer($user, $routedQuestion);
             }
@@ -213,6 +213,14 @@ class AiAssistantController extends Controller
 
             $this->conversationContext->updateContext($request, $user, $routedQuestion, $result);
             $this->conversationContext->updateClarification($request, $user, $routedQuestion, $result);
+            $this->conversationContext->appendTurn(
+                $user,
+                $validated['message'],
+                $reply,
+                is_string($routedQuestion['intent'] ?? null) ? $routedQuestion['intent'] : null,
+                is_string($routedQuestion['capability'] ?? null) ? $routedQuestion['capability'] : null,
+                $request,
+            );
 
             return response()->json([
                 'success' => true,

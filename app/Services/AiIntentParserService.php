@@ -55,6 +55,12 @@ class AiIntentParserService
 
     private const TOPIC_ACTIONS = ['continue_topic', 'new_topic', 'unclear'];
 
+    /**
+     * How many recent exchanges are shown to the classifier. Kept small so the
+     * classification prompt stays small and predictable.
+     */
+    private const MAX_PARSE_TURNS = 4;
+
     public function __construct(
         private AiCapabilityPolicy $capabilityPolicy,
         private GeminiApiService $geminiApi,
@@ -62,7 +68,7 @@ class AiIntentParserService
     {
     }
 
-    public function parse(string $question, array $activeTopic = []): ?array
+    public function parse(string $question, array $activeTopic = [], array $turns = []): ?array
     {
         if (! is_string(config('services.gemini.api_key')) || trim((string) config('services.gemini.api_key')) === '') {
             return null;
@@ -73,7 +79,7 @@ class AiIntentParserService
                 $this->systemPrompt(),
                 json_encode([
                     'question' => $question,
-                    'active_topic' => $this->safeTopicForParsing($activeTopic),
+                    'active_topic' => $this->safeTopicForParsing($activeTopic, $turns),
                 ], JSON_UNESCAPED_SLASHES) ?: '',
                 [
                     'responseFormat' => [
@@ -116,7 +122,7 @@ class AiIntentParserService
         }
     }
 
-    public function route(string $question, array $activeTopic = []): array
+    public function route(string $question, array $activeTopic = [], array $turns = []): array
     {
         $normalized = mb_strtolower(trim($question));
         $common = [
@@ -144,7 +150,7 @@ class AiIntentParserService
             ];
         }
 
-        $parsed = $this->parse($question, $activeTopic);
+        $parsed = $this->parse($question, $activeTopic, $turns);
 
         if ($parsed === null || $parsed['topic_action'] === 'unclear' || $parsed['intent'] === 'unclear') {
             return [
@@ -328,7 +334,17 @@ class AiIntentParserService
             && $this->capabilityPolicy->isKnownCapability($topic['capability']);
     }
 
-    private function safeTopicForParsing(array $topic): array
+    /**
+     * Reduce stored context to the handful of scalar fields the classifier is
+     * allowed to see, plus a short window of recent exchanges.
+     *
+     * Turns are assistant-side only and every field is length-capped, so a long
+     * reply or a client-supplied string cannot bloat or steer the prompt.
+     *
+     * @param  array<int, array<string, mixed>>  $turns
+     * @return array<string, mixed>
+     */
+    private function safeTopicForParsing(array $topic, array $turns = []): array
     {
         $safe = [];
         foreach (['prior_intent', 'capability', 'response_type', 'reference_type', 'item_name'] as $key) {
@@ -336,6 +352,25 @@ class AiIntentParserService
             if (is_string($value) && mb_strlen($value) <= 255) {
                 $safe[$key] = $value;
             }
+        }
+
+        $recentTurns = array_values(array_filter(array_map(
+            function (array $turn): array {
+                $question = is_string($turn['question'] ?? null) ? mb_substr($turn['question'], 0, 255) : null;
+                $reply = is_string($turn['reply'] ?? null) ? mb_substr($turn['reply'], 0, 255) : null;
+
+                return array_filter([
+                    'question' => $question,
+                    'reply' => $reply,
+                    'intent' => is_string($turn['intent'] ?? null) ? mb_substr($turn['intent'], 0, 64) : null,
+                    'capability' => is_string($turn['capability'] ?? null) ? mb_substr($turn['capability'], 0, 64) : null,
+                ], fn ($value): bool => $value !== null);
+            },
+            array_slice(array_values($turns), -self::MAX_PARSE_TURNS),
+        ), fn (array $turn): bool => ($turn['question'] ?? null) !== null && ($turn['reply'] ?? null) !== null));
+
+        if ($recentTurns !== []) {
+            $safe['recent_turns'] = $recentTurns;
         }
 
         return $safe;
