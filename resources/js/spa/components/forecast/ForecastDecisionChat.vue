@@ -54,8 +54,11 @@
         >
           <p class="whitespace-pre-line" v-html="renderMarkdown(message.text)"></p>
 
-          <p v-if="message.source === 'local'" class="mt-1.5 text-[10px] italic opacity-70">
-            Deterministic summary — provider unavailable, unconfigured, or not grounded in the forecast.
+          <!-- Only shown when a provider was genuinely involved and its answer was
+               not used. Messages written by this UI itself (greetings, out-of-scope
+               guidance) carry no source and are never labelled a fallback. -->
+          <p v-if="sourceNote(message)" class="mt-1.5 text-[10px] italic opacity-70">
+            {{ sourceNote(message) }}
           </p>
 
           <!-- Export: the AI orders, the forecast supplies the numbers. -->
@@ -232,6 +235,31 @@ function renderMarkdown(text) {
     }
 }
 
+/**
+ * Names the real reason an answer came from the deterministic summary instead of
+ * the provider. The previous single sentence covered three unrelated causes and
+ * was also printed under text this UI wrote itself, which made a working Gemini
+ * integration look broken.
+ */
+function sourceNote(message) {
+    if (message.role !== 'ai' || !message.source || message.source === 'provider') {
+        return '';
+    }
+
+    switch (message.providerStatus) {
+        case 'no_key':
+            return 'Deterministic summary — no AI provider key is configured in this environment.';
+        case 'request_failed':
+            return 'Deterministic summary — the AI provider could not be reached.';
+        case 'reply_rejected':
+            return 'Deterministic summary — the AI reply cited figures the forecast did not calculate, so the verified numbers are shown instead.';
+        case 'not_attempted':
+            return 'Deterministic summary — the AI provider was not contacted.';
+        default:
+            return 'Deterministic summary — calculated directly from the forecast.';
+    }
+}
+
 function scrollToBottom() {
     nextTick(() => {
         if (logRef.value) {
@@ -257,6 +285,7 @@ async function run(promptType, label) {
                 role: 'ai',
                 text: data.answer,
                 source: data.source,
+                providerStatus: data.provider_status,
                 promptType: data.prompt_type,
                 inventoryIds: data.inventory_ids ?? [],
             },
@@ -269,6 +298,7 @@ async function run(promptType, label) {
                 role: 'ai',
                 text: requestError?.response?.data?.message ?? 'Could not answer that question from the current forecast.',
                 source: 'local',
+                providerStatus: 'request_failed',
                 inventoryIds: [],
             },
         ];
@@ -284,6 +314,11 @@ function askPrompt(prompt) {
     run(prompt.type, questions[prompt.type] ?? prompt.label);
 }
 
+/**
+ * Appends a message this panel composed itself. No `source` is set, because no
+ * AI provider was involved — these must never be captioned as a provider
+ * fallback. Pass `source`/`providerStatus` when relaying a backend answer.
+ */
 function pushAssistant(text, options = {}) {
     messages.value = [
         ...messages.value,
@@ -291,7 +326,6 @@ function pushAssistant(text, options = {}) {
             key: nextKey(),
             role: 'ai',
             text,
-            source: 'local',
             inventoryIds: [],
             ...options,
         },
@@ -314,7 +348,7 @@ async function askAboutItem(item) {
             inventory_id: item.inventory_id,
         }, { skipToast: true });
 
-        pushAssistant(data.explanation);
+        pushAssistant(data.explanation, { source: data.source ?? 'local' });
     } catch (requestError) {
         pushAssistant(requestError?.response?.data?.message ?? 'Could not explain that item from the current forecast.');
     } finally {
@@ -401,11 +435,9 @@ async function exportList(message) {
             try {
                 const payload = JSON.parse(text);
 
-                messages.value = [
-                    ...messages.value,
-                    { key: nextKey(), role: 'ai', text: payload.message, source: 'local', inventoryIds: [] },
-                ];
-                scrollToBottom();
+                // A server-side refusal (stale ids, role, missing forecast) is
+                // not a provider fallback, so it is reported without a caption.
+                pushAssistant(payload.message);
 
                 return;
             } catch {
@@ -413,17 +445,7 @@ async function exportList(message) {
             }
         }
 
-        messages.value = [
-            ...messages.value,
-            {
-                key: nextKey(),
-                role: 'ai',
-                text: 'Could not produce the procurement list PDF. Refresh model training, then ask again.',
-                source: 'local',
-                inventoryIds: [],
-            },
-        ];
-        scrollToBottom();
+        pushAssistant('Could not produce the procurement list PDF. Refresh model training, then ask again.');
     } finally {
         exportingKey.value = null;
     }

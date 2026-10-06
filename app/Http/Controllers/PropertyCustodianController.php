@@ -8,9 +8,11 @@ use App\Models\User;
 use App\Models\Transaction;
 use App\Models\Inventory;
 use App\Models\StockMovement;
+use App\Services\ForecastDecisionSupportService;
 use App\Services\ForecastExplanationService;
 use App\Services\InventoryOperationService;
 use App\Services\StoredDemandForecastService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +24,7 @@ class PropertyCustodianController extends Controller
     public function __construct(
         protected ForecastExplanationService $forecastExplanationService,
         protected StoredDemandForecastService $storedForecastService,
+        protected ForecastDecisionSupportService $forecastDecisionSupport,
         protected InventoryOperationService $inventoryOperations
     )
     {
@@ -195,12 +198,116 @@ class PropertyCustodianController extends Controller
             return response()->json([
                 'explanation' => $explanation['explanation'],
                 'item' => $row['item_name'],
+                // Passed through so the SPA can tell a Gemini-written
+                // explanation from the deterministic one. It was previously
+                // dropped here, and the client then assumed "local" and blamed
+                // the provider for text it had never requested.
+                'source' => $explanation['source'] ?? 'local',
             ]);
         }
 
         return redirect()->route('propertyCustodian.reports')
             ->with('forecastExplanation', $explanation['explanation'])
             ->with('forecastExplanationItem', $row['item_name']);
+    }
+
+    /**
+     * Forecast-only decision support. The ranked selection is produced locally by
+     * ForecastDecisionSupportService, so `inventory_ids` always matches the rows
+     * shown in the forecast table and later re-exported as a PDF.
+     */
+    public function forecastDecisionSupport(Request $request)
+    {
+        $validated = $request->validate([
+            'prompt_type' => ['required', 'string', Rule::in(ForecastDecisionSupportService::PROMPT_TYPES)],
+        ]);
+
+        $result = $this->forecastDecisionSupport->answer($request->user(), $validated['prompt_type']);
+
+        if (($result['status'] ?? null) === 'forbidden') {
+            return response()->json(['message' => $result['message']], 403);
+        }
+
+        if (($result['status'] ?? null) !== 'success') {
+            return response()->json(['message' => $result['message']], 422);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * Renders an AI-recommended procurement list as a signed PDF.
+     *
+     * The rows are re-read from the stored forecast rather than trusted from the
+     * client, so the printed quantities always match the model output. IDs that
+     * are no longer forecast (deleted items, stale training run) are reported
+     * instead of being silently dropped.
+     */
+    public function forecastProcurementListPdf(Request $request)
+    {
+        $validated = $request->validate([
+            'inventory_ids' => ['required', 'array', 'min:1', 'max:'.ForecastDecisionSupportService::MAX_SELECTED_ITEMS],
+            'inventory_ids.*' => ['required', 'integer', 'min:1'],
+            'prompt_type' => ['nullable', 'string', Rule::in(ForecastDecisionSupportService::PROMPT_TYPES)],
+        ]);
+
+        $forecast = $this->storedForecastService->read($request->user());
+
+        if (($forecast['status'] ?? null) === 'forbidden') {
+            return response()->json(['message' => 'That information is not available for your role.'], 403);
+        }
+
+        if (($forecast['status'] ?? null) !== 'success') {
+            return response()->json([
+                'message' => 'No trained production ML forecast is available, so no procurement list can be produced.',
+            ], 422);
+        }
+
+        $rowsById = collect($forecast['rows'] ?? [])->keyBy('inventory_id');
+        $items = [];
+        $missing = [];
+
+        // The client's ordering is preserved so the printed list matches the
+        // ranking the assistant presented.
+        foreach ($validated['inventory_ids'] as $inventoryId) {
+            $row = $rowsById->get($inventoryId);
+
+            if (! is_array($row)) {
+                $missing[] = (int) $inventoryId;
+
+                continue;
+            }
+
+            $items[] = $row;
+        }
+
+        if ($missing !== []) {
+            return response()->json([
+                'message' => 'These items are no longer in the current forecast, so the list cannot be produced: '
+                    .implode(', ', $missing).'. Retrain the model, then ask again.',
+                'missing_inventory_ids' => $missing,
+            ], 422);
+        }
+
+        $promptType = $validated['prompt_type'] ?? ForecastDecisionSupportService::PROMPT_PURCHASE_FIRST;
+        $generatedAt = is_string($forecast['generated_at'] ?? null)
+            ? Carbon::parse($forecast['generated_at'])
+            : null;
+        $period = $forecast['forecast_period'] ?? 'Forecast period unavailable';
+
+        $pdf = Pdf::loadView('pdfs.procurement-priority-list', [
+            'items' => $items,
+            'question' => ForecastDecisionSupportService::questionLabel($promptType),
+            'forecastPeriod' => $period,
+            'generatedAt' => $generatedAt?->format('F j, Y g:i A'),
+            'preparedBy' => $request->user()->username,
+            'itemCount' => count($items),
+            'totalUnits' => (int) collect($items)->sum(fn (array $row): int => (int) ($row['suggested_procurement'] ?? 0)),
+        ]);
+
+        $slug = str($period)->slug('-')->value() ?: 'forecast';
+
+        return $pdf->download("procurement-priority-list-{$slug}.pdf");
     }
 
     public function forecastRecommendations(Request $request)
