@@ -209,7 +209,6 @@
             >
               <option value="suggested">Suggested quantity</option>
               <option value="demand">Forecast demand</option>
-              <option value="available">Available stock</option>
               <option value="name">Item name</option>
             </select>
           </div>
@@ -226,14 +225,12 @@
 
         <!-- Recommendations table -->
         <div class="max-h-[70vh] overflow-auto">
-          <table class="w-full min-w-[72rem] text-left text-sm">
+          <table class="w-full min-w-[58rem] text-left text-sm">
             <thead class="sticky top-0 z-10 bg-gray-50 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-800 dark:text-gray-400">
               <tr>
                 <th class="px-4 py-3">Item</th>
                 <th class="px-3 py-3">Category</th>
                 <th class="px-3 py-3 text-right">Predicted demand</th>
-                <th class="px-3 py-3 text-right">Available stock</th>
-                <th class="px-3 py-3 text-right">Pending demand</th>
                 <th class="px-3 py-3 text-right">Safety stock</th>
                 <th class="px-3 py-3 text-right">Suggested quantity</th>
                 <th class="px-3 py-3">Priority</th>
@@ -253,7 +250,7 @@
                   <td class="px-4 py-3">
                     <span class="block h-4 w-40 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
                   </td>
-                  <td v-for="column in 9" :key="`skeleton-cell-${column}`" class="px-3 py-3">
+                  <td v-for="column in 7" :key="`skeleton-cell-${column}`" class="px-3 py-3">
                     <span
                       class="block h-4 animate-pulse rounded bg-gray-200/70 dark:bg-white/10"
                       :class="column === 1 ? 'w-28' : 'w-16 ml-auto'"
@@ -268,8 +265,6 @@
                   <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">{{ row.item_name }}</td>
                   <td class="px-3 py-3 text-gray-600 dark:text-gray-300">{{ row.category }}</td>
                   <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.forecast_demand ?? 'N/A' }} {{ row.unit }}</td>
-                  <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.available_stock }} {{ row.unit }}</td>
-                  <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.pending_demand }} {{ row.unit }}</td>
                   <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.safety_stock ?? 'N/A' }} {{ row.unit }}</td>
                   <td class="px-3 py-3 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{{ row.suggested_procurement ?? 'N/A' }} {{ row.unit }}</td>
                   <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium" :class="priorityClass(row.priority)">{{ row.priority }}</span></td>
@@ -278,7 +273,7 @@
                 </tr>
               </template>
               <tr v-if="!rows.length">
-                <td colspan="10" class="px-4 py-12 text-center">
+                <td colspan="8" class="px-4 py-12 text-center">
                   <span
                     class="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-white/5 dark:text-gray-500"
                   >
