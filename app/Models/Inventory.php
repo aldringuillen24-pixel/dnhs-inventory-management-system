@@ -2,12 +2,51 @@
 
 namespace App\Models;
 
+use App\Support\SampleForecastData;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Inventory extends Model
 {
     use HasFactory;
+
+    /**
+     * Sample rows exist so the demand-forecast model has history on a fresh
+     * installation. They must not be visible as real property, so they are
+     * filtered out here rather than at each call site: there are dozens of
+     * inventory queries across the app and a filter that has to be remembered
+     * would eventually be forgotten, putting fake stock in front of a user.
+     *
+     * The forecast reader and the training command opt back in by name with
+     * withoutGlobalScope(SampleForecastData::SCOPE).
+     */
+    protected static function booted(): void
+    {
+        static::addGlobalScope(SampleForecastData::SCOPE, function ($query) {
+            // Identified by the ledger rather than by a marker on the row
+            // itself. Two reasons:
+            //
+            //  - AiAssistantLocalFactsTest requires that no ordinary inventory
+            //    query mentions the description column at all, so the AI cannot
+            //    answer from an internal receiving note. Filtering on
+            //    description here would put that column into every query.
+            //  - No schema change is needed to add a marker column, which
+            //    matters because a scope referencing a missing column breaks
+            //    every inventory query on an installation that has not run the
+            //    migration.
+            //
+            // Every sample item has at least its opening stock_in, so "has a
+            // sample movement" and "is sample data" are the same set.
+            $query->whereNotExists(function ($movements) {
+                $movements->selectRaw('1')
+                    ->from('stock_movements')
+                    ->whereColumn('stock_movements.inventory_id', 'inventory.item_id')
+                    ->where(fn ($notes) => $notes
+                        ->where('stock_movements.notes', 'like', SampleForecastData::MOVEMENT_PREFIX.'%')
+                        ->orWhere('stock_movements.notes', 'like', SampleForecastData::LEGACY_MOVEMENT_PREFIX.'%'));
+            });
+        });
+    }
 
     protected $table = 'inventory';
 

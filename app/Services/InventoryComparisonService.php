@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\DTOs\InventoryComparisonData;
 use App\Models\Inventory;
+use App\Support\SampleForecastData;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -430,6 +431,26 @@ class InventoryComparisonService
                 ->whereNotNull('maintenance_records.completed_at'),
             default => throw ValidationException::withMessages(['metric' => 'Choose a supported comparison metric.']),
         };
+
+        // These branches are raw query-builder joins, which never see the
+        // Inventory and StockMovement global scopes, so sample forecast rows
+        // would otherwise be counted here and reported by the assistant as
+        // though they described real stock. The join is an inner join, so
+        // excluding the item is enough to exclude its movements and requests.
+        //
+        // Mirrors Inventory's own scope rather than filtering on
+        // inventory.description: the assistant must not answer from that
+        // column, so it must not appear in the query either.
+        if (collect($query->joins ?? [])->contains(fn ($join) => ($join->table ?? '') === 'inventory')) {
+            $query->whereNotExists(function ($movements) {
+                $movements->selectRaw('1')
+                    ->from('stock_movements')
+                    ->whereColumn('stock_movements.inventory_id', 'inventory.item_id')
+                    ->where(fn ($notes) => $notes
+                        ->where('stock_movements.notes', 'like', SampleForecastData::MOVEMENT_PREFIX.'%')
+                        ->orWhere('stock_movements.notes', 'like', SampleForecastData::LEGACY_MOVEMENT_PREFIX.'%'));
+            });
+        }
 
         if ($itemId !== null) {
             $query->where($metric === 'request_count' ? 'requests.item_id' : 'inventory.item_id', $itemId);

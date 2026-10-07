@@ -6,6 +6,7 @@ use App\Models\AssignmentRequest;
 use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\User;
+use App\Support\SampleForecastData;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -274,7 +275,12 @@ class StoredDemandForecastService
         }
 
         $forecastItems = [...$payload['forecasts'], ...$payload['insufficient_history']];
+        // Sample forecast rows are hidden from every other part of the app, but
+        // this is the one screen they exist for. Without this opt-out every row
+        // would look like an orphaned item and the whole forecast would be
+        // refused as empty -- the same failure mode as the deleted-item bug.
         $inventory = Inventory::query()
+            ->withoutGlobalScope(SampleForecastData::SCOPE)
             ->with('category:category_id,category_name')
             ->whereIn('item_id', collect($forecastItems)->pluck('inventory_id')->all())
             ->get()

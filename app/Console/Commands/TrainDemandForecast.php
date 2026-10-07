@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\ForecastPayload;
 use App\Models\StockMovement;
 use App\Services\StoredDemandForecastService;
+use App\Support\SampleForecastData;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -174,7 +175,21 @@ class TrainDemandForecast extends Command
             ]);
 
             $this->eligibleDemandMovements($completedMonth)
-                ->with('inventory.category')
+                // The scope has to be dropped here too, not only in the
+                // whereHas above. withoutGlobalScope in a whereHas only affects
+                // filtering; eager loading rebuilds the relation with the model's
+                // own scopes, so $movement->inventory came back null for every
+                // sample row and the guard below skipped all of them, producing
+                // a header-only CSV and a training run with nothing to learn from.
+                //
+                // The constraint is attached to 'inventory' rather than to
+                // 'inventory.category', because on a nested eager load Laravel
+                // hands the closure to the deepest relation -- constraining
+                // 'inventory.category' alone leaves inventory still scoped.
+                ->with([
+                    'inventory' => fn ($inventory) => $inventory->withoutGlobalScope(SampleForecastData::SCOPE),
+                    'inventory.category',
+                ])
                 ->orderBy('created_at')
                 ->each(function (StockMovement $movement) use ($handle, $historyStarts, $historyEndMonth): void {
                     if (! $movement->inventory) {
@@ -206,6 +221,9 @@ class TrainDemandForecast extends Command
         $hasIssuanceTables = Schema::hasTable('assignment_requests') && Schema::hasTable('transactions');
 
         return StockMovement::query()
+            // The training data may legitimately be the sample history on a
+            // fresh installation, which the global scope hides everywhere else.
+            ->withoutGlobalScope(SampleForecastData::SCOPE)
             ->where('quantity', '>', 0)
             ->where('created_at', '<', $completedMonth)
             ->where(function ($query) use ($hasIssuanceTables): void {
@@ -238,12 +256,19 @@ class TrainDemandForecast extends Command
                             });
                     }));
             })
-            ->whereHas('inventory.category', function ($category): void {
-                $category->where('requires_serial_number', false)
-                    ->where(function ($terms): void {
-                        foreach (self::DEMAND_CATEGORY_TERMS as $term) {
-                            $terms->orWhereRaw('LOWER(category_name) LIKE ?', ['%'.$term.'%']);
-                        }
+            // Split into two steps so the inventory half can drop the scope that hides
+            // sample rows. Written as whereHas('inventory.category', ...) the
+            // scope is applied by the nested relation and the sample items
+            // would silently stop contributing their history.
+            ->whereHas('inventory', function ($inventory): void {
+                $inventory->withoutGlobalScope(SampleForecastData::SCOPE)
+                    ->whereHas('category', function ($category): void {
+                        $category->where('requires_serial_number', false)
+                            ->where(function ($terms): void {
+                                foreach (self::DEMAND_CATEGORY_TERMS as $term) {
+                                    $terms->orWhereRaw('LOWER(category_name) LIKE ?', ['%'.$term.'%']);
+                                }
+                            });
                     });
             });
     }
