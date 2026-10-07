@@ -7,6 +7,7 @@ use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -285,11 +286,25 @@ class StoredDemandForecastService
             ->groupBy('item_id')
             ->map(fn ($requests): int => (int) $requests->sum('quantity'));
 
+        // A forecast row whose inventory item has since been deleted, or moved
+        // to a different category, no longer describes anything real: its
+        // "buy N" figure was derived against that item and that category. So
+        // the row is dropped rather than shown.
+        //
+        // It used to reject the whole document on the first miss, which meant
+        // deleting one routine inventory item emptied the entire forecast page
+        // for every user. Dropping only the orphaned rows keeps the remaining
+        // predictions usable; a genuinely unreadable document is still refused
+        // above, by validateLivePayload(), and a forecast that has lost every
+        // row is still refused below.
         $rows = collect();
+        $orphaned = [];
         foreach ($forecastItems as $item) {
             $record = $inventory->get($item['inventory_id']);
             if (! $record || (int) $record->category_id !== $item['category_id']) {
-                return $this->errorResult();
+                $orphaned[] = (int) $item['inventory_id'];
+
+                continue;
             }
 
             $rows->push($this->validatedForecastRow(
@@ -297,6 +312,21 @@ class StoredDemandForecastService
                 $record,
                 (int) ($pendingDemand->get($record->item_id) ?? 0),
             ));
+        }
+
+        if ($orphaned !== []) {
+            Log::info('Stored demand forecast skipped rows with no matching inventory item.', [
+                'orphaned_inventory_ids' => $orphaned,
+                'kept_rows' => $rows->count(),
+                'forecast_month' => $payload['forecasts'][0]['forecast_month'] ?? null,
+            ]);
+        }
+
+        // Every row was orphaned, so there is nothing left to present. This is
+        // distinct from a corrupt document: the file is fine, the inventory it
+        // was trained against is simply gone.
+        if ($rows->isEmpty()) {
+            return $this->errorResult();
         }
 
         $successfulRows = $rows->where('status', 'success');

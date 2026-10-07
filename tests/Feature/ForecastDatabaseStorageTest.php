@@ -227,6 +227,99 @@ test('a corrupt stored document is refused instead of crashing the page', functi
     expect(app(StoredDemandForecastService::class)->read($this->custodian)['status'])->toBe('error');
 });
 
+test('deleting one item drops only its row instead of emptying the forecast', function () {
+    Storage::fake('forecast');
+
+    // Three items are forecast and present in inventory...
+    ($this->makeItem)(9001);
+    ($this->makeItem)(9002);
+    ($this->makeItem)(9003);
+
+    $payload = json_decode(
+        phase8Document(now()->toIso8601String(), 9001, (int) $this->category->category_id),
+        true,
+        512,
+        JSON_THROW_ON_ERROR
+    );
+    // ...and the trained document describes all three.
+    $payload['forecasts'][1] = $payload['forecasts'][0];
+    $payload['forecasts'][1]['inventory_id'] = 9002;
+    $payload['forecasts'][2] = $payload['forecasts'][0];
+    $payload['forecasts'][2]['inventory_id'] = 9003;
+
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($payload, JSON_THROW_ON_ERROR),
+    );
+
+    expect(app(StoredDemandForecastService::class)->read($this->custodian)['rows'])->toHaveCount(3);
+
+    // Routine housekeeping: the custodian deletes one item.
+    Inventory::whereKey(9002)->delete();
+
+    $after = app(StoredDemandForecastService::class)->read($this->custodian);
+
+    // The remaining predictions must survive.
+    expect($after['status'])->toBe('success')
+        ->and($after['rows'])->toHaveCount(2)
+        ->and(collect($after['rows'])->pluck('inventory_id')->all())->toBe([9001, 9003]);
+});
+
+test('an item moved to another category drops only its own row', function () {
+    Storage::fake('forecast');
+
+    ($this->makeItem)(9001);
+    $moved = ($this->makeItem)(9002);
+
+    $payload = json_decode(
+        phase8Document(now()->toIso8601String(), 9001, (int) $this->category->category_id),
+        true,
+        512,
+        JSON_THROW_ON_ERROR
+    );
+    $payload['forecasts'][1] = $payload['forecasts'][0];
+    $payload['forecasts'][1]['inventory_id'] = 9002;
+
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($payload, JSON_THROW_ON_ERROR),
+    );
+
+    // The forecast was trained for School Supplies; recategorising invalidates
+    // that row, but must not invalidate the other one.
+    $other = Category::firstOrCreate(['category_name' => 'Furniture'], ['requires_serial_number' => false]);
+    $moved->forceFill(['category_id' => $other->category_id])->save();
+
+    $after = app(StoredDemandForecastService::class)->read($this->custodian);
+
+    expect($after['status'])->toBe('success')
+        ->and($after['rows'])->toHaveCount(1)
+        ->and($after['rows'][0]['inventory_id'])->toBe(9001);
+});
+
+test('a forecast whose items have all been deleted is still refused', function () {
+    Storage::fake('forecast');
+
+    $item = ($this->makeItem)(9001);
+
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        phase8Document(now()->toIso8601String(), 9001, (int) $this->category->category_id),
+    );
+
+    expect(app(StoredDemandForecastService::class)->read($this->custodian)['rows'])->toHaveCount(1);
+
+    $item->delete();
+
+    // Nothing is left to present, so the page must say so rather than render
+    // an empty table as though the forecast simply had no items.
+    $after = app(StoredDemandForecastService::class)->read($this->custodian);
+    expect($after['status'])->toBe('error')->and($after['rows'])->toBeEmpty();
+});
+
 test('decision support reads the same database forecast', function () {
     Storage::fake('forecast');
 

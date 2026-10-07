@@ -48,7 +48,12 @@
     </div>
 
     <template v-else>
-      <!-- Forecast status error -->
+      <!-- Forecast status: a banner above the panel, never a replacement for it.
+
+           Both halves of the panel render fine without a forecast. The chat says
+           "No forecast loaded." and still answers what it can, and the table
+           shows an empty body. Replacing the panel with a full-page message hid
+           working UI and made an explained state look like a broken page. -->
       <div
         v-if="['error', 'stale', 'failed'].includes(forecastStatus)"
         class="rounded-md border border-rose-200 bg-rose-50 p-5 dark:border-rose-900/50 dark:bg-rose-950/20"
@@ -66,19 +71,17 @@
         </button>
       </div>
 
-      <!-- Empty: only when the stored forecast genuinely has no rows. A filter that
-           matches nothing keeps the panel (and the filters) on screen and shows
-           "no recommendations match" inside the table instead. -->
+      <!-- No forecast at all. A banner for the same reason as the status above. -->
       <div
         v-else-if="!hasForecastRows"
-        class="rounded-md border border-gray-200 bg-white p-8 text-center dark:border-gray-800 dark:bg-gray-900"
+        class="rounded-md border border-amber-200 bg-amber-50 p-5 dark:border-amber-800/40 dark:bg-amber-950/30"
       >
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white">No demand forecast available</h2>
-        <p class="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">No trained production ML forecast is available. Model training runs separately from chat and reports.</p>
+        <h2 class="text-base font-semibold text-amber-900 dark:text-amber-200">No demand forecast available</h2>
+        <p class="mt-1 text-sm text-amber-800 dark:text-amber-300">No trained production ML forecast is available. Model training runs separately from chat and reports.</p>
         <button
           type="button"
           :disabled="reloading"
-          class="mt-4 inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+          class="mt-3 inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
           @click="reloadForecast"
         >
           <LucideIcon :icon="RefreshCw" class="h-4 w-4" :class="{ 'animate-spin': reloading }" />
@@ -88,8 +91,11 @@
 
       <!-- Results panel: forecast-only decision support on the left, the
            recommendation table on the right. The table keeps its own scroll so
-           narrowing the split never crops the rows. -->
-      <div v-else class="custodian-panel overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+           narrowing the split never crops the rows.
+
+           Always rendered, including with no forecast, so the page keeps its
+           shape and the user can see which surface is unavailable and why. -->
+      <div class="custodian-panel overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <div class="grid grid-cols-1 lg:grid-cols-[25rem_minmax(0,1fr)] xl:grid-cols-[27rem_minmax(0,1fr)]">
           <div
             class="min-h-0 max-h-[86vh] border-b border-gray-200/80 dark:border-gray-800 lg:border-b-0 lg:border-r"
@@ -305,7 +311,14 @@
                   >
                     <LucideIcon :icon="PackageSearch" class="h-5 w-5" />
                   </span>
-                  <p class="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200">No recommendations match these filters.</p>
+                  <p class="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200">
+                    {{ hasForecastRows
+                      ? 'No recommendations match these filters.'
+                      : 'No forecast rows are available yet.' }}
+                  </p>
+                  <p v-if="!hasForecastRows" class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Run a valid model refresh to populate this table.
+                  </p>
                 </td>
               </tr>
               </template>
@@ -469,6 +482,13 @@ async function load() {
     }
   } catch (requestError) {
     error.value = requestError?.response?.data?.message ?? 'Could not load forecast recommendations.';
+    // These rows came from an earlier successful load. Once the refresh has
+    // failed they can no longer be trusted: an item deleted since then is
+    // still rendered as a clickable link, and following it 404s. Clear them so
+    // the table never shows entries the server has just disowned.
+    rows.value = [];
+    paginator.value = {};
+    categories.value = [];
   } finally {
     loading.value = false;
     rowsLoading.value = false;
