@@ -65,6 +65,33 @@
       </section>
 
       <div class="space-y-1">
+        <span class="compact-label">Inspection outcome</span>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            class="compact-btn compact-btn--sm"
+            :class="outcome === 'passed' ? 'compact-btn--primary' : 'compact-btn--outline'"
+            :disabled="busy"
+            @click="outcome = 'passed'"
+          >
+            Passed
+          </button>
+          <button
+            type="button"
+            class="compact-btn compact-btn--sm"
+            :class="outcome === 'needs_repair' ? 'compact-btn--primary' : 'compact-btn--outline'"
+            :disabled="busy"
+            @click="outcome = 'needs_repair'"
+          >
+            Needs repair
+          </button>
+        </div>
+        <p v-if="outcome === 'needs_repair'" class="text-[11px] text-amber-700 dark:text-amber-300">
+          The item stays under inspection until the custodian approves the repair.
+        </p>
+      </div>
+
+      <div class="space-y-1">
         <label class="compact-label" for="inspection-findings">
           Inspection findings <span class="font-normal text-gray-500">(optional)</span>
         </label>
@@ -94,7 +121,7 @@
           :disabled="busy"
           @click="markInspected"
         >
-          {{ busy ? 'Saving…' : 'Mark as Inspected' }}
+          {{ busy ? 'Saving…' : outcome === 'needs_repair' ? 'Recommend Repair' : 'Mark as Inspected' }}
         </button>
       </div>
     </div>
@@ -114,6 +141,7 @@ const emit = defineEmits(['close', 'inspected']);
 
 const record = ref(null);
 const findings = ref('');
+const outcome = ref('passed');
 const looking = ref(false);
 const busy = ref(false);
 const lookupError = ref('');
@@ -126,6 +154,7 @@ function format(value) {
 function reset() {
   record.value = null;
   findings.value = '';
+  outcome.value = 'passed';
   lookupError.value = '';
   submitError.value = '';
 }
@@ -173,7 +202,7 @@ async function markInspected() {
   try {
     const { data } = await api.post(
       `/inspector/inspection/${record.value.inspection_id}/mark-inspected`,
-      { finding_notes: findings.value.trim() || null },
+      { finding_notes: findings.value.trim() || null, outcome: outcome.value },
       // The parent view raises the "Inspection recorded" toast from the emitted
       // event, so the interceptor must stay quiet to avoid a duplicate.
       { skipToast: true },

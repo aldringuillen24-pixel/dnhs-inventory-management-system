@@ -151,7 +151,9 @@ class SchoolHeadController extends Controller
 
         // Custody-based statuses read the assignment transaction: a fully issued
         // record keeps 0 in inventory.quantity, so summing the column reports 0.
-        $effective = fn ($item): int => in_array($item->status, ['assigned', 'under_inspection'], true)
+        // Under repair joins the list because repair can be approved while the
+        // units are still issued out.
+        $effective = fn ($item): int => in_array($item->status, ['assigned', 'under_inspection', 'under_repair'], true)
             ? $item->effectiveQuantity()
             : (int) $item->quantity;
 

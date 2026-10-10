@@ -122,6 +122,7 @@ class InspectorController extends Controller
     {
         $validated = $request->validate([
             'finding_notes' => ['nullable', 'string', 'max:1000'],
+            'outcome' => ['nullable', 'string', 'in:passed,needs_repair'],
         ]);
 
         $inspection = InspectionRecord::findOrFail($inspectionId);
@@ -129,6 +130,7 @@ class InspectorController extends Controller
             (int) $inspection->id,
             (int) $request->user()->id,
             $validated['finding_notes'] ?? null,
+            $validated['outcome'] ?? 'passed',
         );
 
         if ($error !== null) {
@@ -140,11 +142,22 @@ class InspectorController extends Controller
 
         $inventory = Inventory::findOrFail($inspection->inventory_id);
 
+        if (($validated['outcome'] ?? 'passed') === 'needs_repair') {
+            return response()->json([
+                'status' => 'success',
+                'message' => ($inventory->item_name ?? 'Item') . ' recommended for repair. Awaiting custodian approval.',
+                'inventory_id' => $inventory->item_id,
+                'inventory_status' => $inventory->status,
+                'outcome' => 'needs_repair',
+            ]);
+        }
+
         return response()->json([
             'status' => 'success',
             'message' => ($inventory->item_name ?? 'Item') . ' marked as inspected and returned to ' . str_replace('_', ' ', (string) $inventory->status) . '.',
             'inventory_id' => $inventory->item_id,
             'inventory_status' => $inventory->status,
+            'outcome' => 'passed',
         ]);
     }
 

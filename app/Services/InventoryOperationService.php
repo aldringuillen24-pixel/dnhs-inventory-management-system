@@ -1317,6 +1317,18 @@ class InventoryOperationService
                 return 'Item is not currently under repair.';
             }
 
+            // A row with nothing on the shelf can still complete when its units
+            // are issued out: the holder never gave them up, so finishing returns
+            // the row to them. Only a row with neither stock nor holder is refused.
+            $hasActiveAssignments = Transaction::query()
+                ->where('item_id', $inventory->item_id)
+                ->where('status', 'assigned')
+                ->where('quantity', '>', 0)
+                ->exists();
+            if ((int) $inventory->quantity <= 0 && ! $hasActiveAssignments) {
+                return 'Only item records with remaining stock can be marked as repaired. The units are still issued out.';
+            }
+
             $maintenanceRecord = MaintenanceRecord::query()
                 ->where('inventory_id', $inventory->item_id)
                 ->whereIn('status', ['reported', 'in_progress'])
@@ -1328,7 +1340,9 @@ class InventoryOperationService
             }
 
             $quantity = (int) $inventory->quantity;
-            $inventory->update(['status' => 'available']);
+            // An item repaired while some of its units are still issued out
+            // returns to its holder instead of reading as available stock.
+            $inventory->update(['status' => $hasActiveAssignments ? 'assigned' : 'available']);
             $maintenanceRecord->update([
                 'status' => 'completed',
                 'repair_notes' => $repairNotes ?? $maintenanceRecord->repair_notes,
@@ -1375,6 +1389,9 @@ class InventoryOperationService
             $inventory = Inventory::whereKey($itemId)->lockForUpdate()->firstOrFail();
             if ($inventory->status !== 'under_repair') {
                 return 'Only items under repair can be marked ready to dispose.';
+            }
+            if ((int) $inventory->quantity <= 0) {
+                return 'Only item records with remaining stock can be marked ready to dispose. The units are still issued out.';
             }
 
             $quantity = (int) $inventory->quantity;
@@ -1530,9 +1547,20 @@ class InventoryOperationService
         return null;
     }
 
-    public function markInspected(int $inspectionId, int $actorId, ?string $notes): ?string
+    /**
+     * Inspection outcomes an inspector may record. `needs_repair` keeps the
+     * item under inspection and hands the decision to the custodian instead
+     * of restoring the previous status.
+     */
+    public const INSPECTION_OUTCOMES = ['passed', 'needs_repair'];
+
+    public function markInspected(int $inspectionId, int $actorId, ?string $notes, string $outcome = 'passed'): ?string
     {
-        return DB::transaction(function () use ($inspectionId, $actorId, $notes): ?string {
+        if (! in_array($outcome, self::INSPECTION_OUTCOMES, true)) {
+            return 'Unknown inspection outcome.';
+        }
+
+        return DB::transaction(function () use ($inspectionId, $actorId, $notes, $outcome): ?string {
             $inspection = InspectionRecord::query()->whereKey($inspectionId)->lockForUpdate()->firstOrFail();
             if ($inspection->status !== 'flagged') {
                 return 'This inspection record has already been completed.';
@@ -1543,6 +1571,30 @@ class InventoryOperationService
                 return 'This item is no longer awaiting inspection.';
             }
 
+            if ($outcome === 'needs_repair') {
+                $inspection->update([
+                    'status' => 'repair_recommended',
+                    'outcome' => 'needs_repair',
+                    'inspected_by' => $actorId,
+                    'finding_notes' => $notes ?? $inspection->finding_notes,
+                    'inspected_at' => now(),
+                ]);
+
+                $this->recordMovement(
+                    $inventory->item_id,
+                    $actorId,
+                    'inspection',
+                    $inventory->effectiveQuantity(),
+                    $inventory->effectiveQuantity(),
+                    $inventory->effectiveQuantity(),
+                    'inspection_record',
+                    $inspection->id,
+                    $notes ? "Recommended for repair: {$notes}" : 'Recommended for repair after inspection',
+                );
+
+                return null;
+            }
+
             $statusBefore = in_array($inspection->status_before, self::INSPECTABLE_STATUSES, true)
                 ? $inspection->status_before
                 : 'available';
@@ -1551,6 +1603,7 @@ class InventoryOperationService
 
             $inspection->update([
                 'status' => 'inspected',
+                'outcome' => 'passed',
                 'inspected_by' => $actorId,
                 'finding_notes' => $notes ?? $inspection->finding_notes,
                 'inspected_at' => now(),
@@ -1567,6 +1620,105 @@ class InventoryOperationService
                 'inspection_record',
                 $inspection->id,
                 $notes,
+            );
+
+            return null;
+        });
+    }
+
+    /**
+     * Custodian approves an inspector's repair recommendation. The item moves
+     * straight to under_repair so it never reads as available mid-flow.
+     */
+    public function approveRepairRecommendation(int $inspectionId, int $actorId): ?string
+    {
+        return DB::transaction(function () use ($inspectionId, $actorId): ?string {
+            $inspection = InspectionRecord::query()->whereKey($inspectionId)->lockForUpdate()->firstOrFail();
+            if ($inspection->status !== 'repair_recommended') {
+                return 'This repair recommendation has already been decided.';
+            }
+
+            $inventory = Inventory::query()->with('category')->whereKey($inspection->inventory_id)->lockForUpdate()->firstOrFail();
+            if ($inventory->status !== 'under_inspection') {
+                return 'This item is no longer awaiting inspection.';
+            }
+            if ($inventory->category?->is_maintenance_eligible === false) {
+                return 'Items in this category are not eligible for repair.';
+            }
+
+            $quantity = (int) $inventory->quantity;
+            $inventory->update(['status' => 'under_repair']);
+            $maintenanceRecord = MaintenanceRecord::create([
+                'inventory_id' => $inventory->item_id,
+                'reported_by' => $inspection->inspected_by ?? $actorId,
+                'status' => 'reported',
+                'issue_description' => $inspection->finding_notes ?? 'Recommended for repair after inspection',
+                'started_at' => now(),
+            ]);
+            $this->recordMovement(
+                $inventory->item_id,
+                $actorId,
+                'maintenance',
+                $quantity,
+                $quantity,
+                $quantity,
+                'maintenance_record',
+                $maintenanceRecord->id,
+                "Repair approved after inspection: {$maintenanceRecord->issue_description}",
+            );
+
+            $inspection->update([
+                'status' => 'inspected',
+                'repair_decision' => 'approved',
+                'repair_decided_by' => $actorId,
+                'repair_decided_at' => now(),
+            ]);
+
+            return null;
+        });
+    }
+
+    /**
+     * Custodian declines an inspector's repair recommendation. The item
+     * returns to the status it held before inspection.
+     */
+    public function declineRepairRecommendation(int $inspectionId, int $actorId): ?string
+    {
+        return DB::transaction(function () use ($inspectionId, $actorId): ?string {
+            $inspection = InspectionRecord::query()->whereKey($inspectionId)->lockForUpdate()->firstOrFail();
+            if ($inspection->status !== 'repair_recommended') {
+                return 'This repair recommendation has already been decided.';
+            }
+
+            $inventory = Inventory::query()->whereKey($inspection->inventory_id)->lockForUpdate()->firstOrFail();
+            if ($inventory->status !== 'under_inspection') {
+                return 'This item is no longer awaiting inspection.';
+            }
+
+            $statusBefore = in_array($inspection->status_before, self::INSPECTABLE_STATUSES, true)
+                ? $inspection->status_before
+                : 'available';
+
+            $inventory->update(['status' => $statusBefore]);
+
+            $inspection->update([
+                'status' => 'inspected',
+                'repair_decision' => 'declined',
+                'repair_decided_by' => $actorId,
+                'repair_decided_at' => now(),
+            ]);
+
+            $quantity = $inventory->effectiveQuantity();
+            $this->recordMovement(
+                $inventory->item_id,
+                $actorId,
+                'inspection',
+                $quantity,
+                $quantity,
+                $quantity,
+                'inspection_record',
+                $inspection->id,
+                'Repair recommendation declined after inspection',
             );
 
             return null;

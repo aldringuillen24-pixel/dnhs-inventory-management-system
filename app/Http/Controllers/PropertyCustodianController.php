@@ -8,6 +8,8 @@ use App\Models\User;
 use App\Services\AuditLedgerService;
 use App\Models\Transaction;
 use App\Models\Inventory;
+
+use App\Models\InspectionRecord;
 use App\Models\StockMovement;
 use App\Services\ForecastAiRecommendationService;
 use App\Services\ForecastDecisionSupportService;
@@ -756,7 +758,7 @@ class PropertyCustodianController extends Controller
                 $join->on('inventory.item_id', '=', 'active_assignments.item_id');
             })
             ->select('inventory.status')
-            ->selectRaw("SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END) as total_quantity")
+            ->selectRaw("SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection', 'under_repair') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END) as total_quantity")
             ->whereNotNull('inventory.status')
             ->groupBy('inventory.status')
             ->pluck('total_quantity', 'status');
@@ -841,9 +843,9 @@ class PropertyCustodianController extends Controller
                 ->selectRaw('MIN(inventory.item_id) as source_item_id')
                 ->selectRaw('MIN(inventory.inventory_item_no) as inventory_item_no')
                 ->selectRaw('MAX(inventory.description) as description')
-                ->selectRaw("SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END) as quantity")
-                ->selectRaw("SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END * inventory.unit_cost) as total_cost")
-                ->selectRaw("SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END * inventory.unit_cost) / NULLIF(SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END), 0) as unit_cost")
+                ->selectRaw("SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection', 'under_repair') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END) as quantity")
+                ->selectRaw("SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection', 'under_repair') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END * inventory.unit_cost) as total_cost")
+                ->selectRaw("SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection', 'under_repair') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END * inventory.unit_cost) / NULLIF(SUM(CASE WHEN inventory.status IN ('assigned', 'under_inspection', 'under_repair') THEN COALESCE(active_assignments.active_assigned_quantity, inventory.quantity) ELSE inventory.quantity END), 0) as unit_cost")
                 ->selectRaw('MAX(inventory.date_acquired) as date_acquired')
                 ->selectRaw('MAX(inventory.lifespan_years) as lifespan_years')
                 ->selectRaw('MAX(inventory.expected_end_date) as expected_end_date')
@@ -1035,6 +1037,23 @@ class PropertyCustodianController extends Controller
 
         $activeAssignments = $activeAssignmentsQuery->get()->groupBy('item_id');
 
+        // Pending repair recommendations (inspector asked for repair, custodian
+        // has not decided yet), scoped to the same displayed source rows.
+        $repairRecommendations = InspectionRecord::query()
+            ->with([
+                'flaggedBy:id,first_name,last_name,username',
+                'inspectedBy:id,first_name,last_name,username',
+            ])
+            ->where('status', 'repair_recommended')
+            ->when(
+                $scopedSourceIds->isNotEmpty(),
+                fn ($query) => $query->whereIn('inventory_id', $scopedSourceIds),
+                fn ($query) => $query->whereRaw('0 = 1'),
+            )
+            ->latest('id')
+            ->get()
+            ->groupBy('inventory_id');
+
         // Pending holds for the Available/All tabs: requests in
         // `waiting for approval` promise units the stock rows still show as
         // available (deduction happens at approval). Loaded once; matched per
@@ -1050,8 +1069,8 @@ class PropertyCustodianController extends Controller
             ->groupBy('item_id')
             ->pluck('hold_quantity', 'item_id');
 
-        $attachGroupDetails = function ($collection) use ($sourceItemsByGroup, $activeAssignments, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
-            $collection->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup, $activeAssignments, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
+        $attachGroupDetails = function ($collection) use ($sourceItemsByGroup, $activeAssignments, $repairRecommendations, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
+            $collection->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup, $activeAssignments, $repairRecommendations, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
                 $matchedSourceItems = $sourceItemsByGroup->get(
                     $groupKey(
                         $inventoryItem->item_name,
@@ -1070,7 +1089,7 @@ class PropertyCustodianController extends Controller
                     $matchedSourceItems = $fallbackSource ? collect([$fallbackSource]) : collect();
                 }
 
-                $matchedSourceItems->each(function (Inventory $sourceItem) use ($activeAssignments): void {
+                $matchedSourceItems->each(function (Inventory $sourceItem) use ($activeAssignments, $repairRecommendations): void {
                     $itemAssignments = $activeAssignments->get($sourceItem->item_id, collect());
                     $sourceItem->latestAssignment = $itemAssignments->first();
                     $sourceItem->assigned_quantity = (int) $itemAssignments->sum('quantity');
@@ -1129,6 +1148,19 @@ class PropertyCustodianController extends Controller
                         ->implode(', ');
                     $sourceItem->latestMovement = $sourceItem->latestStockMovement;
                     $sourceItem->disposalMovement = $sourceItem->latestDisposalMovement;
+                    $recommendation = $repairRecommendations->get($sourceItem->item_id)?->first();
+                    $sourceItem->repairRecommendation = $recommendation ? [
+                        'inspection_id' => $recommendation->id,
+                        'reason' => $recommendation->finding_notes,
+                        'status_before' => $recommendation->status_before,
+                        'flagged_by' => $recommendation->flaggedBy
+                            ? (trim(($recommendation->flaggedBy->first_name ?? '') . ' ' . ($recommendation->flaggedBy->last_name ?? '')) ?: $recommendation->flaggedBy->username)
+                            : 'Unknown',
+                        'inspected_by' => $recommendation->inspectedBy
+                            ? (trim(($recommendation->inspectedBy->first_name ?? '') . ' ' . ($recommendation->inspectedBy->last_name ?? '')) ?: $recommendation->inspectedBy->username)
+                            : 'Unknown',
+                        'inspected_at' => $recommendation->inspected_at?->toDateTimeString(),
+                    ] : null;
                 });
 
                 $inventoryItem->sourceItems = $matchedSourceItems;
@@ -2179,7 +2211,7 @@ class PropertyCustodianController extends Controller
                 $validated['repair_notes'] ?? null,
                 isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
             );
-            $successMessage = count($itemIds) . ' item(s) marked as repaired and returned to available inventory.';
+            $successMessage = count($itemIds) . ' item(s) marked as repaired and returned to inventory.';
         } else {
             $error = $this->inventoryOperations->markRepaired(
                 (int) $itemId,
@@ -2187,7 +2219,7 @@ class PropertyCustodianController extends Controller
                 $validated['repair_notes'] ?? null,
                 isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
             );
-            $successMessage = 'Item marked as repaired and now available.';
+            $successMessage = 'Item marked as repaired and returned to inventory.';
         }
 
         if ($error !== null) {
@@ -2231,6 +2263,34 @@ class PropertyCustodianController extends Controller
         }
 
         return redirect()->route('propertyCustodian.inventory')->with('success', $successMessage);
+    }
+
+    public function approveRepairRecommendation(Request $request, $inspectionId)
+    {
+        $error = $this->inventoryOperations->approveRepairRecommendation(
+            (int) $inspectionId,
+            (int) $request->user()->id,
+        );
+
+        if ($error !== null) {
+            return redirect()->back()->with('error', $error);
+        }
+
+        return redirect()->route('propertyCustodian.inventory')->with('success', 'Repair recommendation approved. The item is now under repair.');
+    }
+
+    public function declineRepairRecommendation(Request $request, $inspectionId)
+    {
+        $error = $this->inventoryOperations->declineRepairRecommendation(
+            (int) $inspectionId,
+            (int) $request->user()->id,
+        );
+
+        if ($error !== null) {
+            return redirect()->back()->with('error', $error);
+        }
+
+        return redirect()->route('propertyCustodian.inventory')->with('success', 'Repair recommendation declined. The item was returned to its previous status.');
     }
 
     public function disposeInventory(Request $request, $itemId)

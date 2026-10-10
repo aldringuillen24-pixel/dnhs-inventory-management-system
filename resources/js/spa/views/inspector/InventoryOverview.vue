@@ -76,15 +76,32 @@
                   <p v-if="row.reason" class="mt-1 max-w-[18rem] truncate" :title="row.reason">{{ row.reason }}</p>
                 </td>
                 <td class="px-4 py-3.5 text-right">
-                  <button
-                    type="button"
-                    class="compact-btn compact-btn--sm border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
-                    :disabled="markingId !== null"
-                    title="Complete without scanning — for items without a QR label"
-                    @click="markRowInspected(row)"
-                  >
-                    {{ markingId === row.inspection_id ? 'Saving…' : 'Mark Inspected' }}
-                  </button>
+                  <div class="inline-flex items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      class="rounded-md p-1.5 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                      :disabled="markingId !== null"
+                      title="Recommend repair — the custodian approves it"
+                      aria-label="Recommend repair"
+                      @click="recommendRowRepair(row)"
+                    >
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-7 7a2.1 2.1 0 0 1-3-3l7-7a6 6 0 0 1 7.9-7.9z" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-md p-1.5 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                      :disabled="markingId !== null"
+                      title="Mark inspected — complete without scanning"
+                      aria-label="Mark inspected"
+                      @click="markRowInspected(row)"
+                    >
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m5 12 4 4L19 6" />
+                      </svg>
+                    </button>
+                  </div>
                 </td>
               </tr>
               <tr v-if="!queueLoading && !queue.length">
@@ -197,13 +214,23 @@ async function onInspected(data) {
 // QR label): the queue already carries the inspection_id, so no lookup is
 // needed. Findings stay optional and default to the flag reason.
 async function markRowInspected(row) {
+  await completeRow(row, 'passed');
+}
+
+// Per-row repair recommendation: the item stays under inspection and the
+// custodian approves the repair from their Under Inspection workspace.
+async function recommendRowRepair(row) {
+  await completeRow(row, 'needs_repair');
+}
+
+async function completeRow(row, outcome) {
   if (markingId.value !== null || !row?.inspection_id) return;
 
   markingId.value = row.inspection_id;
   try {
     const { data } = await api.post(
       `/inspector/inspection/${row.inspection_id}/mark-inspected`,
-      { finding_notes: null },
+      { finding_notes: null, outcome },
       // Success and error toasts are raised here so the interceptor stays quiet.
       { skipToast: true },
     );

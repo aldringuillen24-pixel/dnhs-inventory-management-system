@@ -268,13 +268,13 @@
               />
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">{{ row.item_name }}</p>
-                <p v-if="hasIssuedOut(row)" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">Assigned: {{ format(assignedOutQty(row)) }} {{ row.unit }}</p>
+                <p v-if="hasIssuedOut(row) && workspace !== 'available'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base"><span v-if="workspace !== 'assigned'">Assigned: </span>{{ format(assignedOutQty(row)) }} {{ row.unit }}</p>
                 <p v-else-if="row.status === 'available'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">Available: {{ format(row.free_quantity ?? row.quantity) }} {{ row.unit }}</p>
                 <p v-else class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400 min-[480px]:mt-1 min-[480px]:text-xs">{{ format(row.quantity) }} {{ row.unit }}</p>
-                <p v-if="hasIssuedOut(row)" class="mt-0.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500 min-[480px]:text-xs">
+                <p v-if="hasIssuedOut(row) && row.status === 'available' && workspace === 'all'" class="mt-0.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500 min-[480px]:text-xs">
                   Left in stockroom: {{ format(row.quantity) }}
                 </p>
-                <p v-if="hasIssuedOut(row) && (row.pending_hold ?? 0) > 0" class="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300 min-[480px]:text-xs">
+                <p v-if="hasIssuedOut(row) && workspace !== 'available' && (row.pending_hold ?? 0) > 0" class="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300 min-[480px]:text-xs">
                   Pending: {{ format(row.pending_hold ?? 0) }}
                 </p>
                 <p v-else-if="row.status === 'available'" class="mt-0.5 text-[11px] font-semibold min-[480px]:text-xs" :class="(row.pending_hold ?? 0) > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'">
@@ -285,7 +285,8 @@
                 </p>
               </div>
               <StatusBadge :status="row.status" compact />
-              <span v-if="hasIssuedOut(row)" class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Assigned issuing</span>
+              <span v-if="hasRepairRecommendation(row)" class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Repair recommended</span>
+              <span v-if="hasIssuedOut(row) && workspace !== 'available'" class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Assigned issuing</span>
               <button
                 type="button"
                 class="shrink-0 rounded-md border border-emerald-200 px-2 py-1.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10 min-[480px]:px-3 min-[480px]:py-2 min-[480px]:text-xs"
@@ -444,10 +445,10 @@
 
                   <!-- Quantity -->
                   <td class="px-4 py-3.5 text-right font-bold text-gray-900 dark:text-white">
-                    <template v-if="hasIssuedOut(row)">
-                      Assigned: {{ format(assignedOutQty(row)) }}
+                    <template v-if="hasIssuedOut(row) && workspace !== 'available'">
+                      <span v-if="workspace !== 'assigned'">Assigned: </span>{{ format(assignedOutQty(row)) }}
                       <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
-                      <span class="block text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+                      <span v-if="row.status === 'available' && workspace === 'all'" class="block text-[11px] font-semibold text-gray-400 dark:text-gray-500">
                         Left in stockroom: {{ format(row.quantity) }}
                       </span>
                       <span v-if="(row.pending_hold ?? 0) > 0" class="block text-[11px] font-semibold text-amber-600 dark:text-amber-300">
@@ -479,7 +480,10 @@
 
                   <!-- Status -->
                   <td class="px-4 py-3.5">
-                    <StatusBadge :status="displayStatus(row)" />
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge :status="displayStatus(row)" />
+                      <span v-if="hasRepairRecommendation(row)" class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Repair recommended</span>
+                    </div>
                   </td>
 
                   <!-- Actions: display-only under All Inventory -->
@@ -878,6 +882,33 @@
                 >
                   {{ source.receive_return_assignments.length }} pending return{{ source.receive_return_assignments.length > 1 ? 's' : '' }}
                 </span>
+                <div
+                  v-if="source.repairRecommendation"
+                  class="flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-200 bg-amber-50/70 px-2 py-1.5 dark:border-amber-500/30 dark:bg-amber-500/5"
+                >
+                  <span class="text-[11px] font-bold text-amber-800 dark:text-amber-200">Repair recommended</span>
+                  <span class="text-[11px] text-amber-700 dark:text-amber-300">
+                    by {{ source.repairRecommendation.inspected_by }}<span v-if="source.repairRecommendation.reason"> · {{ source.repairRecommendation.reason }}</span>
+                  </span>
+                  <span class="ml-auto inline-flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      class="rounded-md bg-amber-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      :disabled="repairDecisionId !== null"
+                      @click="decideRepairRecommendation(source, 'approve')"
+                    >
+                      {{ repairDecisionId === source.repairRecommendation.inspection_id ? 'Approving…' : 'Approve' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-md border border-gray-200 px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-white/5"
+                      :disabled="repairDecisionId !== null"
+                      @click="decideRepairRecommendation(source, 'decline')"
+                    >
+                      Decline
+                    </button>
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -1179,7 +1210,7 @@
     <Modal
       :open="maintenanceActionGroup !== null"
       :title="maintenanceActionTitle"
-      :subtitle="maintenanceAction === 'repair' ? 'Select the item records to return to available inventory.' : 'Select the item records to mark for disposal.'"
+      :subtitle="maintenanceAction === 'repair' ? 'Select the item records to complete. Rows still with their holder return to the assignee.' : 'Select the item records to mark for disposal.'"
       max-width="max-w-2xl"
       @close="closeMaintenanceActionModal"
     >
@@ -1194,7 +1225,7 @@
 
         <div class="max-h-[45vh] divide-y divide-gray-100 overflow-y-auto rounded-md border border-gray-200 dark:divide-white/5 dark:border-gray-700">
           <label
-            v-for="source in maintenanceActionItems"
+            v-for="source in actionableMaintenanceActionItems"
             :key="source.item_id"
             class="flex cursor-pointer flex-wrap items-center justify-between gap-3 p-4 hover:bg-gray-50 dark:hover:bg-white/5"
           >
@@ -1216,16 +1247,32 @@
               </span>
             </span>
             <span class="flex items-center gap-2 text-xs">
-              <span>{{ format(source.quantity) }} {{ source.unit }}</span>
-              <span class="rounded-md bg-amber-50 px-2 py-1 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+              <span v-if="Number(source.quantity ?? 0) > 0">{{ format(source.quantity) }} {{ source.unit }}</span>
+              <span
+                v-if="Number(source.quantity ?? 0) <= 0"
+                class="rounded-md bg-indigo-50 px-2 py-1 font-medium text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300"
+                title="The units are still issued out — completing returns the row to the assignee"
+              >
+                With assignee
+              </span>
+              <span
+                v-else
+                class="rounded-md bg-amber-50 px-2 py-1 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+              >
                 Under repair
               </span>
             </span>
           </label>
-          <p v-if="!maintenanceActionItems.length" class="p-4 text-sm text-gray-500">
-            No item records are currently under repair in this group.
+          <p v-if="!actionableMaintenanceActionItems.length" class="p-4 text-sm text-gray-500">
+            {{ heldMaintenanceActionCount > 0
+              ? 'No actionable records here — the rest have neither stock nor holder.'
+              : 'No item records are currently under repair in this group.' }}
           </p>
         </div>
+
+        <p v-if="heldMaintenanceActionCount > 0" class="text-xs text-gray-500 dark:text-gray-400">
+          {{ heldMaintenanceActionCount }} record{{ heldMaintenanceActionCount > 1 ? 's have' : ' has' }} neither stock nor holder and cannot be completed.
+        </p>
 
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ maintenanceActionItemIds.length }} item record(s) selected.</p>
 
@@ -1637,6 +1684,7 @@ const confirmBulk = ref(false);
 const selection = ref([]);
 const recordGroup = ref(null);
 const selectedPrintItemIds = ref([]);
+const repairDecisionId = ref(null);
 const maintenanceGroup = ref(null);
 const maintenanceItemIds = ref([]);
 const maintenanceIssue = ref('');
@@ -1700,6 +1748,14 @@ const inspectableItems = computed(() => (inspectionGroup.value?.sourceItems ?? [
   .filter((source) => INSPECTABLE_STATUSES.includes(source.status)));
 const maintenanceActionItems = computed(() => (maintenanceActionGroup.value?.sourceItems ?? [])
   .filter((source) => source.status === 'under_repair'));
+// Zero-stock rows are still issued out, so they cannot be completed here.
+// They stay hidden from the picker with a count note instead of a disabled
+// row, which read as broken rather than informative.
+const hasStockOrHolder = (source) => Number(source.quantity ?? 0) > 0 || Number(source.assigned_quantity ?? 0) > 0;
+const actionableMaintenanceActionItems = computed(() =>
+  maintenanceActionItems.value.filter(hasStockOrHolder));
+const heldMaintenanceActionCount = computed(() =>
+  maintenanceActionItems.value.filter((source) => !hasStockOrHolder(source)).length);
 const disposeEligibleItems = computed(() => (disposeGroup.value?.sourceItems ?? [])
   .filter((source) => source.status === 'ready_to_dispose'));
 const maintenanceActionTitle = computed(() => maintenanceAction.value === 'repair'
@@ -2194,6 +2250,40 @@ function scanAnotherQrCode() {
   qrError.value = '';
 }
 
+function hasRepairRecommendation(row) {
+  return (row?.sourceItems ?? []).some((source) => Boolean(source?.repairRecommendation));
+}
+
+async function decideRepairRecommendation(source, decision) {
+  const inspectionId = source?.repairRecommendation?.inspection_id;
+  if (!inspectionId || repairDecisionId.value !== null) return;
+
+  repairDecisionId.value = inspectionId;
+  try {
+    const { data } = await api.post(
+      `/custodian/inspection/${inspectionId}/${decision === 'approve' ? 'approve-repair' : 'decline-repair'}`,
+      {},
+      { skipToast: true },
+    );
+    useToastStore().success(
+      decision === 'approve' ? 'Repair approved' : 'Recommendation declined',
+      data?.message ?? (decision === 'approve'
+        ? 'The item is now under repair.'
+        : 'The item was returned to its previous status.'),
+    );
+    recordGroup.value = null;
+    forgetPageCache();
+    await load();
+  } catch (requestError) {
+    useToastStore().error(
+      'Could not decide',
+      requestError?.response?.data?.message ?? 'Could not record this decision. Refresh the inventory and try again.',
+    );
+  } finally {
+    repairDecisionId.value = null;
+  }
+}
+
 function openRecordModal(row) {
   recordGroup.value = row;
   selectedPrintItemIds.value = [];
@@ -2223,7 +2313,9 @@ function assignedOutQty(row) {
 }
 
 function hasIssuedOut(row) {
-  return row?.status === 'available' && assignedOutQty(row) > 0;
+  // Under repair joins available here: repair can be approved while units are
+  // still issued out, and those rows must show the holder breakdown too.
+  return (row?.status === 'available' || row?.status === 'under_repair') && assignedOutQty(row) > 0;
 }
 
 function isPartialAssigned(row) {

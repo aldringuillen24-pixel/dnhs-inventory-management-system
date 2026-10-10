@@ -140,6 +140,10 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/inventory/{itemId}/mark-ready-to-dispose', [PropertyCustodianController::class, 'markReadyToDispose'])->name('inventory.mark-ready-to-dispose');
 
+    Route::post('/inspection/{inspectionId}/approve-repair', [PropertyCustodianController::class, 'approveRepairRecommendation'])->name('inspection.approve-repair');
+
+    Route::post('/inspection/{inspectionId}/decline-repair', [PropertyCustodianController::class, 'declineRepairRecommendation'])->name('inspection.decline-repair');
+
     Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
 
     Route::get('/inventory/qr/lookup', [PropertyCustodianController::class, 'qrLookup'])->name('inventory.qr.lookup');
@@ -258,6 +262,8 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/inventory/{itemId}/send-to-inspection', [PropertyCustodianController::class, 'sendToInspection'])->name('inventory.send-to-inspection');
         Route::post('/inventory/{itemId}/mark-repaired', [PropertyCustodianController::class, 'markRepaired'])->name('inventory.mark-repaired');
         Route::post('/inventory/{itemId}/mark-ready-to-dispose', [PropertyCustodianController::class, 'markReadyToDispose'])->name('inventory.mark-ready-to-dispose');
+        Route::post('/inspection/{inspectionId}/approve-repair', [PropertyCustodianController::class, 'approveRepairRecommendation'])->name('inspection.approve-repair');
+        Route::post('/inspection/{inspectionId}/decline-repair', [PropertyCustodianController::class, 'declineRepairRecommendation'])->name('inspection.decline-repair');
         Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
         Route::get('/transactions', [PropertyCustodianController::class, 'transactions'])->name('transactions');
         Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assign');

@@ -577,3 +577,366 @@ test('bulk records that share no serial number still group into one row', functi
         ->and((int) $rows[0]['quantity'])->toBe(12)
         ->and((int) $rows[0]['total_cost'])->toBe(6000);
 });
+
+function makeRepairableItem($test, string $name, int $quantity = 1): Inventory
+{
+    $category = Category::create([
+        'category_name' => 'Repairable '.preg_replace('/[^A-Za-z0-9]+/', ' ', $name),
+        'requires_serial_number' => false,
+        'is_maintenance_eligible' => true,
+    ]);
+
+    return Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $test->custodian->id,
+        'item_name' => $name,
+        'quantity' => $quantity,
+        'unit_cost' => 1000,
+        'status' => 'available',
+        'date_acquired' => '2026-01-10',
+    ]);
+}
+
+function recommendRepair($test, Inventory $item, string $notes = 'Needs repair'): InspectionRecord
+{
+    expect(app(\App\Services\InventoryOperationService::class)
+        ->sendToInspection($item->item_id, $test->custodian->id, 'Check me'))->toBeNull();
+
+    $inspection = InspectionRecord::where('inventory_id', $item->item_id)->firstOrFail();
+
+    $test->actingAs($test->inspector)
+        ->postJson(route('api.inspector.inspection.mark-inspected', $inspection->id), [
+            'finding_notes' => $notes,
+            'outcome' => 'needs_repair',
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success')
+        ->assertJsonPath('outcome', 'needs_repair')
+        ->assertJsonPath('inventory_status', 'under_inspection');
+
+    return $inspection->fresh();
+}
+
+test('inspector can recommend repair and the item stays under inspection', function () {
+    $item = makeRepairableItem($this, 'Recommend Repair Fan');
+    $record = recommendRepair($this, $item, 'Fan belt frayed');
+
+    expect($item->fresh()->status)->toBe('under_inspection')
+        ->and($record->status)->toBe('repair_recommended')
+        ->and($record->outcome)->toBe('needs_repair')
+        ->and($record->finding_notes)->toBe('Fan belt frayed')
+        ->and($record->inspected_by)->toBe($this->inspector->id);
+
+    // Recommended items leave the inspector's flagged queue.
+    $queue = $this->actingAs($this->inspector)
+        ->getJson(route('api.inspector.inspection.queue'))
+        ->assertOk()
+        ->json('records');
+
+    expect(collect($queue)->pluck('inspection_id')->all())->not->toContain($record->id);
+});
+
+test('custodian approval moves a recommended item straight to under repair', function () {
+    $item = makeRepairableItem($this, 'Approve Repair Drill');
+    $record = recommendRepair($this, $item, 'Motor sparks');
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inspection.approve-repair', $record->id), [])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($item->fresh()->status)->toBe('under_repair');
+
+    $this->assertDatabaseHas('maintenance_records', [
+        'inventory_id' => $item->item_id,
+        'reported_by' => $this->inspector->id,
+        'status' => 'reported',
+    ]);
+
+    $decided = $record->fresh();
+    expect($decided->status)->toBe('inspected')
+        ->and($decided->repair_decision)->toBe('approved')
+        ->and($decided->repair_decided_by)->toBe($this->custodian->id)
+        ->and($decided->repair_decided_at)->not->toBeNull();
+
+    // Deciding twice is refused.
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inspection.approve-repair', $record->id), [])
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'This repair recommendation has already been decided.');
+});
+
+test('custodian decline returns a recommended item to its previous status', function () {
+    $item = makeRepairableItem($this, 'Decline Repair Lamp');
+    $record = recommendRepair($this, $item, 'Just dusty');
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inspection.decline-repair', $record->id), [])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($item->fresh()->status)->toBe('available');
+
+    $this->assertDatabaseMissing('maintenance_records', [
+        'inventory_id' => $item->item_id,
+    ]);
+
+    $decided = $record->fresh();
+    expect($decided->status)->toBe('inspected')
+        ->and($decided->repair_decision)->toBe('declined')
+        ->and($decided->repair_decided_by)->toBe($this->custodian->id);
+});
+
+test('repair approval is refused for maintenance-ineligible categories', function () {
+    // The default test category is deliberately maintenance-ineligible.
+    $item = makeInspectableItem($this, 'Ineligible Repair Item');
+    $record = recommendRepair($this, $item);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inspection.approve-repair', $record->id), [])
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'Items in this category are not eligible for repair.');
+
+    expect($item->fresh()->status)->toBe('under_inspection')
+        ->and($record->fresh()->status)->toBe('repair_recommended');
+});
+
+test('inspectors cannot decide repair recommendations', function () {
+    $item = makeRepairableItem($this, 'Guarded Repair Item');
+    $record = recommendRepair($this, $item);
+
+    $this->actingAs($this->inspector)
+        ->postJson(route('api.custodian.inspection.approve-repair', $record->id), [])
+        ->assertForbidden();
+
+    $this->actingAs($this->inspector)
+        ->postJson(route('api.custodian.inspection.decline-repair', $record->id), [])
+        ->assertForbidden();
+
+    expect($record->fresh()->status)->toBe('repair_recommended');
+});
+
+test('unknown inspection outcomes are rejected', function () {
+    $item = makeRepairableItem($this, 'Unknown Outcome Item');
+    expect(app(\App\Services\InventoryOperationService::class)
+        ->sendToInspection($item->item_id, $this->custodian->id, 'Check me'))->toBeNull();
+
+    $inspection = InspectionRecord::where('inventory_id', $item->item_id)->firstOrFail();
+
+    $this->actingAs($this->inspector)
+        ->postJson(route('api.inspector.inspection.mark-inspected', $inspection->id), [
+            'outcome' => 'exploded',
+        ])
+        ->assertUnprocessable();
+
+    expect($inspection->fresh()->status)->toBe('flagged');
+});
+
+test('repair completion restores assigned status when units are still issued out', function () {
+    $category = Category::create([
+        'category_name' => 'Partially Issued Gear',
+        'requires_serial_number' => false,
+        'is_maintenance_eligible' => true,
+    ]);
+    $item = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->custodian->id,
+        'item_name' => 'Partial Repair Chair',
+        'quantity' => 3,
+        'unit_cost' => 1000,
+        'status' => 'under_repair',
+        'date_acquired' => '2026-01-10',
+    ]);
+    Transaction::create([
+        'user_id' => $this->endUser->id,
+        'item_id' => $item->item_id,
+        'quantity' => 2,
+        'issued_quantity' => 2,
+        'transaction_date' => '2026-02-01',
+        'status' => 'assigned',
+    ]);
+    \App\Models\MaintenanceRecord::create([
+        'inventory_id' => $item->item_id,
+        'reported_by' => $this->custodian->id,
+        'status' => 'reported',
+        'issue_description' => 'Wobbly leg',
+        'started_at' => now(),
+    ]);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inventory.mark-repaired', $item->item_id), [
+            'inventory_ids' => [$item->item_id],
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    // The stockroom remainder stays countable, but the row reads as assigned
+    // because the holder still has units — not as available stock.
+    expect($item->fresh()->status)->toBe('assigned')
+        ->and((int) $item->fresh()->quantity)->toBe(3);
+});
+
+test('approved assigned-origin rows show holder quantity and cost under repair', function () {
+    $category = Category::create([
+        'category_name' => 'Holder Visible Gear',
+        'requires_serial_number' => false,
+        'is_maintenance_eligible' => true,
+    ]);
+    $item = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->custodian->id,
+        'item_name' => 'Holder Epson',
+        'quantity' => 0,
+        'unit_cost' => 2500,
+        'status' => 'available',
+        'date_acquired' => '2026-01-10',
+    ]);
+    Transaction::create([
+        'user_id' => $this->endUser->id,
+        'item_id' => $item->item_id,
+        'quantity' => 1,
+        'issued_quantity' => 1,
+        'transaction_date' => '2026-02-01',
+        'status' => 'assigned',
+    ]);
+
+    expect(app(\App\Services\InventoryOperationService::class)
+        ->sendToInspection($item->item_id, $this->custodian->id, 'Check me'))->toBeNull();
+
+    $inspection = InspectionRecord::where('inventory_id', $item->item_id)->firstOrFail();
+
+    $this->actingAs($this->inspector)
+        ->postJson(route('api.inspector.inspection.mark-inspected', $inspection->id), [
+            'outcome' => 'needs_repair',
+        ])
+        ->assertOk();
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inspection.approve-repair', $inspection->id), [])
+        ->assertOk();
+
+    $rows = collect(
+        $this->actingAs($this->custodian)
+            ->getJson(route('api.custodian.inventory', ['workspace' => 'under_repair']))
+            ->assertOk()
+            ->json('inventoryPages.under_repair.data')
+    )->where('item_name', 'Holder Epson')->values();
+
+    expect($rows)->toHaveCount(1)
+        ->and((int) $rows[0]['quantity'])->toBe(1)
+        ->and((float) $rows[0]['unit_cost'])->toBe(2500.0)
+        ->and((float) $rows[0]['total_cost'])->toBe(2500.0);
+});
+
+test('fully assigned repair rows complete back to the assignee', function () {
+    // Flagged while assigned: the stockroom row holds 0, the unit is with the user.
+    // Needs an eligible category (the default test one is ineligible on purpose).
+    $category = Category::create([
+        'category_name' => 'Issued Repairable Gear',
+        'requires_serial_number' => false,
+        'is_maintenance_eligible' => true,
+    ]);
+    $item = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->custodian->id,
+        'item_name' => 'Issued Repair Chair',
+        'quantity' => 0,
+        'unit_cost' => 1000,
+        'status' => 'assigned',
+        'date_acquired' => '2026-01-10',
+        'assigned_to_user_id' => $this->endUser->id,
+    ]);
+    Transaction::create([
+        'user_id' => $this->endUser->id,
+        'item_id' => $item->item_id,
+        'quantity' => 1,
+        'issued_quantity' => 1,
+        'transaction_date' => '2026-02-01',
+        'status' => 'assigned',
+    ]);
+    expect(app(\App\Services\InventoryOperationService::class)
+        ->sendToInspection($item->item_id, $this->custodian->id, 'Wobbly leg'))->toBeNull();
+
+    $inspection = InspectionRecord::where('inventory_id', $item->item_id)->firstOrFail();
+
+    $this->actingAs($this->inspector)
+        ->postJson(route('api.inspector.inspection.mark-inspected', $inspection->id), [
+            'outcome' => 'needs_repair',
+        ])
+        ->assertOk();
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inspection.approve-repair', $inspection->id), [])
+        ->assertOk();
+
+    expect($item->fresh()->status)->toBe('under_repair');
+
+    // The holder never gave the unit up, so completing returns the row to them.
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inventory.mark-repaired', $item->item_id), [
+            'inventory_ids' => [$item->item_id],
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($item->fresh()->status)->toBe('assigned')
+        ->and((int) Transaction::where('item_id', $item->item_id)->where('status', 'assigned')->sum('quantity'))->toBe(1);
+});
+
+test('orphan zero-stock rows with no holder still cannot be marked repaired', function () {
+    $category = Category::create([
+        'category_name' => 'Orphan Repairable Gear',
+        'requires_serial_number' => false,
+        'is_maintenance_eligible' => true,
+    ]);
+    $item = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->custodian->id,
+        'item_name' => 'Orphan Repair Chair',
+        'quantity' => 0,
+        'unit_cost' => 1000,
+        'status' => 'under_repair',
+        'date_acquired' => '2026-01-10',
+    ]);
+    \App\Models\MaintenanceRecord::create([
+        'inventory_id' => $item->item_id,
+        'reported_by' => $this->custodian->id,
+        'status' => 'reported',
+        'issue_description' => 'Wobbly leg',
+        'started_at' => now(),
+    ]);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.inventory.mark-repaired', $item->item_id), [
+            'inventory_ids' => [$item->item_id],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'Only item records with remaining stock can be marked as repaired. The units are still issued out.');
+
+    expect($item->fresh()->status)->toBe('under_repair');
+});
+
+test('custodian inventory exposes pending repair recommendations on source rows', function () {
+    $item = makeRepairableItem($this, 'Recommended Row Item');
+    $record = recommendRepair($this, $item, 'Bearing worn');
+
+    $rows = collect(
+        $this->actingAs($this->custodian)
+            ->getJson(route('api.custodian.inventory', ['workspace' => 'under_inspection']))
+            ->assertOk()
+            ->json('inventoryPages.under_inspection.data')
+    )->where('item_name', 'Recommended Row Item')->values();
+
+    expect($rows)->toHaveCount(1);
+
+    $sources = collect($rows[0]['sourceItems'] ?? [])->where('item_id', $item->item_id)->values();
+    expect($sources)->toHaveCount(1)
+        ->and($sources[0]['repairRecommendation']['inspection_id'])->toBe($record->id)
+        ->and($sources[0]['repairRecommendation']['reason'])->toBe('Bearing worn')
+        ->and($sources[0]['repairRecommendation']['inspected_by'])->toBe('School Inspector');
+});

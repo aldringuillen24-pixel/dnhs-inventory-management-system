@@ -15,6 +15,10 @@ class InspectionRecord extends Model
         'inspected_by',
         'status_before',
         'status',
+        'outcome',
+        'repair_decision',
+        'repair_decided_by',
+        'repair_decided_at',
         'finding_notes',
         'flagged_at',
         'inspected_at',
@@ -25,6 +29,7 @@ class InspectionRecord extends Model
         return [
             'flagged_at' => 'datetime',
             'inspected_at' => 'datetime',
+            'repair_decided_at' => 'datetime',
         ];
     }
 
