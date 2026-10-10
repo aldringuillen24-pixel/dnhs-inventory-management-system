@@ -1556,7 +1556,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import QRCode from 'qrcode';
-import { Armchair, BookOpen, Camera, Dumbbell, FlaskConical, HardDrive, Monitor, Package, Printer, Projector, Wrench } from 'lucide';
+import { Armchair, BookOpen, Camera, Dumbbell, FileStack, FlaskConical, HardDrive, Monitor, Package, Printer, Projector, Wrench } from 'lucide';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { useToastStore } from '../../stores/toast';
@@ -1572,6 +1572,7 @@ import EditInventoryModal from './EditInventoryModal.vue';
 
 const STATUSES = ['available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose', 'disposed'];
 const ITEM_ICONS = [
+  { terms: ['bond paper', 'coupon bond', 'copy paper', 'ream', 'paper', 'envelope', 'folder', 'notepad', 'notebook', 'index card', 'cartolina', 'manila paper', 'parchment', 'sticky note'], icon: FileStack },
   { terms: ['document camera', 'camera'], icon: Camera },
   { terms: ['printer', 'epson'], icon: Printer },
   { terms: ['external hard drive', 'hard drive', 'storage drive'], icon: HardDrive },
@@ -1581,6 +1582,7 @@ const ITEM_ICONS = [
   { terms: ['chair', 'desk', 'table'], icon: Armchair },
 ];
 const CATEGORY_ICONS = [
+  { terms: ['school suppl', 'consumable', 'office suppl'], icon: FileStack },
   { terms: ['furniture'], icon: Armchair },
   { terms: ['ict', 'information technology'], icon: Monitor },
   { terms: ['office equipment'], icon: Printer },
