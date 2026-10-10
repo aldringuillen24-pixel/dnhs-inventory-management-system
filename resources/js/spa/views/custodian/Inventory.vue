@@ -269,6 +269,9 @@
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">{{ row.item_name }}</p>
                 <p class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400 min-[480px]:mt-1 min-[480px]:text-xs">{{ format(row.quantity) }} {{ row.unit }}</p>
+                <p v-if="row.status === 'available'" class="mt-0.5 text-[11px] font-semibold min-[480px]:text-xs" :class="(row.pending_hold ?? 0) > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'">
+                  Available: {{ format(row.free_quantity ?? row.quantity) }} · Pending: {{ format(row.pending_hold ?? 0) }}
+                </p>
                 <p v-if="groupSubtitle(row)" class="mt-0.5 truncate font-mono text-[11px] text-gray-500 dark:text-gray-400">
                   {{ groupSubtitle(row) }}
                 </p>
@@ -434,6 +437,9 @@
                   <td class="px-4 py-3.5 text-right font-bold text-gray-900 dark:text-white">
                     {{ format(row.quantity) }}
                     <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
+                    <span v-if="row.status === 'available'" class="block text-[11px] font-semibold" :class="(row.pending_hold ?? 0) > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'">
+                      Available: {{ format(row.free_quantity ?? row.quantity) }} · Pending: {{ format(row.pending_hold ?? 0) }}
+                    </span>
                   </td>
 
                   <!-- Unit Cost -->

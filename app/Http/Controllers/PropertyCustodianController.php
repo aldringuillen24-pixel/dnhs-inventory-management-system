@@ -1011,8 +1011,23 @@ class PropertyCustodianController extends Controller
 
         $activeAssignments = $activeAssignmentsQuery->get()->groupBy('item_id');
 
-        $attachGroupDetails = function ($collection) use ($sourceItemsByGroup, $activeAssignments, $groupKey): void {
-            $collection->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup, $activeAssignments, $groupKey): void {
+        // Pending holds for the Available/All tabs: requests in
+        // `waiting for approval` promise units the stock rows still show as
+        // available (deduction happens at approval). Loaded once; matched per
+        // group below with the same normalisation the request flow uses.
+        $holdItemTypeRequests = AssignmentRequest::query()
+            ->where('status', 'waiting for approval')
+            ->whereNotNull('requested_item_name')
+            ->get(['requested_item_name', 'requested_category_id', 'requested_unit', 'quantity']);
+        $holdByItemId = AssignmentRequest::query()
+            ->where('status', 'waiting for approval')
+            ->whereNotNull('item_id')
+            ->selectRaw('item_id, SUM(quantity) as hold_quantity')
+            ->groupBy('item_id')
+            ->pluck('hold_quantity', 'item_id');
+
+        $attachGroupDetails = function ($collection) use ($sourceItemsByGroup, $activeAssignments, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
+            $collection->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup, $activeAssignments, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
                 $matchedSourceItems = $sourceItemsByGroup->get(
                     $groupKey(
                         $inventoryItem->item_name,
@@ -1094,6 +1109,24 @@ class PropertyCustodianController extends Controller
 
                 $inventoryItem->sourceItems = $matchedSourceItems;
                 $inventoryItem->assigned_quantity = (int) $matchedSourceItems->sum('assigned_quantity');
+
+                // Soft-hold display for available rows: item-type holds match
+                // the triple (any ICS group of the triple can fulfill them),
+                // record holds match this group's source rows exactly.
+                if (($inventoryItem->status ?? '') === 'available') {
+                    $typeHold = (int) $holdItemTypeRequests
+                        ->filter(fn (AssignmentRequest $request): bool => (int) $request->requested_category_id === (int) $inventoryItem->category_id
+                            && RequestableItemMatcher::nameMatches((string) $inventoryItem->item_name, (string) $request->requested_item_name)
+                            && RequestableItemMatcher::unitMatches((string) $request->requested_unit, $inventoryItem->unit))
+                        ->sum('quantity');
+                    $recordHold = (int) $matchedSourceItems->sum(fn (Inventory $source): int => (int) ($holdByItemId[$source->item_id] ?? 0));
+                    $pendingHold = $typeHold + $recordHold;
+                    $inventoryItem->pending_hold = $pendingHold;
+                    $inventoryItem->free_quantity = max(0, (int) $inventoryItem->quantity - $pendingHold);
+                } else {
+                    $inventoryItem->pending_hold = 0;
+                    $inventoryItem->free_quantity = (int) $inventoryItem->quantity;
+                }
             });
         };
 
