@@ -421,7 +421,7 @@ test('assignment modal receives only available inventory with stock', function (
 
     foreach ([
         ['item_name' => 'Assigned Laptop', 'status' => 'assigned', 'quantity' => 1],
-        ['item_name' => 'Maintenance Laptop', 'status' => 'under_maintenance', 'quantity' => 1],
+        ['item_name' => 'Maintenance Laptop', 'status' => 'under_repair', 'quantity' => 1],
         ['item_name' => 'Empty Laptop', 'status' => 'available', 'quantity' => 0],
     ] as $item) {
         Inventory::create([
@@ -1559,14 +1559,14 @@ test('manual issue rejects mismatched unavailable and insufficient inventory wit
         ->assertRedirect()
         ->assertSessionHas('error');
 
-    $inventory->update(['status' => 'under_maintenance']);
+    $inventory->update(['status' => 'under_repair']);
     $this->actingAs($this->propertyCustodian)
         ->post(route('propertyCustodian.transactions.assignItem'), $manualIssueData)
         ->assertRedirect()
         ->assertSessionHas('error');
 
     expect($inventory->fresh()->quantity)->toBe(2)
-        ->and($inventory->fresh()->status)->toBe('under_maintenance')
+        ->and($inventory->fresh()->status)->toBe('under_repair')
         ->and(Transaction::count())->toBe(0)
         ->and(StockMovement::count())->toBe(0);
 });

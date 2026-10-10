@@ -550,7 +550,7 @@ class PropertyCustodianController extends Controller
             ->values();
 
         $attentionData = $activeInventory
-            ->whereIn('status', ['under_maintenance', 'under_inspection', 'ready_to_dispose'])
+            ->whereIn('status', ['under_repair', 'under_inspection', 'ready_to_dispose'])
             ->sortBy('expected_end_date')
             ->take(8)
             ->map(fn ($item) => [
@@ -668,7 +668,7 @@ class PropertyCustodianController extends Controller
                 'assignedUnits' => (int) $activeInventory->where('status', 'assigned')->sum('quantity'),
                 'totalValue' => (float) $activeInventory->sum(fn ($item) => $item->quantity * $item->unit_cost),
                 'disposedUnits' => (int) $inventory->where('status', 'disposed')->sum('quantity'),
-                'attentionUnits' => (int) $activeInventory->whereIn('status', ['under_maintenance', 'under_inspection', 'ready_to_dispose'])->sum('quantity'),
+                'attentionUnits' => (int) $activeInventory->whereIn('status', ['under_repair', 'under_inspection', 'ready_to_dispose'])->sum('quantity'),
                 'lowStockGroups' => $lowStockData->count(),
                 'approachingLifespan' => (int) $approachingLifespanCount,
                 'expiredLifespan' => (int) $expiredLifespanCount,
@@ -784,11 +784,16 @@ class PropertyCustodianController extends Controller
             'total' => (int) $statusQuantities->except('disposed')->map(fn ($total) => (int) $total)->sum(),
             'available' => (int) ($statusQuantities['available'] ?? 0),
             'assigned' => (int) ($statusQuantities['assigned'] ?? 0) + $custodyFlaggedInspectionQuantity,
-            'attention' => (int) ($statusQuantities['under_inspection'] ?? 0) + (int) ($statusQuantities['under_maintenance'] ?? 0),
+            'attention' => (int) ($statusQuantities['under_inspection'] ?? 0) + (int) ($statusQuantities['under_repair'] ?? 0),
         ];
-        $statuses = ['available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose', 'disposed'];
-        $activeWorkspace = in_array($request->query('workspace', 'all'), ['all', 'available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose', 'disposed'], true)
-            ? $request->query('workspace', 'all')
+        $statuses = ['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
+        // Legacy bookmark support: the workspace used to be called
+        // under_maintenance. Map it so saved links keep working.
+        $requestedWorkspace = $request->query('workspace', 'all') === 'under_maintenance'
+            ? 'under_repair'
+            : $request->query('workspace', 'all');
+        $activeWorkspace = in_array($requestedWorkspace, ['all', 'available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'], true)
+            ? $requestedWorkspace
             : 'all';
         // A record flagged for inspection while its units are still issued out is both
         // assigned and awaiting inspection. Flagging only rewrites `status`, so a
@@ -802,7 +807,7 @@ class PropertyCustodianController extends Controller
         // derived per status, so nothing is double counted in the overall total.
         $workspaceStatuses = [
             'available' => ['available'],
-            'under_maintenance' => ['under_maintenance'],
+            'under_repair' => ['under_repair'],
             'under_inspection' => ['under_inspection'],
             'ready_to_dispose' => ['ready_to_dispose'],
             'disposed' => ['disposed'],
@@ -958,7 +963,7 @@ class PropertyCustodianController extends Controller
             ->get()
             ->groupBy(fn (Inventory $item) => $groupKey($item->item_name, $item->category_id, $item->unit, $item->status, $item->ics_no));
 
-        // Performance: the maintenance picker lists every available row, so it is
+        // Performance: the repair picker lists every available row, so it is
         // sourced from the pool above (already hydrated with relations) plus a
         // lean top-up of the available rows outside the displayed groups. This
         // avoids hydrating displayed rows twice while keeping the full list.
@@ -2100,7 +2105,7 @@ class PropertyCustodianController extends Controller
                 $validated['issue_description'],
                 $validated['notes'] ?? null,
             );
-            $successMessage = count($itemIds) . ' inventory item(s) sent to maintenance.';
+            $successMessage = count($itemIds) . ' inventory item(s) sent for repair.';
         } else {
             $inventory = Inventory::findOrFail($itemId);
             $error = $this->inventoryOperations->sendToMaintenance(
@@ -2109,7 +2114,7 @@ class PropertyCustodianController extends Controller
                 $validated['issue_description'],
                 $validated['notes'] ?? null,
             );
-            $successMessage = 'Item sent to maintenance.';
+            $successMessage = 'Item sent for repair.';
         }
 
         if ($error !== null) {

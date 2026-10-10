@@ -1260,14 +1260,14 @@ class InventoryOperationService
         return DB::transaction(function () use ($itemId, $actorId, $issue, $notes): ?string {
             $inventory = Inventory::with('category')->whereKey($itemId)->lockForUpdate()->firstOrFail();
             if ($inventory->status !== 'available') {
-                return 'Only available items can be sent to maintenance.';
+                return 'Only available items can be sent for repair.';
             }
             if ($inventory->category?->is_maintenance_eligible === false) {
-                return 'Items in this category are not eligible for maintenance.';
+                return 'Items in this category are not eligible for repair.';
             }
 
             $quantity = (int) $inventory->quantity;
-            $inventory->update(['status' => 'under_maintenance']);
+            $inventory->update(['status' => 'under_repair']);
             $maintenanceRecord = MaintenanceRecord::create([
                 'inventory_id' => $inventory->item_id,
                 'reported_by' => $actorId,
@@ -1313,8 +1313,8 @@ class InventoryOperationService
     {
         return DB::transaction(function () use ($itemId, $actorId, $repairNotes, $maintenanceCost): ?string {
             $inventory = Inventory::whereKey($itemId)->lockForUpdate()->firstOrFail();
-            if ($inventory->status !== 'under_maintenance') {
-                return 'Item is not currently under maintenance.';
+            if ($inventory->status !== 'under_repair') {
+                return 'Item is not currently under repair.';
             }
 
             $maintenanceRecord = MaintenanceRecord::query()
@@ -1324,7 +1324,7 @@ class InventoryOperationService
                 ->lockForUpdate()
                 ->first();
             if (! $maintenanceRecord) {
-                return 'No active maintenance record was found.';
+                return 'No active repair record was found.';
             }
 
             $quantity = (int) $inventory->quantity;
@@ -1373,8 +1373,8 @@ class InventoryOperationService
     {
         return DB::transaction(function () use ($itemId, $actorId, $notes): ?string {
             $inventory = Inventory::whereKey($itemId)->lockForUpdate()->firstOrFail();
-            if ($inventory->status !== 'under_maintenance') {
-                return 'Only items under maintenance can be marked ready to dispose.';
+            if ($inventory->status !== 'under_repair') {
+                return 'Only items under repair can be marked ready to dispose.';
             }
 
             $quantity = (int) $inventory->quantity;
@@ -1463,14 +1463,14 @@ class InventoryOperationService
     }
 
     /**
-     * Statuses a custodian may flag for inspection. Unlike maintenance this is not
+     * Statuses a custodian may flag for inspection. Unlike repair this is not
      * gated on the category, because inspection is a verification step rather than
      * a repair.
      */
     public const INSPECTABLE_STATUSES = [
         'available',
         'assigned',
-        'under_maintenance',
+        'under_repair',
         'ready_to_dispose',
     ];
 
@@ -1479,7 +1479,7 @@ class InventoryOperationService
         return DB::transaction(function () use ($itemId, $actorId, $reason): ?string {
             $inventory = Inventory::query()->whereKey($itemId)->lockForUpdate()->firstOrFail();
             if (! in_array($inventory->status, self::INSPECTABLE_STATUSES, true)) {
-                return 'Only available, assigned, under maintenance, or ready to dispose items can be sent to inspection.';
+                return 'Only available, assigned, under repair, or ready to dispose items can be sent to inspection.';
             }
 
             $statusBefore = $inventory->status;

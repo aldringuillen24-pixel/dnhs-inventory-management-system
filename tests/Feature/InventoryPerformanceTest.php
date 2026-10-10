@@ -75,7 +75,7 @@ beforeEach(function () {
         $row('Paper', $this->general, 'box', 'available', 5);
     }
     for ($i = 0; $i < 8; $i++) {
-        $row('Wooden Chair', $this->general, 'piece', 'under_maintenance', 1);
+        $row('Wooden Chair', $this->general, 'piece', 'under_repair', 1);
     }
     for ($i = 0; $i < 6; $i++) {
         $row('Stapler', $this->general, 'piece', 'under_inspection', 2);
@@ -151,7 +151,7 @@ test('inventory aggregates match independent recomputation at volume', function 
         ->assertJsonPath('inventoryMetrics.assigned', (int) $liveItems->where('status', 'assigned')->sum($effective))
         ->assertJsonPath(
             'inventoryMetrics.attention',
-            (int) $liveItems->whereIn('status', ['under_inspection', 'under_maintenance'])->sum($effective)
+            (int) $liveItems->whereIn('status', ['under_inspection', 'under_repair'])->sum($effective)
         );
 
     // No status may be double counted: every live unit lands in exactly one bucket.
@@ -159,7 +159,7 @@ test('inventory aggregates match independent recomputation at volume', function 
         (int) $liveItems->groupBy('status')->sum(fn ($items) => (int) $items->sum($effective))
     );
 
-    foreach (['available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose'] as $status) {
+    foreach (['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose'] as $status) {
         $response->assertJsonPath(
             "inventoryStatusCounts.{$status}",
             (int) $liveItems->where('status', $status)->sum($effective)

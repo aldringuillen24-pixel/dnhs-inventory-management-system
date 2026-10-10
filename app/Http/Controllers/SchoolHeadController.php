@@ -50,7 +50,7 @@ class SchoolHeadController extends Controller
 
         $conditionData = collect([
             ['label' => 'Damaged', 'value' => (int) $inventory->where('status', 'damaged')->sum('quantity')],
-            ['label' => 'Under Repair or Maintenance', 'value' => (int) $inventory->whereIn('status', ['under_repair', 'under_maintenance'])->sum('quantity')],
+            ['label' => 'Under Repair', 'value' => (int) $inventory->whereIn('status', ['under_repair', 'under_maintenance'])->sum('quantity')],
             ['label' => 'Lost', 'value' => (int) $inventory->where('status', 'lost')->sum('quantity')],
             ['label' => 'Disposal Review', 'value' => (int) $inventory->whereIn('status', ['ready_to_dispose', 'disposal_review'])->sum('quantity')],
         ]);
@@ -129,7 +129,7 @@ class SchoolHeadController extends Controller
                 'assignedUnits' => (int) $inventory->where('status', 'assigned')->sum('quantity'),
                 'totalValue' => (float) $inventory->sum(fn ($item) => $item->quantity * $item->unit_cost),
                 'lowStockItems' => $lowStockCount,
-                'attentionItems' => (int) $inventory->whereIn('status', ['under_inspection', 'under_maintenance', 'ready_to_dispose'])->sum('quantity'),
+                'attentionItems' => (int) $inventory->whereIn('status', ['under_inspection', 'under_repair', 'ready_to_dispose'])->sum('quantity'),
                 'approachingLifespan' => (int) $approachingLifespanCount,
                 'expiredLifespan' => (int) $expiredLifespanCount,
                 'pendingRequests' => $pendingRequests->count(),

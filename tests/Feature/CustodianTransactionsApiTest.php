@@ -268,8 +268,8 @@ test('custodian can send selected available inventory records to maintenance tog
         ->assertOk()
         ->assertJsonPath('status', 'success');
 
-    expect($first->fresh()->status)->toBe('under_maintenance')
-        ->and($second->fresh()->status)->toBe('under_maintenance')
+    expect($first->fresh()->status)->toBe('under_repair')
+        ->and($second->fresh()->status)->toBe('under_repair')
         ->and($ineligible->fresh()->status)->toBe('available')
         ->and(\App\Models\MaintenanceRecord::whereIn('inventory_id', [$first->item_id, $second->item_id])->count())->toBe(2);
 

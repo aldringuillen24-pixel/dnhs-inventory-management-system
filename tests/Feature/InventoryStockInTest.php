@@ -470,7 +470,7 @@ test('inventory API exposes the disposed workspace and ignores removed filters',
         ['item_name' => 'Available Projector', 'status' => 'available'],
         ['item_name' => 'Assigned Projector', 'status' => 'assigned'],
         ['item_name' => 'Inspection Projector', 'status' => 'under_inspection'],
-        ['item_name' => 'Maintenance Projector', 'status' => 'under_maintenance'],
+        ['item_name' => 'Maintenance Projector', 'status' => 'under_repair'],
         ['item_name' => 'Disposed Projector', 'status' => 'disposed'],
     ];
 
@@ -721,7 +721,7 @@ test('editing and deletion reject inventory that is not available', function () 
         'item_name' => 'Maintenance Laptop',
         'quantity' => 1,
         'unit' => 'unit',
-        'status' => 'under_maintenance',
+        'status' => 'under_repair',
         'date_acquired' => '2026-08-10',
     ]);
 

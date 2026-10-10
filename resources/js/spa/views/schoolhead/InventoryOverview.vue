@@ -237,7 +237,7 @@ const STATUS_LABELS = {
   all: 'All',
   available: 'Available',
   assigned: 'Assigned',
-  under_maintenance: 'Under Maintenance',
+  under_repair: 'Under Repair',
   under_inspection: 'Under Inspection',
   ready_to_dispose: 'Ready to Dispose',
   disposed: 'Disposed',

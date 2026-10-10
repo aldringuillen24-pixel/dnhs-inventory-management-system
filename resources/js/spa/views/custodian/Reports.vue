@@ -365,7 +365,7 @@
               <svg class="mx-auto h-8 w-8 text-emerald-500 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              No items currently flagged for maintenance or inspection.
+              No items currently flagged for repair or inspection.
             </div>
 
             <div

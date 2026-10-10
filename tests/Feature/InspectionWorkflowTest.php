@@ -93,7 +93,7 @@ function makeIssuedItem($test, string $name, int $quantity = 1): Inventory
 
 test('custodian can flag items for inspection from every allowed status', function () {
     $available = makeInspectableItem($test ?? $this, 'Flag From Available');
-    $maintenance = makeInspectableItem($this, 'Flag From Maintenance', 1, 'under_maintenance');
+    $maintenance = makeInspectableItem($this, 'Flag From Maintenance', 1, 'under_repair');
     $dispose = makeInspectableItem($this, 'Flag From Dispose', 1, 'ready_to_dispose');
     $assigned = makeIssuedItem($this, 'Flag From Assigned');
 
@@ -112,7 +112,7 @@ test('custodian can flag items for inspection from every allowed status', functi
     $records = InspectionRecord::orderBy('id')->get();
     expect($records)->toHaveCount(4)
         ->and($records->pluck('status_before')->all())->toBe(
-            ['available', 'under_maintenance', 'ready_to_dispose', 'assigned']
+            ['available', 'under_repair', 'ready_to_dispose', 'assigned']
         )
         ->and($records->pluck('status')->unique()->all())->toBe(['flagged'])
         ->and($records->pluck('flagged_by')->unique()->all())->toBe([$this->custodian->id])
@@ -147,11 +147,11 @@ test('flagging for inspection rejects statuses outside the allowed set', functio
 
     $disposed = makeInspectableItem($this, 'Already Disposed', 1, 'disposed');
     expect($operations->sendToInspection($disposed->item_id, $this->custodian->id, null))
-        ->toBe('Only available, assigned, under maintenance, or ready to dispose items can be sent to inspection.');
+        ->toBe('Only available, assigned, under repair, or ready to dispose items can be sent to inspection.');
 
     $alreadyFlagged = makeInspectableItem($this, 'Already Flagged', 1, 'under_inspection');
     expect($operations->sendToInspection($alreadyFlagged->item_id, $this->custodian->id, null))
-        ->toBe('Only available, assigned, under maintenance, or ready to dispose items can be sent to inspection.');
+        ->toBe('Only available, assigned, under repair, or ready to dispose items can be sent to inspection.');
 
     expect(InspectionRecord::count())->toBe(0);
 });
@@ -229,7 +229,7 @@ test('inspector marks an item inspected and the original status is restored', fu
     $operations = app(\App\Services\InventoryOperationService::class);
 
     $fromAvailable = makeInspectableItem($this, 'Back To Available');
-    $fromMaintenance = makeInspectableItem($this, 'Back To Maintenance', 1, 'under_maintenance');
+    $fromMaintenance = makeInspectableItem($this, 'Back To Maintenance', 1, 'under_repair');
     $fromDispose = makeInspectableItem($this, 'Back To Dispose', 1, 'ready_to_dispose');
     $fromAssigned = makeIssuedItem($this, 'Back To Assigned');
 
@@ -256,7 +256,7 @@ test('inspector marks an item inspected and the original status is restored', fu
 
     // Each remaining source status is restored by its own inspection record.
     foreach ([
-        [$fromMaintenance, 'under_maintenance'],
+        [$fromMaintenance, 'under_repair'],
         [$fromDispose, 'ready_to_dispose'],
         [$fromAssigned, 'assigned'],
     ] as [$item, $expectedStatus]) {

@@ -877,7 +877,7 @@ class InventoryReturnsTest extends TestCase
 
         $this->assertDatabaseHas('inventory', [
             'item_id' => $this->assignedItem->item_id,
-            'status' => 'under_maintenance',
+            'status' => 'under_repair',
         ]);
         $this->assertDatabaseHas('maintenance_records', [
             'inventory_id' => $this->assignedItem->item_id,
@@ -893,7 +893,7 @@ class InventoryReturnsTest extends TestCase
         ]);
         $this->actingAs($this->custodian)
             ->get(route('propertyCustodian.inventory'))
-            ->assertViewHas('inventoryStatusCounts', fn ($counts) => $counts['under_maintenance'] === 1)
+            ->assertViewHas('inventoryStatusCounts', fn ($counts) => $counts['under_repair'] === 1)
             ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['attention'] === 1);
         $this->actingAs($this->custodian)
             ->get(route('propertyCustodian.transactions'))
@@ -951,7 +951,7 @@ class InventoryReturnsTest extends TestCase
 
         $this->assertDatabaseHas('inventory', [
             'item_id' => $item->item_id,
-            'status' => 'under_maintenance',
+            'status' => 'under_repair',
         ]);
     }
 
@@ -976,7 +976,7 @@ class InventoryReturnsTest extends TestCase
                 'issue_description' => 'Consumables should not enter maintenance.',
             ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Items in this category are not eligible for maintenance.');
+            ->assertJsonPath('message', 'Items in this category are not eligible for repair.');
 
         $this->assertDatabaseHas('inventory', [
             'item_id' => $item->item_id,
@@ -1009,7 +1009,7 @@ class InventoryReturnsTest extends TestCase
             ])
             ->assertRedirect();
 
-        $response->assertSessionHas('error', 'Items in this category are not eligible for maintenance.');
+        $response->assertSessionHas('error', 'Items in this category are not eligible for repair.');
         $this->assertDatabaseHas('inventory', [
             'item_id' => $item->item_id,
             'status' => 'available',
@@ -1026,7 +1026,7 @@ class InventoryReturnsTest extends TestCase
     public function test_custodian_can_mark_a_maintenance_item_as_repaired_and_audit_it()
     {
         $this->assignedItem->update([
-            'status' => 'under_maintenance',
+            'status' => 'under_repair',
             'assigned_to_user_id' => null,
         ]);
 

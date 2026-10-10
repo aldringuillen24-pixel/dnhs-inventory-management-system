@@ -53,7 +53,7 @@ test('the overview monitor lists every state with workbench-honest quantities', 
         'quantity' => 0,
         'assigned_to_user_id' => $holder->id,
     ]);
-    monitorItem($custodian, 'Faulty Projector', ['status' => 'under_maintenance']);
+    monitorItem($custodian, 'Faulty Projector', ['status' => 'under_repair']);
 
     $payload = $this->actingAs($head)
         ->getJson(route('api.school-head.inventory.overview'))
@@ -62,7 +62,7 @@ test('the overview monitor lists every state with workbench-honest quantities', 
 
     $rows = collect($payload['monitorRows']);
     expect($rows->pluck('status')->unique()->sort()->values()->all())
-        ->toEqualCanonicalizing(['available', 'assigned', 'under_maintenance']);
+        ->toEqualCanonicalizing(['available', 'assigned', 'under_repair']);
 
     $laptop = $rows->firstWhere('item_name', 'Lent Laptop');
     expect($laptop['holder_name'])->toBe('Hold Erson')

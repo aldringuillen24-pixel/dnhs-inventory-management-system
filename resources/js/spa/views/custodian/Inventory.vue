@@ -519,8 +519,8 @@
                         v-if="row.status === 'available' && !isPartialAssigned(row) && hasMaintenanceEligibleItems(row)"
                         type="button"
                         class="rounded-md p-1.5 text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-500/10"
-                        title="Send selected items to maintenance"
-                        aria-label="Send items to maintenance"
+                        title="Send selected items for repair"
+                        aria-label="Send items for repair"
                         @click="openMaintenanceModal(row)"
                       >
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -539,7 +539,7 @@
                           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" />
                         </svg>
                       </button>
-                      <template v-if="row.status === 'under_maintenance'">
+                      <template v-if="row.status === 'under_repair'">
                         <button
                           type="button"
                           class="rounded-md p-1.5 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
@@ -698,7 +698,7 @@
               class="rounded-md border border-amber-200 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/10"
               @click="openMaintenanceModal(recordGroup)"
             >
-              Send to Maintenance
+              Send for Repair
             </button>
             <button
               v-if="isInspectable(recordGroup.status) && hasInspectableItems(recordGroup)"
@@ -708,7 +708,7 @@
             >
               Send to Inspection
             </button>
-            <template v-if="recordGroup.status === 'under_maintenance'">
+            <template v-if="recordGroup.status === 'under_repair'">
               <button
                 type="button"
                 class="rounded-md border border-emerald-200 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
@@ -887,7 +887,7 @@
 
     <Modal
       :open="maintenanceGroup !== null"
-      :title="maintenanceGroup ? `Send ${maintenanceGroup.item_name} to maintenance` : 'Send items to maintenance'"
+      :title="maintenanceGroup ? `Send ${maintenanceGroup.item_name} for repair` : 'Send items for repair'"
       subtitle="Select the available item records to send, then describe the issue."
       max-width="max-w-xl"
       fixed-body
@@ -952,7 +952,7 @@
             required
             maxlength="1000"
             :disabled="sendingToMaintenance"
-            placeholder="Describe the problem or maintenance needed"
+            placeholder="Describe the problem or repair needed"
             class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         </div>
@@ -987,7 +987,7 @@
             :disabled="sendingToMaintenance || maintenanceItemIds.length === 0 || !maintenanceIssue.trim()"
             @click="sendSelectedToMaintenance"
           >
-            {{ sendingToMaintenance ? 'Sending…' : `Send ${maintenanceItemIds.length} to Maintenance` }}
+            {{ sendingToMaintenance ? 'Sending…' : `Send ${maintenanceItemIds.length} for Repair` }}
           </button>
         </div>
       </div>
@@ -1218,12 +1218,12 @@
             <span class="flex items-center gap-2 text-xs">
               <span>{{ format(source.quantity) }} {{ source.unit }}</span>
               <span class="rounded-md bg-amber-50 px-2 py-1 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-                Under maintenance
+                Under repair
               </span>
             </span>
           </label>
           <p v-if="!maintenanceActionItems.length" class="p-4 text-sm text-gray-500">
-            No item records are currently under maintenance in this group.
+            No item records are currently under repair in this group.
           </p>
         </div>
 
@@ -1245,7 +1245,7 @@
           </div>
           <div class="space-y-1.5">
             <label for="maintenance-cost" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-              Maintenance cost <span class="font-normal text-gray-500">(optional)</span>
+              Repair cost <span class="font-normal text-gray-500">(optional)</span>
             </label>
             <input
               id="maintenance-cost"
@@ -1570,7 +1570,7 @@ import QrScannerModal from '../../components/ui/qr/QrScannerModal.vue';
 import StockInModal from './StockInModal.vue';
 import EditInventoryModal from './EditInventoryModal.vue';
 
-const STATUSES = ['available', 'assigned', 'under_maintenance', 'under_inspection', 'ready_to_dispose', 'disposed'];
+const STATUSES = ['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
 const ITEM_ICONS = [
   { terms: ['bond paper', 'coupon bond', 'copy paper', 'ream', 'paper', 'envelope', 'folder', 'notepad', 'notebook', 'index card', 'cartolina', 'manila paper', 'parchment', 'sticky note'], icon: FileStack },
   { terms: ['document camera', 'camera'], icon: Camera },
@@ -1595,7 +1595,7 @@ const STATUS_LABELS = {
   all: 'All Inventory',
   available: 'Available',
   assigned: 'Assigned',
-  under_maintenance: 'Under Maintenance',
+  under_repair: 'Under Repair',
   under_inspection: 'Under Inspection',
   ready_to_dispose: 'Ready to Dispose',
   disposed: 'Disposed',
@@ -1695,11 +1695,11 @@ const maintenanceEligibleItems = computed(() => (maintenanceGroup.value?.sourceI
   .filter((source) => source.status === 'available' && isMaintenanceEligible(source)));
 // Mirrors InventoryOperationService::INSPECTABLE_STATUSES. Unlike maintenance this is
 // not gated on the category, because inspection verifies rather than repairs.
-const INSPECTABLE_STATUSES = ['available', 'assigned', 'under_maintenance', 'ready_to_dispose'];
+const INSPECTABLE_STATUSES = ['available', 'assigned', 'under_repair', 'ready_to_dispose'];
 const inspectableItems = computed(() => (inspectionGroup.value?.sourceItems ?? [])
   .filter((source) => INSPECTABLE_STATUSES.includes(source.status)));
 const maintenanceActionItems = computed(() => (maintenanceActionGroup.value?.sourceItems ?? [])
-  .filter((source) => source.status === 'under_maintenance'));
+  .filter((source) => source.status === 'under_repair'));
 const disposeEligibleItems = computed(() => (disposeGroup.value?.sourceItems ?? [])
   .filter((source) => source.status === 'ready_to_dispose'));
 const maintenanceActionTitle = computed(() => maintenanceAction.value === 'repair'
@@ -1752,7 +1752,7 @@ function tabBadgeClass(key, isActive) {
       return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
     case 'assigned':
       return 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300';
-    case 'under_maintenance':
+    case 'under_repair':
     case 'under_inspection':
       return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300';
     case 'ready_to_dispose':
@@ -2344,7 +2344,7 @@ async function sendSelectedToMaintenance() {
     await load();
   } catch (requestError) {
     maintenanceError.value = requestError?.response?.data?.message
-      ?? 'Could not send the selected items to maintenance. Refresh the inventory and try again.';
+      ?? 'Could not send the selected items for repair. Refresh the inventory and try again.';
   } finally {
     sendingToMaintenance.value = false;
   }
@@ -2425,7 +2425,7 @@ async function confirmMaintenanceAction() {
     .filter((source) => maintenanceActionItemIds.value.includes(source.item_id));
 
   if (!selectedSources.length) {
-    maintenanceActionError.value = 'Select at least one item record that is still under maintenance.';
+    maintenanceActionError.value = 'Select at least one item record that is still under repair.';
     maintenanceActionBusy.value = false;
     return;
   }

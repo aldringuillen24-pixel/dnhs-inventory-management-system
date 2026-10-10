@@ -84,7 +84,7 @@ class EndUserController extends Controller
             ->values();
         $conditionData = collect([
             ['label' => 'Damaged', 'value' => (int) $assignedRequests->filter(fn ($request) => $request->item?->status === 'damaged')->sum('quantity')],
-            ['label' => 'Under Maintenance or Repair', 'value' => (int) $assignedRequests->filter(fn ($request) => in_array($request->item?->status, ['under_maintenance', 'under_repair'], true))->sum('quantity')],
+            ['label' => 'Under Repair', 'value' => (int) $assignedRequests->filter(fn ($request) => in_array($request->item?->status, ['under_repair', 'under_maintenance'], true))->sum('quantity')],
             ['label' => 'Lost', 'value' => (int) $assignedRequests->filter(fn ($request) => $request->item?->status === 'lost')->sum('quantity')],
             ['label' => 'Disposal Review', 'value' => (int) $assignedRequests->filter(fn ($request) => in_array($request->item?->status, ['ready_to_dispose', 'disposal_review'], true))->sum('quantity')],
         ])->filter(fn ($condition) => $condition['value'] > 0)->values();
@@ -105,7 +105,7 @@ class EndUserController extends Controller
                 'pendingRequests' => $pendingRequests->count(),
                 'pendingReturns' => $pendingReturns,
                 'dueSoon' => (int) $dueSoon,
-                'attentionItems' => (int) $assignedRequests->filter(fn ($request) => in_array($request->item?->status, ['damaged', 'under_maintenance', 'under_repair', 'lost', 'ready_to_dispose', 'disposal_review'], true))->sum('quantity'),
+                'attentionItems' => (int) $assignedRequests->filter(fn ($request) => in_array($request->item?->status, ['damaged', 'under_repair', 'lost', 'ready_to_dispose', 'disposal_review'], true))->sum('quantity'),
             ],
             'categoryData' => $categoryData,
             'statusData' => $statusData,
