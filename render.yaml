@@ -58,76 +58,63 @@ services:
         value: python3
       - key: FORECAST_DEMO_MODE
         value: "false"
+  - type: cron
+    name: dnhs-inventory-forecast-train
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    schedule: "0 4 3 * *"
+    dockerCommand: php artisan forecast:train
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        fromService:
+          type: web
+          name: dnhs-inventory
+          property: envVars
+          envVarKey: APP_KEY
+      - key: APP_URL
+        fromService:
+          type: web
+          name: dnhs-inventory
+          property: envVars
+          envVarKey: APP_URL
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: port
+      - key: DB_DATABASE
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: dnhs-inventory-db
+          property: password
+      - key: SESSION_DRIVER
+        value: database
+      - key: CACHE_STORE
+        value: database
+      - key: FILESYSTEM_DISK
+        value: local
+      - key: FORECAST_PYTHON_BINARY
+        value: python3
+      - key: FORECAST_DEMO_MODE
+        value: "false"
 
 databases:
   - name: dnhs-inventory-db
     plan: starter
-
-# Monthly retraining. The forecast history is whole-month granularity, so a
-# weekly run would regenerate an identical document; the 3rd of each month
-# covers the month that just closed.
-#
-# This must be a separate service from the web one. The trained forecast is
-# stored in the database (forecast_payloads), so the trained result written here
-# is readable by the web service and survives its redeploys — a JSON file on
-# either container's disk would not be visible to the other.
-#
-# History still has to exist in the database: on a fresh production database
-# there are no completed stock-out movements yet, and training needs at least
-# `forecast.minimum_history` completed months per item.
-type: cron
-name: dnhs-inventory-forecast-train
-runtime: docker
-dockerfilePath: ./Dockerfile
-plan: starter
-schedule: "0 4 3 * *"
-dockerCommand: php artisan forecast:train
-envVars:
-  - key: APP_ENV
-    value: production
-  - key: APP_DEBUG
-    value: "false"
-  - key: APP_KEY
-    fromService:
-      type: web
-      name: dnhs-inventory
-      property: envVars
-      envVarKey: APP_KEY
-  - key: APP_URL
-    fromService:
-      type: web
-      name: dnhs-inventory
-      property: envVars
-      envVarKey: APP_URL
-  - key: DB_CONNECTION
-    value: pgsql
-  - key: DB_HOST
-    fromDatabase:
-      name: dnhs-inventory-db
-      property: host
-  - key: DB_PORT
-    fromDatabase:
-      name: dnhs-inventory-db
-      property: port
-  - key: DB_DATABASE
-    fromDatabase:
-      name: dnhs-inventory-db
-      property: database
-  - key: DB_USERNAME
-    fromDatabase:
-      name: dnhs-inventory-db
-      property: user
-  - key: DB_PASSWORD
-    fromDatabase:
-      name: dnhs-inventory-db
-      property: password
-  - key: SESSION_DRIVER
-    value: database
-  - key: CACHE_STORE
-    value: database
-  - key: FILESYSTEM_DISK
-    value: local
-  - key: FORECAST_PYTHON_BINARY
-    value: python3
-  - key: FORECAST_DEMO_MODE
-    value: "false"
