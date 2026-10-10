@@ -268,14 +268,11 @@
               />
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">{{ row.item_name }}</p>
-                <p v-if="hasIssuedOut(row) && workspace !== 'available'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base"><span v-if="workspace !== 'assigned'">Assigned: </span>{{ format(assignedOutQty(row)) }} {{ row.unit }}</p>
+                <p v-if="hasIssuedOut(row) && workspace !== 'available' && workspace !== 'all'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base"><span v-if="workspace !== 'assigned'">Assigned: </span>{{ format(assignedOutQty(row)) }} {{ row.unit }}</p>
                 <p v-if="workspace === 'assigned' && rowAssignees(row)" class="mt-0.5 truncate text-[11px] font-medium text-gray-500 dark:text-gray-400 min-[480px]:text-xs">{{ rowAssignees(row) }}</p>
-                <p v-else-if="row.status === 'available'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">Available: {{ format(row.free_quantity ?? row.quantity) }} {{ row.unit }}</p>
+                <p v-else-if="row.status === 'available' && workspace !== 'all'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">Available: {{ format(row.free_quantity ?? row.quantity) }} {{ row.unit }}</p>
                 <p v-else class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400 min-[480px]:mt-1 min-[480px]:text-xs">{{ format(row.quantity) }} {{ row.unit }}</p>
-                <p v-if="hasIssuedOut(row) && row.status === 'available' && workspace === 'all'" class="mt-0.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500 min-[480px]:text-xs">
-                  Left in stockroom: {{ format(row.quantity) }}
-                </p>
-                <p v-if="hasIssuedOut(row) && workspace !== 'available' && (row.pending_hold ?? 0) > 0" class="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300 min-[480px]:text-xs">
+                <p v-if="hasIssuedOut(row) && workspace !== 'available' && workspace !== 'all' && (row.pending_hold ?? 0) > 0" class="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300 min-[480px]:text-xs">
                   Pending: {{ format(row.pending_hold ?? 0) }}
                 </p>
                 <p v-else-if="row.status === 'available'" class="mt-0.5 text-[11px] font-semibold min-[480px]:text-xs" :class="(row.pending_hold ?? 0) > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'">
@@ -290,7 +287,7 @@
               </p>
               <StatusBadge v-else :status="row.status" compact />
               <span v-if="hasRepairRecommendation(row)" class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Repair recommended</span>
-              <span v-if="hasIssuedOut(row) && workspace !== 'available'" class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Assigned issuing</span>
+              <span v-if="hasIssuedOut(row) && workspace !== 'available' && workspace !== 'all'" class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Assigned issuing</span>
               <button
                 type="button"
                 class="shrink-0 rounded-md border border-emerald-200 px-2 py-1.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10 min-[480px]:px-3 min-[480px]:py-2 min-[480px]:text-xs"
@@ -451,17 +448,14 @@
 
                   <!-- Quantity -->
                   <td class="px-4 py-3.5 text-right font-bold text-gray-900 dark:text-white">
-                    <template v-if="hasIssuedOut(row) && workspace !== 'available'">
+                    <template v-if="hasIssuedOut(row) && workspace !== 'available' && workspace !== 'all'">
                       <span v-if="workspace !== 'assigned'">Assigned: </span>{{ format(assignedOutQty(row)) }}
                       <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
-                      <span v-if="row.status === 'available' && workspace === 'all'" class="block text-[11px] font-semibold text-gray-400 dark:text-gray-500">
-                        Left in stockroom: {{ format(row.quantity) }}
-                      </span>
                       <span v-if="(row.pending_hold ?? 0) > 0" class="block text-[11px] font-semibold text-amber-600 dark:text-amber-300">
                         Pending: {{ format(row.pending_hold ?? 0) }}
                       </span>
                     </template>
-                    <template v-else-if="row.status === 'available'">
+                    <template v-else-if="row.status === 'available' && workspace !== 'all'">
                       Available: {{ format(row.free_quantity ?? row.quantity) }}
                       <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
                       <span class="block text-[11px] font-semibold" :class="(row.pending_hold ?? 0) > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'">

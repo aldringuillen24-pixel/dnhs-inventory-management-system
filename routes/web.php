@@ -175,6 +175,7 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
     Route::get('/requests/my-requests', fn () => redirect('/spa/end-user/requests'))->name('my-requests');
     Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
     Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
+    Route::delete('/requests/{id}', [EndUserController::class, 'cancelRequest'])->name('requests.cancel');
 
     Route::get('/assigned-items', fn () => redirect('/spa/end-user/assigned'))->name('my-assigned-items');
     Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('assigned-items.transfer');
@@ -304,6 +305,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::get('/requests/my-requests', [EndUserController::class, 'myRequests'])->name('my-requests');
         Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
         Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
+        Route::delete('/requests/{id}', [EndUserController::class, 'cancelRequest'])->name('requests.cancel');
         Route::get('/assigned-items', [EndUserController::class, 'myAssignedItems'])->name('assigned-items');
         Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('transfer');
         Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');

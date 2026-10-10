@@ -68,11 +68,12 @@
               <th class="px-4 py-3.5">Requested On</th>
               <th class="px-4 py-3.5">Status</th>
               <th class="px-4 py-3.5">Note</th>
+              <th class="px-4 py-3.5 text-center">Actions</th>
             </tr>
           </thead>
           <tbody v-if="loading" aria-hidden="true">
             <tr v-for="row in 5" :key="row">
-              <td v-for="column in 5" :key="column" class="px-4 py-3.5">
+              <td v-for="column in 6" :key="column" class="px-4 py-3.5">
                 <div class="compact-skeleton h-3 w-3/4" />
               </td>
             </tr>
@@ -88,9 +89,21 @@
               <td class="px-4 py-3.5 text-md text-gray-500 dark:text-gray-400">{{ formatDate(request.requested_at) }}</td>
               <td class="px-4 py-3.5"><StatusBadge :status="request.status" /></td>
               <td class="px-4 py-3.5 text-md text-gray-500 dark:text-gray-400">{{ request.status === 'cancelled' ? request.cancellation_reason || '—' : request.notes || '—' }}</td>
+              <td class="px-4 py-3.5 text-center">
+                <button
+                  v-if="['waiting for approval', 'waiting for procurement'].includes(request.status)"
+                  type="button"
+                  class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-rose-950/30"
+                  :disabled="cancellingId === request.id"
+                  @click="cancelTarget = request"
+                >
+                  Cancel
+                </button>
+                <span v-else class="text-xs text-gray-400">—</span>
+              </td>
             </tr>
             <tr v-if="!myRequests.length">
-              <td colspan="5" class="px-4 py-8 text-center text-xs text-gray-500">No requests yet. Use “Request Item” to start one.</td>
+              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">No requests yet. Use “Request Item” to start one.</td>
             </tr>
           </tbody>
         </table>
@@ -159,6 +172,16 @@
     </div>
 
     <RequestItemModal :open="requestOpen" :categories="categories" @close="requestOpen = false" @saved="onRequestSaved" />
+
+    <ConfirmDialog
+      :open="cancelTarget !== null"
+      title="Cancel this request?"
+      :message="`Withdraw your request for ${cancelTarget?.requested_item_name ?? cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The custodian will no longer see it in the approval queue.`"
+      :busy="cancelling"
+      confirm-label="Yes, Cancel Request"
+      @cancel="cancelTarget = null"
+      @confirm="cancelRequest"
+    />
   </div>
 </template>
 
@@ -168,6 +191,7 @@ import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { useToastStore } from '../../stores/toast';
 import StatusBadge from '../../components/ui/data-display/StatusBadge.vue';
+import ConfirmDialog from '../../components/ui/dialogs/ConfirmDialog.vue';
 import RequestItemModal from './RequestItemModal.vue';
 
 const toast = useToastStore();
@@ -178,6 +202,8 @@ const firstLoading = ref(true);
 const error = ref('');
 const workingId = ref(null);
 const requestOpen = ref(false);
+const cancelTarget = ref(null);
+const cancelling = ref(false);
 
 const myRequests = ref([]);
 const incomingRequests = ref([]);
@@ -256,6 +282,24 @@ function onRequestSaved() {
   requestOpen.value = false;
   forgetPageCache();
   load();
+}
+
+async function cancelRequest() {
+  if (!cancelTarget.value || cancelling.value) return;
+
+  cancelling.value = true;
+  try {
+    await api.delete(`/end-user/requests/${cancelTarget.value.id}`);
+    cancelTarget.value = null;
+    forgetPageCache();
+    await load();
+  } catch (requestError) {
+    if (requestError?.response?.status === 422) {
+      toast.error('Error', requestError?.response?.data?.message ?? 'Could not cancel the request.');
+    }
+  } finally {
+    cancelling.value = false;
+  }
 }
 
 onMounted(() => load());

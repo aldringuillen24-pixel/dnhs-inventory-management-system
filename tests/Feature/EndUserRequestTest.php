@@ -2677,3 +2677,106 @@ test('end user cannot duplicate return request for same item', function () {
         'status' => 'waiting for custodian approval',
     ]);
 });
+
+function makeOwnerRequest($test, string $status = 'waiting for approval'): AssignmentRequest
+{
+    $category = Category::create([
+        'category_name' => 'Cancellation Gear ' . $status,
+        'requires_serial_number' => false,
+    ]);
+
+    return AssignmentRequest::create([
+        'requested_item_name' => 'Cancel Me Item',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
+        'user_id' => $test->endUser->id,
+        'target_user_id' => $test->propertyCustodian->id,
+        'quantity' => 2,
+        'status' => $status,
+        'requested_at' => now(),
+    ]);
+}
+
+test('owner can cancel their own waiting request', function () {
+    $request = makeOwnerRequest($this);
+
+    $this->actingAs($this->endUser)
+        ->delete(route('endUser.requests.cancel', $request->id))
+        ->assertRedirect(route('endUser.my-requests'))
+        ->assertSessionHas('success', 'Request cancelled.');
+
+    $fresh = $request->fresh();
+    expect($fresh->status)->toBe('cancelled')
+        ->and($fresh->responded_at)->not->toBeNull();
+});
+
+test('owner can cancel their own procurement request', function () {
+    $request = makeOwnerRequest($this, 'waiting for procurement');
+
+    $this->actingAs($this->endUser)
+        ->deleteJson(route('api.end-user.requests.cancel', $request->id))
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($request->fresh()->status)->toBe('cancelled');
+});
+
+test('non-owner cannot cancel another user request', function () {
+    $request = makeOwnerRequest($this);
+
+    $other = User::create([
+        'role_id' => $this->endUserRole->role_id,
+        'first_name' => 'Other',
+        'last_name' => 'User',
+        'username' => 'other-user',
+        'email' => 'other@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+
+    $this->actingAs($other)
+        ->delete(route('endUser.requests.cancel', $request->id))
+        ->assertForbidden();
+
+    expect($request->fresh()->status)->toBe('waiting for approval');
+});
+
+test('processed requests cannot be cancelled by the owner', function () {
+    $request = makeOwnerRequest($this);
+    $request->update(['status' => 'declined']);
+
+    $this->actingAs($this->endUser)
+        ->delete(route('endUser.requests.cancel', $request->id))
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Only requests waiting for approval can be cancelled.');
+
+    expect($request->fresh()->status)->toBe('declined');
+});
+
+test('custodian can cancel a procurement request', function () {
+    $request = makeOwnerRequest($this, 'waiting for procurement');
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.cancel', $request->id), [
+            'cancellation_reason' => 'Duplicate need.',
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'))
+        ->assertSessionHas('success', 'Item request cancelled.');
+
+    $fresh = $request->fresh();
+    expect($fresh->status)->toBe('cancelled')
+        ->and($fresh->cancellation_reason)->toBe('Duplicate need.');
+});
+
+test('custodian can decline a procurement request', function () {
+    $request = makeOwnerRequest($this, 'waiting for procurement');
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.requests.decline', $request->id), [
+            'notes' => 'Not in the procurement plan.',
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'))
+        ->assertSessionHas('success', 'Request has been declined.');
+
+    expect($request->fresh()->status)->toBe('declined');
+});

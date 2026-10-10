@@ -81,6 +81,35 @@
         <div v-else class="p-2.5 min-[480px]:p-4 sm:p-6">
           <!-- 1. REQUESTS TAB -->
           <template v-if="activeTab === 'requests'">
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="relative w-full max-w-sm">
+                  <svg class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    v-model="requestsSearch"
+                    type="search"
+                    placeholder="Search requester, item, category…"
+                    aria-label="Search requests"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                  />
+                </div>
+                <button
+                  v-if="requestsSearch"
+                  type="button"
+                  class="rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+                  @click="requestsSearch = ''"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ filteredIncoming.length + filteredAssignments.length }} of {{ incoming.length + assignments.length }} shown
+              </span>
+            </div>
+
             <!-- Incoming Requests -->
             <div class="mb-5 min-[480px]:mb-8">
               <div class="mb-3 flex items-center justify-between border-b border-gray-100 pb-2.5 dark:border-white/5 min-[480px]:mb-4 min-[480px]:pb-3">
@@ -106,7 +135,7 @@
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-white/5">
-                    <tr v-for="request in incoming" :key="request.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                    <tr v-for="request in filteredIncoming" :key="request.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                       <!-- Requester -->
                       <td class="px-4 py-3.5">
                         <div class="flex items-center gap-2.5">
@@ -204,9 +233,9 @@
                       </td>
                     </tr>
 
-                    <tr v-if="!incoming.length">
+                    <tr v-if="!filteredIncoming.length">
                       <td colspan="7" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
-                        No incoming requests waiting for approval.
+                        {{ requestsSearch.trim() ? `No results for '${requestsSearch.trim()}'.` : 'No incoming requests waiting for approval.' }}
                       </td>
                     </tr>
                   </tbody>
@@ -237,7 +266,7 @@
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-white/5">
-                    <tr v-for="assignment in assignments" :key="assignment.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                    <tr v-for="assignment in filteredAssignments" :key="assignment.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                       <td class="px-4 py-3.5 font-semibold text-gray-900 dark:text-white">
                         {{ personName(assignment.target_user ?? assignment.targetUser) }}
                       </td>
@@ -258,9 +287,9 @@
                         </span>
                       </td>
                     </tr>
-                    <tr v-if="!assignments.length">
+                    <tr v-if="!filteredAssignments.length">
                       <td colspan="5" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
-                        No pending assignment requests waiting for end user.
+                        {{ requestsSearch.trim() ? `No results for '${requestsSearch.trim()}'.` : 'No pending assignment requests waiting for end user.' }}
                       </td>
                     </tr>
                   </tbody>
@@ -271,6 +300,35 @@
 
           <!-- 2. TRANSFERS TAB -->
           <template v-else-if="activeTab === 'transfers'">
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="relative w-full max-w-sm">
+                  <svg class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    v-model="transfersSearch"
+                    type="search"
+                    placeholder="Search sender, recipient, item…"
+                    aria-label="Search transfers"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                  />
+                </div>
+                <button
+                  v-if="transfersSearch"
+                  type="button"
+                  class="rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+                  @click="transfersSearch = ''"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ filteredTransfers.length }} of {{ transfers.length }} shown
+              </span>
+            </div>
+
             <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
               <table class="w-full min-w-[56rem] text-left text-xs">
                 <thead class="sticky top-0 z-10">
@@ -283,7 +341,7 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-white/5">
-                  <tr v-for="transfer in transfers" :key="transfer.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                  <tr v-for="transfer in filteredTransfers" :key="transfer.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                     <!-- From -> To -->
                     <td class="px-4 py-3.5">
                       <div class="flex items-center gap-2">
@@ -337,9 +395,9 @@
                     </td>
                   </tr>
 
-                  <tr v-if="!transfers.length">
+                  <tr v-if="!filteredTransfers.length">
                     <td colspan="5" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
-                      No pending custody transfers.
+                      {{ transfersSearch.trim() ? `No results for '${transfersSearch.trim()}'.` : 'No pending custody transfers.' }}
                     </td>
                   </tr>
                 </tbody>
@@ -349,6 +407,35 @@
 
           <!-- 3. RETURNS TAB -->
           <template v-else-if="activeTab === 'returns'">
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="relative w-full max-w-sm">
+                  <svg class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    v-model="returnsSearch"
+                    type="search"
+                    placeholder="Search user, item…"
+                    aria-label="Search returns"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                  />
+                </div>
+                <button
+                  v-if="returnsSearch"
+                  type="button"
+                  class="rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+                  @click="returnsSearch = ''"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ filteredReturns.length }} of {{ returns.length }} shown
+              </span>
+            </div>
+
             <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
               <table class="w-full min-w-[52rem] text-left text-xs">
                 <thead class="sticky top-0 z-10">
@@ -361,7 +448,7 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-white/5">
-                  <tr v-for="returnRequest in returns" :key="returnRequest.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                  <tr v-for="returnRequest in filteredReturns" :key="returnRequest.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                     <!-- End user -->
                     <td class="px-4 py-3.5">
                       <div class="font-semibold text-gray-900 dark:text-white">{{ returnRequest.user?.full_name ?? 'Unknown User' }}</div>
@@ -409,9 +496,9 @@
                     </td>
                   </tr>
 
-                  <tr v-if="!returns.length">
+                  <tr v-if="!filteredReturns.length">
                     <td colspan="5" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
-                      No pending item returns.
+                      {{ returnsSearch.trim() ? `No results for '${returnsSearch.trim()}'.` : 'No pending item returns.' }}
                     </td>
                   </tr>
                 </tbody>
@@ -423,7 +510,7 @@
           <template v-else-if="activeTab === 'history'">
             <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div class="flex flex-wrap items-center gap-2">
-                <div class="relative w-full max-w-sm">
+                <div class="relative flex-1 min-w-[200px] max-w-sm">
                   <svg class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
                   </svg>
@@ -435,19 +522,26 @@
                     class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
                   />
                 </div>
-                <input
-                  v-model="historyDateFrom"
-                  type="date"
-                  aria-label="Filter history from date"
-                  class="rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
-                />
-                <span class="text-xs text-gray-400">to</span>
-                <input
-                  v-model="historyDateTo"
-                  type="date"
-                  aria-label="Filter history to date"
-                  class="rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
-                />
+                <span class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  <label for="historyDateFrom" class="shrink-0">From</label>
+                  <input
+                    id="historyDateFrom"
+                    v-model="historyDateFrom"
+                    type="date"
+                    aria-label="Filter history from date"
+                    class="w-[140px] shrink-0 rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100 dark:[color-scheme:dark]"
+                  />
+                </span>
+                <span class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  <label for="historyDateTo" class="shrink-0">to</label>
+                  <input
+                    id="historyDateTo"
+                    v-model="historyDateTo"
+                    type="date"
+                    aria-label="Filter history to date"
+                    class="w-[140px] shrink-0 rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100 dark:[color-scheme:dark]"
+                  />
+                </span>
                 <button
                   v-if="historySearch || historyDateFrom || historyDateTo"
                   type="button"
@@ -571,6 +665,35 @@
 
           <!-- 5. AUDIT LEDGER TAB -->
           <template v-else>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="relative w-full max-w-sm">
+                  <svg class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    v-model="ledgerSearch"
+                    type="search"
+                    placeholder="Search item, movement, actor, details…"
+                    aria-label="Search audit ledger"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                  />
+                </div>
+                <button
+                  v-if="ledgerSearch"
+                  type="button"
+                  class="rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+                  @click="ledgerSearch = ''"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {{ filteredLedger.length }} of {{ ledger.length }} shown
+              </span>
+            </div>
+
             <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
               <table class="w-full min-w-[64rem] table-fixed text-left text-xs">
                 <thead class="sticky top-0 z-10">
@@ -695,9 +818,9 @@
                   </template>
                   </template>
 
-                  <tr v-if="!ledger.length">
+                  <tr v-if="!filteredLedger.length">
                     <td colspan="8" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
-                      No stock movement audit records yet.
+                      {{ ledgerSearch.trim() ? `No results for '${ledgerSearch.trim()}'.` : 'No stock movement audit records yet.' }}
                     </td>
                   </tr>
                 </tbody>
@@ -789,6 +912,10 @@ const working = ref(false);
 const historySearch = ref('');
 const historyDateFrom = ref('');
 const historyDateTo = ref('');
+const requestsSearch = ref('');
+const transfersSearch = ref('');
+const returnsSearch = ref('');
+const ledgerSearch = ref('');
 
 const assignOpen = ref(false);
 const reviewRequest = ref(null);
@@ -858,7 +985,7 @@ function ledgerBadgeClass(type) {
 const expandedLedgerGroups = ref(new Set());
 
 const ledgerGroups = computed(() => groupLedgerEntries(
-  ledger.value,
+  filteredLedger.value,
   (entry) => (entry.user ? personName(entry.user) : 'System Automated'),
 ));
 
@@ -974,6 +1101,91 @@ const promptConfig = computed(() => {
 function format(value) {
   return Number(value ?? 0).toLocaleString();
 }
+
+// Client-side, case-insensitive match across the given display values.
+// Pure computed filtering: no extra API calls.
+function matchesSearch(query, values) {
+  const q = String(query ?? '').toLowerCase().trim();
+  if (!q) {
+    return true;
+  }
+  return values
+    .filter((value) => value !== null && value !== undefined && value !== '')
+    .some((value) => String(value).toLowerCase().includes(q));
+}
+
+function requestSearchValues(request) {
+  return [
+    personName(request.user),
+    request.user?.email,
+    request.user?.username,
+    itemName(request),
+    request.item?.inventory_item_no,
+    categoryLine(request),
+    request.requested_category?.category_name,
+    request.quantity,
+    request.status,
+    request.notes,
+    request.requested_at,
+  ];
+}
+
+const filteredIncoming = computed(() =>
+  incoming.value.filter((request) => matchesSearch(requestsSearch.value, requestSearchValues(request))),
+);
+
+const filteredAssignments = computed(() =>
+  assignments.value.filter((assignment) => matchesSearch(requestsSearch.value, [
+    personName(assignment.target_user ?? assignment.targetUser),
+    assignment.item?.item_name,
+    assignment.item?.inventory_item_no,
+    assignment.quantity,
+    assignment.status,
+    assignment.requested_at,
+  ])),
+);
+
+const filteredTransfers = computed(() =>
+  transfers.value.filter((transfer) => matchesSearch(transfersSearch.value, [
+    personName(transfer.user),
+    personName(transfer.target_user ?? transfer.targetUser),
+    transfer.item?.item_name,
+    transfer.item?.inventory_item_no,
+    transfer.quantity,
+    transfer.status,
+    transfer.notes,
+    transfer.requested_at,
+  ])),
+);
+
+const filteredReturns = computed(() =>
+  returns.value.filter((returnRequest) => matchesSearch(returnsSearch.value, [
+    returnRequest.user?.full_name,
+    personName(returnRequest.user),
+    returnRequest.user?.username,
+    returnRequest.item?.item_name,
+    returnRequest.item?.inventory_item_no,
+    returnRequest.quantity,
+    returnRequest.status,
+    returnRequest.notes,
+    returnRequest.requested_at,
+  ])),
+);
+
+const filteredLedger = computed(() =>
+  ledger.value.filter((entry) => matchesSearch(ledgerSearch.value, [
+    entry.inventory?.item_name,
+    entry.inventory?.inventory_item_no,
+    entry.movement_type,
+    entry.quantity,
+    entry.quantity_before,
+    entry.quantity_after,
+    entry.user ? personName(entry.user) : 'System Automated',
+    entry.display_details,
+    entry.notes,
+    entry.created_at,
+  ])),
+);
 
 function personName(user) {
   if (!user) {

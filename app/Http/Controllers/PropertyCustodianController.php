@@ -1553,7 +1553,7 @@ class PropertyCustodianController extends Controller
         $cancelled = DB::transaction(function () use ($id, $validated): bool {
             $assignmentRequest = AssignmentRequest::query()->lockForUpdate()->findOrFail($id);
             if (
-                $assignmentRequest->status !== 'waiting for approval'
+                ! in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT], true)
                 || ! $assignmentRequest->requested_item_name
                 || $assignmentRequest->item_id
             ) {

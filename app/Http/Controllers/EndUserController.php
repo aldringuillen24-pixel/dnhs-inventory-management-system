@@ -752,4 +752,31 @@ class EndUserController extends Controller
 
         return redirect()->route('endUser.my-assigned-items')->with('success', 'Return request cancelled successfully.');
     }
+
+    public function cancelRequest(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'cancellation_reason' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $assignmentRequest = AssignmentRequest::findOrFail($id);
+
+        // Only the requester may cancel their own request.
+        if ((int) $assignmentRequest->user_id !== (int) Auth::id()) {
+            abort(403);
+        }
+
+        // Only requests still awaiting a custodian decision can be cancelled.
+        if (! in_array($assignmentRequest->status, ['waiting for approval', self::STATUS_WAITING_FOR_PROCUREMENT], true)) {
+            return redirect()->back()->with('error', 'Only requests waiting for approval can be cancelled.');
+        }
+
+        $assignmentRequest->update([
+            'status' => 'cancelled',
+            'cancellation_reason' => $validated['cancellation_reason'] ?? null,
+            'responded_at' => now(),
+        ]);
+
+        return redirect()->route('endUser.my-requests')->with('success', 'Request cancelled.');
+    }
 }
