@@ -285,7 +285,10 @@
                   {{ groupSubtitle(row) }}
                 </p>
               </div>
-              <StatusBadge :status="row.status" compact />
+              <p v-if="workspace === 'disposed'" class="min-w-0 flex-1 truncate text-[11px] text-gray-500 dark:text-gray-400" :title="disposalReason(row) || 'No reason recorded.'">
+                {{ disposalReason(row) || 'No reason recorded.' }}
+              </p>
+              <StatusBadge v-else :status="row.status" compact />
               <span v-if="hasRepairRecommendation(row)" class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Repair recommended</span>
               <span v-if="hasIssuedOut(row) && workspace !== 'available'" class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Assigned issuing</span>
               <button
@@ -328,7 +331,8 @@
                 <th v-if="workspace === 'assigned'" class="px-4 py-3.5">Assignee</th>
                 <th class="px-4 py-3.5 text-right">Unit Cost</th>
                 <th class="px-4 py-3.5 text-right">Total Cost</th>
-                <th class="px-4 py-3.5">Condition / Status</th>
+                <th v-if="workspace === 'disposed'" class="px-4 py-3.5">Reason</th>
+                <th v-else class="px-4 py-3.5">Condition / Status</th>
                 <th v-if="workspace !== 'all'" class="px-4 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
@@ -485,9 +489,17 @@
                     ₱{{ money(row.total_cost) }}
                   </td>
 
-                  <!-- Status -->
+                  <!-- Status (disposed workspace shows the disposal reason instead) -->
                   <td class="px-4 py-3.5">
-                    <div class="flex flex-wrap items-center gap-1.5">
+                    <div v-if="workspace === 'disposed'" class="max-w-64">
+                      <p v-if="disposalReason(row)" class="truncate text-xs text-gray-700 dark:text-gray-300" :title="disposalReason(row)">
+                        {{ disposalReason(row) }}
+                      </p>
+                      <p v-else class="text-[11px] text-gray-400 dark:text-gray-500">
+                        No reason recorded.
+                      </p>
+                    </div>
+                    <div v-else class="flex flex-wrap items-center gap-1.5">
                       <StatusBadge :status="displayStatus(row)" />
                       <span v-if="hasRepairRecommendation(row)" class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Repair recommended</span>
                     </div>
@@ -828,13 +840,13 @@
                 <div>
                   <dt class="text-[11px] font-medium text-gray-500 dark:text-gray-400">Disposed on</dt>
                   <dd class="mt-0.5 text-gray-800 dark:text-gray-200">
-                    {{ formatMovementDate(source.disposal_movement ?? source.latest_disposal_movement) }}
+                    {{ formatMovementDate(source.disposalMovement ?? source.latestDisposalMovement ?? source.disposal_movement ?? source.latest_disposal_movement) }}
                   </dd>
                 </div>
                 <div class="sm:col-span-2">
                   <dt class="text-[11px] font-medium text-gray-500 dark:text-gray-400">Reason / notes</dt>
                   <dd class="mt-0.5 whitespace-pre-wrap text-gray-800 dark:text-gray-200">
-                    {{ (source.disposal_movement ?? source.latest_disposal_movement)?.notes || 'No reason or notes recorded.' }}
+                    {{ (source.disposalMovement ?? source.latestDisposalMovement ?? source.disposal_movement ?? source.latest_disposal_movement)?.notes || 'No reason or notes recorded.' }}
                   </dd>
                 </div>
               </dl>
@@ -1163,7 +1175,6 @@
               </span>
             </span>
             <span class="flex items-center gap-2 text-xs">
-              <span>{{ format(source.quantity) }} {{ source.unit }}</span>
               <span class="rounded-md bg-orange-50 px-2 py-1 font-medium text-orange-700 dark:bg-orange-500/10 dark:text-orange-300">
                 Ready to dispose
               </span>
@@ -2259,6 +2270,24 @@ function scanAnotherQrCode() {
 
 function hasRepairRecommendation(row) {
   return (row?.sourceItems ?? []).some((source) => Boolean(source?.repairRecommendation));
+}
+
+// Disposal audit attached per source row. The serializer keys relations by
+// their camelCase method names; the snake_case fallbacks stay for any path
+// that already provides them.
+function disposalMovementOf(source) {
+  return source?.disposalMovement
+    ?? source?.latestDisposalMovement
+    ?? source?.disposal_movement
+    ?? source?.latest_disposal_movement
+    ?? null;
+}
+
+function disposalReason(row) {
+  const reasons = (row?.sourceItems ?? [])
+    .map((source) => disposalMovementOf(source)?.notes)
+    .filter((note) => typeof note === 'string' && note.trim() !== '');
+  return [...new Set(reasons.map((note) => note.trim()))].join(' · ');
 }
 
 async function decideRepairRecommendation(source, decision) {

@@ -176,53 +176,6 @@
             />
             <FieldError :errors="errors" field="ics_no" />
           </div>
-
-          <div>
-            <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="stock-building">
-              Building
-            </label>
-            <input
-              id="stock-building"
-              v-model="form.building"
-              type="text"
-              maxlength="255"
-              placeholder="e.g. Science Laboratory Wing"
-              @input="clearFieldError('building')"
-              class="block w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:px-3.5 min-[480px]:text-sm"
-            />
-            <FieldError :errors="errors" field="building" />
-          </div>
-
-          <div>
-            <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="stock-room">
-              Room
-            </label>
-            <input
-              id="stock-room"
-              v-model="form.room"
-              type="text"
-              maxlength="255"
-              placeholder="e.g. Room 204"
-              @input="clearFieldError('room')"
-              class="block w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:px-3.5 min-[480px]:text-sm"
-            />
-            <FieldError :errors="errors" field="room" />
-          </div>
-
-          <div class="min-[360px]:col-span-2">
-            <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="stock-description">
-              Item Specifications / Description
-            </label>
-            <textarea
-              id="stock-description"
-              v-model="form.description"
-              rows="2"
-              placeholder="Condition, technical specifications, serial marks, or supplier notes…"
-              @input="clearFieldError('description')"
-              class="block w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:px-3.5 min-[480px]:text-sm"
-            />
-            <FieldError :errors="errors" field="description" />
-          </div>
         </div>
       </div>
       </div>
@@ -315,9 +268,6 @@ const form = reactive({
     date_acquired: new Date().toISOString().slice(0, 10),
     lifespan_years: null,
     ics_no: '',
-    building: '',
-    room: '',
-    description: '',
 });
 
 const selectedCategory = computed(() =>
@@ -373,9 +323,6 @@ function resetForm() {
     form.date_acquired = new Date().toISOString().slice(0, 10);
     form.lifespan_years = null;
     form.ics_no = '';
-    form.building = '';
-    form.room = '';
-    form.description = '';
 }
 
 async function submit() {
@@ -392,10 +339,10 @@ async function submit() {
         quantity: Number(form.quantity),
         unit_cost: Number(form.unit_cost),
         date_acquired: form.date_acquired,
-        description: form.description || null,
+        description: null,
         ics_no: form.ics_no || null,
-        building: form.building || null,
-        room: form.room || null,
+        building: null,
+        room: null,
     };
 
     if (form.lifespan_years) {
