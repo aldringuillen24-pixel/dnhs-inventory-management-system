@@ -332,8 +332,41 @@
         </tbody>
     </table>
 
+    {{-- Pending Onboarding Queue --}}
+    <h2>3. Pending Onboarding Queue</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width: 35%;">Username</th>
+                <th style="width: 30%;">Requested Role</th>
+                <th class="right" style="width: 20%;">Waiting</th>
+                <th style="width: 15%;">Flag</th>
+            </tr>
+        </thead>
+        <tbody>
+            @forelse($onboardingQueue as $index => $account)
+                <tr class="{{ $index % 2 === 1 ? 'even' : '' }}">
+                    <td><strong>{{ $account['username'] }}</strong></td>
+                    <td>{{ $account['role_name'] }}</td>
+                    <td class="right font-bold">{{ $account['waiting_days'] }} {{ $account['waiting_days'] === 1 ? 'day' : 'days' }}</td>
+                    <td>
+                        @if ($account['stale'])
+                            <span class="badge badge-amber">Stale</span>
+                        @else
+                            <span class="badge badge-gray">Waiting</span>
+                        @endif
+                    </td>
+                </tr>
+            @empty
+                <tr>
+                    <td colspan="4" class="center" style="color: #94a3b8; padding: 12px;">No accounts awaiting onboarding.</td>
+                </tr>
+            @endforelse
+        </tbody>
+    </table>
+
     {{-- Recent System Audit Activity --}}
-    <h2>3. Recent System Audit Activity Trail</h2>
+    <h2>4. Recent System Audit Activity Trail</h2>
     <table class="data-table">
         <thead>
             <tr>

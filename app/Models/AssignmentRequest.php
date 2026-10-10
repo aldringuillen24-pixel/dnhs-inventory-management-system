@@ -9,6 +9,18 @@ class AssignmentRequest extends Model
 {
     use HasFactory;
 
+    /**
+     * An item-type request submitted when the item had zero available stock.
+     *
+     * It cannot be assigned, so it never enters the approval queue: the
+     * custodian has nothing to allocate. It exists so an end user can still
+     * state a real need when the system is empty, and it feeds the forecast as
+     * unmet demand. See docs/inventory-workflows.md and docs/ai-assistant.md.
+     *
+     * Distinct from 'waiting for approval', which a custodian can act on today.
+     */
+    public const STATUS_WAITING_FOR_PROCUREMENT = 'waiting for procurement';
+
     // Use the generic `requests` table name to represent both custodian-initiated
     // and end-user-initiated requests. Keep the model name `AssignmentRequest`
     // to avoid collision with the HTTP `Request` class.

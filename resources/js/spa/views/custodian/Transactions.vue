@@ -123,7 +123,11 @@
                       <!-- Item -->
                       <td class="px-4 py-3.5">
                         <div class="font-medium text-gray-800 dark:text-gray-200">{{ itemName(request) }}</div>
-                        <span class="text-xs text-gray-400 font-mono">{{ request.item?.inventory_item_no ?? 'New request item' }}</span>
+                        <!-- An item-type request has no inventory record yet, so
+                             there is no item number to show. The old placeholder
+                             text rendered "New request item" directly under the
+                             real name, which read as a second, wrong item. -->
+                        <span v-if="request.item?.inventory_item_no" class="text-xs text-gray-400 font-mono">{{ request.item.inventory_item_no }}</span>
                       </td>
 
                       <!-- Category -->
@@ -156,27 +160,46 @@
 
                       <!-- Action Buttons -->
                       <td class="px-4 py-3.5">
-                        <div class="flex items-center justify-center gap-1.5">
-                          <button
-                            type="button"
-                            :disabled="!hasStock(request)"
-                            class="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            @click="reviewRequest = request"
-                          >
-                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                            Open
-                          </button>
+                        <div class="flex flex-col items-center justify-center gap-1.5">
+                          <template v-if="isAwaitingProcurement(request)">
+                            <!-- Recorded demand with nothing to allocate yet. The label is
+                                 stock-driven, not status-driven: as soon as the
+                                 custodian stocks the item this becomes an
+                                 Assign action, because the request is now
+                                 fulfillable. -->
+                            <span class="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                              Awaiting procurement
+                            </span>
+                            <button
+                              type="button"
+                              class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                              @click="openPrompt('decline-request', request.id)"
+                            >
+                              Decline
+                            </button>
+                          </template>
 
-                          <button
-                            type="button"
-                            class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-                            @click="openPrompt('decline-request', request.id)"
-                          >
-                            Decline
-                          </button>
+                          <template v-else>
+                            <button
+                              type="button"
+                              :disabled="!hasStock(request)"
+                              class="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              @click="reviewRequest = request"
+                            >
+                              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                              {{ isUnmet(request) ? 'Assign' : 'Open' }}
+                            </button>
 
+                            <button
+                              type="button"
+                              class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                              @click="openPrompt('decline-request', request.id)"
+                            >
+                              Decline
+                            </button>
+                          </template>
                         </div>
                       </td>
                     </tr>
@@ -431,7 +454,9 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100 bg-white dark:divide-white/5 dark:bg-gray-900">
-                  <tr v-for="transaction in filteredHistory" :key="transaction.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                  <template v-for="group in groupedHistory" :key="group.key">
+                  <template v-if="group.count === 1" v-for="transaction in group.entries" :key="transaction.id">
+                  <tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                     <td class="px-4 py-3.5 text-center font-bold text-gray-900 dark:text-white">
                       {{ transaction.quantity }}
                     </td>
@@ -463,6 +488,81 @@
                       </button>
                     </td>
                   </tr>
+                  </template>
+                  <template v-else>
+                  <!-- Grouped transactions: identical item, parties, date and status -->
+                  <tr class="bg-gray-50/60 hover:bg-gray-50 dark:bg-white/[0.03] dark:hover:bg-white/[0.05]">
+                    <td class="px-4 py-3.5 text-center font-bold text-gray-900 dark:text-white" :title="`Sum of ${group.count} records`">
+                      {{ group.totalQuantity }}
+                    </td>
+                    <td class="px-4 py-3.5">
+                      <button
+                        type="button"
+                        class="flex items-center gap-1.5 text-left"
+                        :aria-expanded="isHistoryGroupExpanded(group.key)"
+                        :title="isHistoryGroupExpanded(group.key) ? 'Hide individual records' : 'Show individual records'"
+                        @click="toggleHistoryGroup(group.key)"
+                      >
+                        <svg
+                          class="h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform duration-200"
+                          :class="{ 'rotate-180': isHistoryGroupExpanded(group.key) }"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                        <span>
+                          <span class="font-medium text-gray-900 dark:text-white">{{ group.first.item?.item_name ?? 'Unknown item' }}</span>
+                          <span class="ml-1.5 inline-flex rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">×{{ group.count }}</span>
+                        </span>
+                      </button>
+                    </td>
+                    <td class="px-4 py-3.5 text-gray-600 dark:text-gray-300">
+                      {{ group.first.fromUser ? personName(group.first.fromUser) : 'Stockroom / Warehouse' }}
+                    </td>
+                    <td class="px-4 py-3.5">
+                      <div class="font-semibold text-gray-900 dark:text-white">{{ group.first.manual_recipient_name ?? personName(group.first.user) }}</div>
+                      <span v-if="group.first.manual_department" class="block text-xs text-gray-400">{{ group.first.manual_department }}</span>
+                    </td>
+                    <td class="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ formatDate(group.first.transaction_date) }}
+                    </td>
+                    <td class="px-4 py-3.5">
+                      <StatusBadge :status="group.first.status" />
+                    </td>
+                    <td class="px-4 py-3.5 text-right">
+                      <span
+                        v-if="group.entries.some((entry) => entry.manual_recipient_name && entry.expected_return_date && entry.status === 'assigned')"
+                        class="text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+                        title="Expand to record individual returns"
+                      >
+                        {{ group.entries.filter((entry) => entry.manual_recipient_name && entry.expected_return_date && entry.status === 'assigned').length }} to return
+                      </span>
+                    </td>
+                  </tr>
+                  <tr v-if="isHistoryGroupExpanded(group.key)">
+                    <td colspan="7" class="bg-gray-50/40 px-4 py-2 dark:bg-white/[0.02]">
+                      <ul class="space-y-1">
+                        <li v-for="entry in group.entries" :key="entry.id" class="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-6 text-[11px] text-gray-500 dark:text-gray-400">
+                          <span class="font-mono font-semibold text-gray-700 dark:text-gray-300">{{ entry.item?.inventory_item_no ?? `#${entry.id}` }}</span>
+                          <span class="font-bold text-gray-900 dark:text-white">×{{ entry.quantity }}</span>
+                          <span v-if="entry.expected_return_date">due {{ formatDate(entry.expected_return_date) }}</span>
+                          <button
+                            v-if="entry.manual_recipient_name && entry.expected_return_date && entry.status === 'assigned'"
+                            type="button"
+                            class="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300"
+                            @click="openPrompt('manual-return', entry.id)"
+                          >
+                            Record Return
+                          </button>
+                        </li>
+                      </ul>
+                    </td>
+                  </tr>
+                  </template>
+                  </template>
 
                   <tr v-if="!filteredHistory.length">
                     <td colspan="7" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
@@ -491,7 +591,9 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-white/5">
-                  <tr v-for="entry in ledger" :key="entry.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                  <template v-for="group in ledgerGroups" :key="group.key">
+                  <template v-if="group.count === 1" v-for="entry in group.entries" :key="entry.id">
+                  <tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                     <td class="break-words px-3 py-3.5 text-xs text-gray-500 dark:text-gray-400">
                       {{ formatDate(entry.created_at) }}
                     </td>
@@ -525,6 +627,78 @@
                       {{ entry.display_details || entry.notes || 'No additional details recorded.' }}
                     </td>
                   </tr>
+                  </template>
+                  <template v-else>
+                  <!-- Grouped records: identical item, type, minute, actor and details -->
+                  <tr class="bg-gray-50/60 hover:bg-gray-50 dark:bg-white/[0.03] dark:hover:bg-white/[0.05]">
+                    <td class="break-words px-3 py-3.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ formatDate(group.first.created_at) }}
+                    </td>
+                    <td class="break-words px-3 py-3.5">
+                      <button
+                        type="button"
+                        class="flex items-center gap-1.5 text-left"
+                        :aria-expanded="isLedgerGroupExpanded(group.key)"
+                        :title="isLedgerGroupExpanded(group.key) ? 'Hide individual records' : 'Show individual records'"
+                        @click="toggleLedgerGroup(group.key)"
+                      >
+                        <svg
+                          class="h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform duration-200"
+                          :class="{ 'rotate-180': isLedgerGroupExpanded(group.key) }"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                        <span>
+                          <span class="font-medium text-gray-900 dark:text-white">{{ group.first.inventory?.item_name ?? 'Unknown item' }}</span>
+                          <span class="ml-1.5 inline-flex rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">×{{ group.count }}</span>
+                        </span>
+                      </button>
+                    </td>
+                    <td class="break-words px-3 py-3.5">
+                      <span
+                        class="inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        :class="ledgerBadgeClass(group.first.movement_type)"
+                      >
+                        {{ (group.first.movement_type ?? '').replace(/_/g, ' ') }}
+                      </span>
+                    </td>
+                    <td class="px-3 py-3.5 text-center font-bold" :title="`Sum of ${group.count} records`">
+                      <span :class="group.totalQuantity >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'">
+                        {{ group.totalQuantity > 0 ? `+${group.totalQuantity}` : group.totalQuantity }}
+                      </span>
+                    </td>
+                    <td class="px-3 py-3.5 text-center font-mono text-xs text-gray-500 dark:text-gray-400" title="Oldest record's stock before">
+                      {{ group.rangeBefore }}
+                    </td>
+                    <td class="px-3 py-3.5 text-center font-mono text-xs font-bold text-gray-900 dark:text-white" title="Newest record's stock after">
+                      {{ group.rangeAfter }}
+                    </td>
+                    <td class="break-words px-3 py-3.5 text-xs font-medium text-gray-700 dark:text-gray-300">
+                      {{ group.first.user ? personName(group.first.user) : 'System Automated' }}
+                    </td>
+                    <td class="w-56 whitespace-normal break-words px-3 py-3.5 text-xs leading-snug text-gray-600 dark:text-gray-300">
+                      {{ group.first.display_details || group.first.notes || 'No additional details recorded.' }}
+                    </td>
+                  </tr>
+                  <tr v-if="isLedgerGroupExpanded(group.key)">
+                    <td colspan="8" class="bg-gray-50/40 px-3 py-2 dark:bg-white/[0.02]">
+                      <ul class="space-y-1">
+                        <li v-for="entry in group.entries" :key="entry.id" class="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-6 font-mono text-[11px] text-gray-500 dark:text-gray-400">
+                          <span class="font-semibold text-gray-700 dark:text-gray-300">{{ entry.inventory?.inventory_item_no ?? `#${entry.id}` }}</span>
+                          <span :class="Number(entry.quantity ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'">
+                            {{ Number(entry.quantity ?? 0) > 0 ? `+${entry.quantity}` : entry.quantity }}
+                          </span>
+                          <span>{{ entry.quantity_before }} → {{ entry.quantity_after }}</span>
+                        </li>
+                      </ul>
+                    </td>
+                  </tr>
+                  </template>
+                  </template>
 
                   <tr v-if="!ledger.length">
                     <td colspan="8" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
@@ -601,6 +775,7 @@
 import { computed, onMounted, ref } from 'vue';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
+import { groupLedgerEntries } from '../../lib/auditLedger';
 import { useToastStore } from '../../stores/toast';
 import TransactionsSkeleton from '../../components/ui/skeletons/TransactionsSkeleton.vue';
 import Modal from '../../components/ui/dialogs/Modal.vue';
@@ -679,6 +854,80 @@ function ledgerBadgeClass(type) {
   return 'bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-300';
 }
 
+// Display-only grouping for the audit ledger, shared with the school-head
+// audit view through lib/auditLedger so both pages group by exactly the same
+// rule. Adjacent entries identical in every audited dimension collapse into
+// one expandable group row; the raw entries are untouched.
+const expandedLedgerGroups = ref(new Set());
+
+const ledgerGroups = computed(() => groupLedgerEntries(
+  ledger.value,
+  (entry) => (entry.user ? personName(entry.user) : 'System Automated'),
+));
+
+function isLedgerGroupExpanded(key) {
+  return expandedLedgerGroups.value.has(key);
+}
+
+function toggleLedgerGroup(key) {
+  if (expandedLedgerGroups.value.has(key)) {
+    expandedLedgerGroups.value.delete(key);
+  } else {
+    expandedLedgerGroups.value.add(key);
+  }
+}
+
+// Display-only grouping for the History tab, mirroring the audit ledger.
+// Adjacent transactions identical in item, quantity, parties, date, status and
+// expected return date collapse into one expandable row. The per-record
+// "Record Return" action stays reachable: it renders on each expanded entry
+// that qualifies, exactly as it would ungrouped.
+const expandedHistoryGroups = ref(new Set());
+
+function historyGroupKey(transaction) {
+  return [
+    transaction.item?.item_name ?? 'Unknown item',
+    Number(transaction.quantity ?? 0),
+    transaction.fromUser ? personName(transaction.fromUser) : 'Stockroom / Warehouse',
+    transaction.manual_recipient_name ?? personName(transaction.user),
+    transaction.manual_department ?? '',
+    String(transaction.transaction_date ?? '').slice(0, 16),
+    transaction.status ?? '',
+    transaction.expected_return_date ?? '',
+  ].join('|');
+}
+
+const groupedHistory = computed(() => {
+  const groups = [];
+  filteredHistory.value.forEach((transaction, index) => {
+    const key = historyGroupKey(transaction);
+    const current = groups[groups.length - 1];
+    if (current && current.baseKey === key) {
+      current.entries.push(transaction);
+      return;
+    }
+    groups.push({ key: `${index}:${key}`, baseKey: key, entries: [transaction] });
+  });
+  return groups.map((group) => ({
+    ...group,
+    count: group.entries.length,
+    totalQuantity: group.entries.reduce((sum, transaction) => sum + Number(transaction.quantity ?? 0), 0),
+    first: group.entries[0],
+  }));
+});
+
+function isHistoryGroupExpanded(key) {
+  return expandedHistoryGroups.value.has(key);
+}
+
+function toggleHistoryGroup(key) {
+  if (expandedHistoryGroups.value.has(key)) {
+    expandedHistoryGroups.value.delete(key);
+  } else {
+    expandedHistoryGroups.value.add(key);
+  }
+}
+
 const filteredHistory = computed(() => {
   const query = historySearch.value.toLowerCase().trim();
   if (!query) {
@@ -742,7 +991,11 @@ function itemName(request) {
 }
 
 function categoryLine(request) {
-  const category = request.requestedCategory?.category_name ?? request.item?.category?.category_name ?? 'General';
+  // Relation keys are snake_cased by Laravel on serialization, so this is
+  // `requested_category`, never `requestedCategory`. Reading the camelCase name
+  // silently returned undefined and fell through to 'General' on every
+  // item-type request.
+  const category = request.requested_category?.category_name ?? request.item?.category?.category_name ?? 'General';
   const unit = request.requested_unit ?? request.item?.unit ?? '';
   return unit ? `${category} · ${unit}` : category;
 }
@@ -753,6 +1006,20 @@ function stockOf(request) {
 
 function hasStock(request) {
   return stockOf(request) >= Number(request.quantity);
+}
+
+// Unmet demand: submitted when the item had zero stock. Mirrors
+// AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT.
+function isUnmet(request) {
+  return String(request.status ?? '').trim().toLowerCase() === 'waiting for procurement';
+}
+
+// Whether the row still has nothing to allocate. An unmet request is not a
+// permanent state: once the custodian stocks the item, the same request becomes
+// fulfillable and must offer Assign. Gating on status alone would strand it as
+// "Awaiting procurement" forever, which was the point of recording it.
+function isAwaitingProcurement(request) {
+  return isUnmet(request) && !hasStock(request);
 }
 
 function openPrompt(kind, id) {

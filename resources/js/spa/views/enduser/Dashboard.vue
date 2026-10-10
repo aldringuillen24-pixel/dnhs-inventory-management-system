@@ -6,12 +6,6 @@
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Your assigned items and pending work.</p>
       </div>
       <div class="flex flex-wrap items-center gap-2.5">
-        <RouterLink
-          to="/end-user/requests"
-          class="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-brand-500 px-3 py-2 text-xs font-medium text-white shadow-sm hover:bg-brand-600"
-        >
-          Request Item
-        </RouterLink>
       </div>
     </div>
 

@@ -129,7 +129,7 @@ class MenuHelper
                 ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/property-custodian/profile'],
             ],
             'inspector' => [
-                ['icon' => 'inventory', 'name' => 'Inventory Overview', 'path' => '/spa/inspector/inventory'],
+                ['icon' => 'inspection', 'name' => 'Inspection', 'path' => '/spa/inspector/inventory'],
                 ['icon' => 'reports', 'name' => 'Reports', 'path' => '/spa/inspector/reports'],
                 ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/spa/profile'],
             ],

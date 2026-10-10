@@ -20,6 +20,17 @@ log() {
 
 log "booting on port ${PORT}"
 
+# Log the outbound IP Render sends mail from. Needed when an SMTP provider
+# (e.g. Brevo) rejects the connection with "525 Unauthorized IP address":
+# the address to quote to their support team is printed here, because the
+# Free plan has no shell to run an IP lookup from.
+outbound_ip="$(curl -s --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+if [ -n "${outbound_ip}" ]; then
+    log "outbound IP: ${outbound_ip}"
+else
+    log "outbound IP: lookup unavailable"
+fi
+
 # Apache must listen on Render's assigned port, not 80.
 sed -i "s/Listen 80/Listen ${PORT}/" /etc/apache2/ports.conf
 sed -i "s/<VirtualHost \*:80>/<VirtualHost *:${PORT}>/" \

@@ -94,7 +94,11 @@ class AnswerComposer
             $reply = $this->geminiApi->generate(
                 $this->systemPrompt($mode),
                 json_encode($packet, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '',
-                ['temperature' => 0.2, 'maxOutputTokens' => 500]
+                // Reasoning models bill the thinking tokens against this budget,
+                // so a ceiling sized for the visible answer alone truncates the
+                // reply before it starts. Gemma 4 used ~1500 of a 2000 budget on
+                // a one-item packet; 8000 leaves room for the ranked lists.
+                ['temperature' => 0.2, 'maxOutputTokens' => 8000]
             );
         } catch (\Throwable) {
             return $fallback;

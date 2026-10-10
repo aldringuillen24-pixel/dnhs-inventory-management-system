@@ -185,6 +185,41 @@ test('qr lookup includes the assignee and return details for an assigned item', 
         ->assertJsonPath('return_assignments.0.inventory_id', $item->item_id);
 });
 
+test('qr lookup reports the real quantity for an item flagged while assigned', function () {
+    // Reported as "0 piece" on the scan panel for a unit that plainly exists.
+    // inventory.quantity is 0 for a fully issued record, and flagging it for
+    // inspection does not change that — the quantity lives on the transaction.
+    $category = qrCategory();
+    $token = 'dnhs_qr_flagged_custody_tok';
+    $item = seedInventoryItem($this->custodian, $category, $token);
+    $item->update([
+        'quantity' => 0,
+        'status' => 'assigned',
+        'assigned_to_user_id' => $this->custodian->id,
+    ]);
+    Transaction::create([
+        'user_id' => $this->custodian->id,
+        'item_id' => $item->item_id,
+        'quantity' => 3,
+        'issued_quantity' => 3,
+        'transaction_date' => '2026-09-01',
+        'status' => 'assigned',
+    ]);
+
+    app(\App\Services\InventoryOperationService::class)
+        ->sendToInspection($item->item_id, $this->custodian->id, 'Lamp out');
+
+    expect($item->fresh()->status)->toBe('under_inspection')
+        ->and((int) $item->fresh()->quantity)->toBe(0);
+
+    $this->actingAs($this->custodian)
+        ->getJson('/property-custodian/inventory/qr/lookup?token=' . $token)
+        ->assertOk()
+        ->assertJsonPath('quantity', 3)
+        ->assertJsonPath('assigned_to', 'Property Custodian (3)')
+        ->assertJsonPath('return_assignments.0.remaining_quantity', 3);
+});
+
     test('Vue qr lookup api returns the scanned item data', function () {
         $category = qrCategory();
         $token = 'dnhs_qr_vue_testtoken123456';

@@ -117,7 +117,7 @@ const router = createRouter({
             path: '/inspector/inventory',
             name: 'inspector-inventory',
             component: () => import('../views/inspector/InventoryOverview.vue'),
-            meta: { roles: ['Inspector'], title: 'Inventory Overview' },
+            meta: { roles: ['Inspector'], title: 'Inspection' },
         },
         {
             path: '/inspector/reports',

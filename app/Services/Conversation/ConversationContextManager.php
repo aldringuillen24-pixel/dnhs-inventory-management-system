@@ -316,7 +316,23 @@ class ConversationContextManager
         $request->session()->forget($sessionKey);
     }
 
-    public function updateClarification(
+    /**
+     * Store a resolved topic snapshot under the shared TTL and ownership stamp.
+ *
+     * Used when a topic is rebuilt from the recorded turns rather than read from
+     * the session, so the rest of the pipeline sees it exactly as it would see a
+     * topic that had never expired.
+ */
+public function storeContext(Request $request, User $user, array $context): void
+{
+    if (! $request->hasSession()) {
+        return;
+    }
+
+    $this->put($request, $user, $this->contextKey((int) $user->getAuthIdentifier()), $context);
+}
+
+public function updateClarification(
         Request $request,
         User $user,
         array $routedQuestion,

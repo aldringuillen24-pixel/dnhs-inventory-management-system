@@ -117,6 +117,20 @@ function liveForecastRow(Inventory $inventory, int $demand): array
     ];
 }
 
+/**
+ * All $inventory rows that share a name, category and unit, each as a forecast
+ * row — the serialized-category shape that makes the double-count guard matter.
+ *
+ * @param  iterable<Inventory>  $inventory
+ * @return array<int, array<string, mixed>>
+ */
+function liveForecastRowsForGroup(iterable $inventory, int $demand): array
+{
+    return collect($inventory)
+        ->map(fn (Inventory $unit): array => liveForecastRow($unit, $demand))
+        ->all();
+}
+
 function putStoredLiveForecast(array $forecasts, array $insufficientHistory = []): void
 {
     Storage::disk('forecast')->put('forecast/forecast.json', json_encode([
@@ -163,6 +177,137 @@ test('the demand forecast page data reads the generated forecast JSON', function
         ->assertJsonPath('liveForecastResult.rows.0.forecast_demand', 20)
         ->assertJsonPath('liveForecastResult.rows.0.available_stock', 12)
         ->assertJsonPath('liveForecastResult.rows.0.suggested_procurement', 13);
+});
+
+test('unmet staff demand raises the suggested procurement quantity', function () {
+    Storage::fake('forecast');
+    $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
+    $custodian = User::factory()->create(['role_id' => $role->role_id]);
+    $endUser = User::factory()->create(['role_id' => $role->role_id]);
+    $category = Category::create(['category_name' => 'Office Supplies', 'requires_serial_number' => false]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'user_id' => $custodian->id,
+        'item_name' => 'Bond Paper',
+        'unit' => 'reams',
+        'quantity' => 12,
+        'unit_cost' => 10,
+        'date_acquired' => '2026-01-01',
+        'status' => 'available',
+    ]);
+
+    putStoredLiveForecast([liveForecastRow($inventory, 20)]);
+
+    // Without unmet demand this row reads 13 (20 + 5 - 12 - 0).
+    expect(app(StoredDemandForecastService::class)->read($custodian)['rows'][0]['suggested_procurement'])->toBe(13);
+
+    AssignmentRequest::create([
+        'requested_item_name' => 'Bond Paper',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'reams',
+        'user_id' => $endUser->id,
+        'target_user_id' => $custodian->id,
+        'quantity' => 7,
+        'status' => AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
+        'requested_at' => now(),
+    ]);
+
+    $row = app(StoredDemandForecastService::class)->read($custodian)['rows'][0];
+
+    // Unmet demand is a POSITIVE term: 20 + 5 - 12 - 0 + 7.
+    expect($row['unmet_demand'])->toBe(7)
+        ->and($row['unmet_requesters'])->toBe(1)
+        ->and($row['suggested_procurement'])->toBe(20)
+        ->and($row['needs_procurement'])->toBeTrue()
+        ->and($row['calculation_basis'])->toContain('pending demand', 'unmet demand');
+});
+
+test('unmet demand is claimed by exactly one row when several share a name category and unit', function () {
+    Storage::fake('forecast');
+    $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
+    $custodian = User::factory()->create(['role_id' => $role->role_id]);
+    $endUser = User::factory()->create(['role_id' => $role->role_id]);
+    $category = Category::create(['category_name' => 'Lab Equipment', 'requires_serial_number' => true]);
+
+    // Serialized categories keep one row per physical unit, all sharing a name,
+    // category and unit. This is the case the double-count guard exists for.
+    $units = collect(range(1, 5))->map(fn (int $index): Inventory => Inventory::create([
+        'category_id' => $category->category_id,
+        'user_id' => $custodian->id,
+        'item_name' => 'Digital Caliper',
+        'unit' => 'piece',
+        'quantity' => 0,
+        'unit_cost' => 10,
+        'date_acquired' => '2026-01-01',
+        'status' => 'available',
+    ]));
+
+    // Every physical unit appears as its own forecast row, all five sharing one
+    // name + category + unit.
+    putStoredLiveForecast(liveForecastRowsForGroup($units, 10));
+
+    // Baseline before any unmet request: 5 rows × (10 + 3 safety - 0 stock) = 65.
+    $baseline = collect(app(StoredDemandForecastService::class)->read($custodian)['rows'])
+        ->sum('suggested_procurement');
+
+    AssignmentRequest::create([
+        'requested_item_name' => 'Digital Caliper',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
+        'user_id' => $endUser->id,
+        'target_user_id' => $custodian->id,
+        'quantity' => 4,
+        'status' => AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
+        'requested_at' => now(),
+    ]);
+
+    $rows = app(StoredDemandForecastService::class)->read($custodian)['rows'];
+
+    // Counted ONCE across the group, not once per row. Double-counting would
+    // add 4 five times (baseline + 20); correct attribution adds it once.
+    expect($rows)->toHaveCount(5)
+        ->and(collect($rows)->sum('unmet_demand'))->toBe(4)
+        ->and(collect($rows)->filter(fn (array $row): bool => $row['unmet_demand'] > 0))->toHaveCount(1)
+        ->and(collect($rows)->sum('suggested_procurement'))->toBe($baseline + 4);
+});
+
+test('an unmet request that is not waiting for procurement does not change the forecast', function () {
+    Storage::fake('forecast');
+    $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
+    $custodian = User::factory()->create(['role_id' => $role->role_id]);
+    $endUser = User::factory()->create(['role_id' => $role->role_id]);
+    $category = Category::create(['category_name' => 'Office Supplies', 'requires_serial_number' => false]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'user_id' => $custodian->id,
+        'item_name' => 'Bond Paper',
+        'unit' => 'reams',
+        'quantity' => 12,
+        'unit_cost' => 10,
+        'date_acquired' => '2026-01-01',
+        'status' => 'available',
+    ]);
+
+    putStoredLiveForecast([liveForecastRow($inventory, 20)]);
+
+    // Resolved requests must not keep inflating the buy quantity forever.
+    foreach (['approved', 'declined', 'cancelled'] as $status) {
+        AssignmentRequest::create([
+            'requested_item_name' => 'Bond Paper',
+            'requested_category_id' => $category->category_id,
+            'requested_unit' => 'reams',
+            'user_id' => $endUser->id,
+            'target_user_id' => $custodian->id,
+            'quantity' => 9,
+            'status' => $status,
+            'requested_at' => now(),
+        ]);
+    }
+
+    $row = app(StoredDemandForecastService::class)->read($custodian)['rows'][0];
+
+    expect($row['unmet_demand'])->toBe(0)
+        ->and($row['suggested_procurement'])->toBe(13);
 });
 
 test('live reader rejects stale output and duplicate stable identities', function () {

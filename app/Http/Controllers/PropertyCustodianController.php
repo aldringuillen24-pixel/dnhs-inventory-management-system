@@ -5,13 +5,16 @@ namespace App\Http\Controllers;
 use App\Models\AssignmentRequest;
 use App\Models\Category;
 use App\Models\User;
+use App\Services\AuditLedgerService;
 use App\Models\Transaction;
 use App\Models\Inventory;
 use App\Models\StockMovement;
+use App\Services\ForecastAiRecommendationService;
 use App\Services\ForecastDecisionSupportService;
 use App\Services\ForecastExplanationService;
 use App\Services\InventoryOperationService;
 use App\Services\StoredDemandForecastService;
+use App\Support\RequestableItemMatcher;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -25,6 +28,8 @@ class PropertyCustodianController extends Controller
         protected ForecastExplanationService $forecastExplanationService,
         protected StoredDemandForecastService $storedForecastService,
         protected ForecastDecisionSupportService $forecastDecisionSupport,
+        protected ForecastAiRecommendationService $aiForecastRecommendations,
+        protected AuditLedgerService $auditLedgerService,
         protected InventoryOperationService $inventoryOperations
     )
     {
@@ -203,6 +208,11 @@ class PropertyCustodianController extends Controller
                 // dropped here, and the client then assumed "local" and blamed
                 // the provider for text it had never requested.
                 'source' => $explanation['source'] ?? 'local',
+                // The specific reason a local explanation was used. Without it the
+                // client falls back to a generic caption, which reported
+                // "calculated directly from the forecast" even when a reply had
+                // been rejected for citing figures the forecast never produced.
+                'provider_status' => $explanation['provider_status'] ?? null,
             ]);
         }
 
@@ -222,14 +232,90 @@ class PropertyCustodianController extends Controller
             'prompt_type' => ['required', 'string', Rule::in(ForecastDecisionSupportService::PROMPT_TYPES)],
             // Follow-up context: ids only, never free prose, so a follow-up can
             // only narrow the previous answer to rows the forecast supplied.
-            'inventory_ids' => ['nullable', 'array', 'max:'.ForecastDecisionSupportService::MAX_SELECTED_ITEMS],
+            'inventory_ids' => ['nullable', 'array', 'max:'.ForecastDecisionSupportService::MAX_REQUESTED_ITEMS],
             'inventory_ids.*' => ['integer', 'min:1'],
+            // A named count ("give me 5 items") narrows the same ranking. The
+            // service clamps it to the hard ceiling and discloses the cap.
+            'max_items' => ['nullable', 'integer', 'min:1', 'max:1000'],
         ]);
 
         $result = $this->forecastDecisionSupport->answer(
             $request->user(),
             $validated['prompt_type'],
-            ['inventory_ids' => $validated['inventory_ids'] ?? []],
+            [
+                'inventory_ids' => $validated['inventory_ids'] ?? [],
+                'max_items' => $validated['max_items'] ?? null,
+            ],
+        );
+
+        if (($result['status'] ?? null) === 'forbidden') {
+            return response()->json(['message' => $result['message']], 403);
+        }
+
+        if (($result['status'] ?? null) !== 'success') {
+            return response()->json(['message' => $result['message']], 422);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * Parses a free-text forecast question the chat's pattern list could not
+     * classify, without answering it.
+     *
+     * The provider returns a strict form only — prompt type, item reference,
+     * count — and the service validates every field against the question and
+     * the prior answer. An unusable parse is reported as unresolved so the
+     * chat falls back to its guidance message instead of guessing.
+     */
+    public function parseForecastQuestion(Request $request)
+    {
+        $validated = $request->validate([
+            'message' => ['required', 'string', 'max:500'],
+            'inventory_ids' => ['nullable', 'array', 'max:'.ForecastDecisionSupportService::MAX_REQUESTED_ITEMS],
+            'inventory_ids.*' => ['integer', 'min:1'],
+            'item_names' => ['nullable', 'array', 'max:'.ForecastDecisionSupportService::MAX_REQUESTED_ITEMS],
+            'item_names.*' => ['string', 'max:255'],
+        ]);
+
+        $user = $request->user();
+        $parse = $this->forecastDecisionSupport->parseQuestion(
+            $user,
+            $validated['message'],
+            $validated['inventory_ids'] ?? [],
+            $validated['item_names'] ?? [],
+        );
+
+        if (! is_array($parse)) {
+            return response()->json([
+                'status' => 'unresolved',
+                'message' => 'That question was not understood. Name an item or pick a question below.',
+            ]);
+        }
+
+        return response()->json(['status' => 'ok', 'parse' => $parse]);
+    }
+
+    /**
+     * AI recommendations covering every row in the stored forecast.
+     *
+     * Unlike decision support, which answers one question about at most ten
+     * rows, this covers the whole forecast: every row is sorted into exactly one
+     * work queue and given a plain-English sentence. Results are cached against
+     * the forecast's own generation stamp, so a cycle is written once and reused
+     * until the model retrains. `refresh` forces a rewrite for that cycle.
+     *
+     * The endpoint creates nothing. It returns advice.
+     */
+    public function forecastAiRecommendations(Request $request)
+    {
+        $validated = $request->validate([
+            'refresh' => ['nullable', 'boolean'],
+        ]);
+
+        $result = $this->aiForecastRecommendations->recommendations(
+            $request->user(),
+            (bool) ($validated['refresh'] ?? false),
         );
 
         if (($result['status'] ?? null) === 'forbidden') {
@@ -254,7 +340,7 @@ class PropertyCustodianController extends Controller
     public function forecastProcurementListPdf(Request $request)
     {
         $validated = $request->validate([
-            'inventory_ids' => ['required', 'array', 'min:1', 'max:'.ForecastDecisionSupportService::MAX_SELECTED_ITEMS],
+            'inventory_ids' => ['required', 'array', 'min:1', 'max:'.ForecastDecisionSupportService::MAX_REQUESTED_ITEMS],
             'inventory_ids.*' => ['required', 'integer', 'min:1'],
             'prompt_type' => ['nullable', 'string', Rule::in(ForecastDecisionSupportService::PROMPT_TYPES)],
         ]);
@@ -308,7 +394,8 @@ class PropertyCustodianController extends Controller
             'question' => ForecastDecisionSupportService::questionLabel($promptType),
             'forecastPeriod' => $period,
             'generatedAt' => $generatedAt?->format('F j, Y g:i A'),
-            'preparedBy' => $request->user()->username,
+            'preparedBy' => trim($request->user()->first_name.' '.$request->user()->last_name)
+                ?: $request->user()->username,
             'itemCount' => count($items),
             'totalUnits' => (int) collect($items)->sum(fn (array $row): int => (int) ($row['suggested_procurement'] ?? 0)),
         ]);
@@ -380,9 +467,29 @@ class PropertyCustodianController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
         ]);
-        $dateFrom = isset($filters['date_from']) ? Carbon::parse($filters['date_from'])->startOfDay() : now()->subDays(29)->startOfDay();
+        // Default is month-to-date (the 1st through today), so the range rolls
+        // into the new month on its own. Explicit dates still win.
+        $dateFrom = isset($filters['date_from']) ? Carbon::parse($filters['date_from'])->startOfDay() : now()->startOfMonth()->startOfDay();
         $dateTo = isset($filters['date_to']) ? Carbon::parse($filters['date_to'])->endOfDay() : now()->endOfDay();
 
+        return response()->json(array_merge(
+            ['title' => 'Property Custodian Reports'],
+            $this->reportPayload($request->user(), $dateFrom, $dateTo),
+            ['reportFilters' => ['date_from' => $dateFrom->toDateString(), 'date_to' => $dateTo->toDateString()]],
+        ));
+    }
+
+    /**
+     * The report dataset shared by the JSON page and the printable PDF.
+     *
+     * One computation serves both surfaces so the downloaded report can never
+     * disagree with the screen. Anything added here appears in both; anything
+     * that must stay screen-only belongs in the Vue layer instead.
+     *
+     * @return array<string, mixed>
+     */
+    private function reportPayload(User $user, Carbon $dateFrom, Carbon $dateTo): array
+    {
         $inventory = Inventory::with('category:category_id,category_name')->get();
         $activeInventory = $inventory->where('status', '!=', 'disposed');
 
@@ -455,6 +562,77 @@ class PropertyCustodianController extends Controller
             ])
             ->values();
 
+        // Closest end-of-life dates first, so the report leads with what needs
+        // a procurement decision soonest. Grouped by item: per-record rows
+        // carry no meaningful quantity once units are issued out (the row
+        // quantity drops to zero and the units live in transactions), so the
+        // list aggregates like the low-stock panel instead of printing zeros.
+        $expiringData = $activeInventory
+            ->filter(fn ($item) => $item->expected_end_date !== null)
+            ->groupBy(fn ($item) => $item->item_name.'|'.$item->category_id)
+            ->map(function ($items) {
+                $earliest = $items->sortBy(fn ($item) => $item->expected_end_date->timestamp)->first();
+
+                return [
+                    'item_name' => $earliest->item_name,
+                    'category' => $earliest->category?->category_name ?? 'Uncategorized',
+                    'expected_end_date' => $earliest->expected_end_date->format('Y-m-d'),
+                    'quantity' => (int) $items->sum('quantity'),
+                    'tone' => $earliest->lifespan_status === 'end_of_useful_life' ? 'expired'
+                        : ($earliest->lifespan_status === 'approaching_end_of_life' ? 'approaching' : 'healthy'),
+                ];
+            })
+            ->sortBy(fn ($row) => $row['expected_end_date'])
+            ->take(8)
+            ->values();
+
+        // Who holds custody stock, from the assignment transactions themselves.
+        // Inventory rows cannot answer this: once units are issued out the row
+        // quantity is zero and the units live in transactions, so summing rows
+        // reported every holder as holding nothing.
+        $assignedTransactions = Transaction::query()
+            ->with(['user:id,first_name,last_name'])
+            ->where('status', 'assigned')
+            ->get();
+        $holderData = $assignedTransactions
+            ->groupBy(fn ($transaction) => $transaction->manual_recipient_name
+                ?? ($transaction->user_id ? 'user:'.$transaction->user_id : 'unlinked'))
+            ->map(function ($transactions, $key) {
+                $first = $transactions->first();
+
+                return [
+                    'holder_name' => $first->manual_recipient_name
+                        ?? ($first->user
+                            ? (trim($first->user->first_name.' '.$first->user->last_name) ?: $first->user->username)
+                            : 'Unlinked records'),
+                    'quantity' => (int) $transactions->sum('quantity'),
+                ];
+            })
+            ->sortByDesc('quantity')
+            ->take(8)
+            ->values();
+
+        // Assigned transactions past their expected return date, oldest first.
+        $overdueQuery = Transaction::query()
+            ->with(['item:item_id,item_name,inventory_item_no', 'user:id,first_name,last_name'])
+            ->where('status', 'assigned')
+            ->whereDate('expected_return_date', '<', $today);
+        $overdueCount = (clone $overdueQuery)->count();
+        $overdueData = $overdueQuery
+            ->orderBy('expected_return_date')
+            ->limit(8)
+            ->get()
+            ->map(fn ($transaction) => [
+                'item_name' => $transaction->item?->item_name ?? 'Unknown item',
+                'holder_name' => $transaction->manual_recipient_name
+                    ?? ($transaction->user
+                        ? (trim($transaction->user->first_name.' '.$transaction->user->last_name) ?: $transaction->user->username)
+                        : 'Unknown holder'),
+                'expected_return_date' => $transaction->expected_return_date?->format('Y-m-d'),
+                'quantity' => (int) $transaction->quantity,
+            ])
+            ->values();
+
         $movements = StockMovement::query()
             ->whereBetween('created_at', [$dateFrom, $dateTo])
             ->get()
@@ -480,11 +658,10 @@ class PropertyCustodianController extends Controller
             ->limit(10)
             ->get();
 
-        $liveForecastResult = $this->storedForecastService->read($request->user());
-        $demoForecastResult = $this->storedForecastService->readDemo($request->user());
+        $liveForecastResult = $this->storedForecastService->read($user);
+        $demoForecastResult = $this->storedForecastService->readDemo($user);
 
-        return response()->json([
-            'title' => 'Property Custodian Reports',
+        return [
             'metrics' => [
                 'totalUnits' => (int) $activeInventory->sum('quantity'),
                 'availableUnits' => (int) $activeInventory->where('status', 'available')->sum('quantity'),
@@ -502,11 +679,53 @@ class PropertyCustodianController extends Controller
             'movementData' => $movementData,
             'lowStockData' => $lowStockData,
             'attentionData' => $attentionData,
+            'expiringData' => $expiringData,
+            'holderData' => $holderData,
+            'overdueData' => $overdueData,
+            'overdueCount' => (int) $overdueCount,
             'recentTransactions' => $recentTransactions,
             'liveForecastResult' => $liveForecastResult,
             'demoForecastResult' => $demoForecastResult,
-            'reportFilters' => ['date_from' => $dateFrom->toDateString(), 'date_to' => $dateTo->toDateString()],
+        ];
+    }
+
+    /**
+     * Downloads the report page as a clean, card-style PDF.
+     *
+     * Browser printing cannot reproduce the screen faithfully — charts do not
+     * render and grid layouts split across pages — so the printable document
+     * is rendered server-side from the same dataset as the page. Tables
+     * replace charts; every figure matches the screen by construction.
+     */
+    public function reportsSummaryPdf(Request $request)
+    {
+        $filters = $request->validate([
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
         ]);
+        $dateFrom = isset($filters['date_from']) ? Carbon::parse($filters['date_from'])->startOfDay() : now()->startOfMonth()->startOfDay();
+        $dateTo = isset($filters['date_to']) ? Carbon::parse($filters['date_to'])->endOfDay() : now()->endOfDay();
+
+        $payload = $this->reportPayload($request->user(), $dateFrom, $dateTo);
+
+        $forecastRows = collect(($payload['liveForecastResult'] ?? [])['rows'] ?? []);
+        $gaps = $forecastRows->filter(fn (array $row): bool => ($row['needs_procurement'] ?? false) === true);
+
+        $pdf = Pdf::loadView('pdfs.custodian-report-summary', array_merge($payload, [
+            'periodLabel' => $dateFrom->format('M d, Y').' to '.$dateTo->format('M d, Y'),
+            'generatedAt' => now()->format('F j, Y g:i A'),
+            'preparedBy' => trim($request->user()->first_name.' '.$request->user()->last_name)
+                ?: $request->user()->username,
+            'forecastAvailable' => (($payload['liveForecastResult'] ?? [])['status'] ?? null) === 'success',
+            'forecastPeriod' => ($payload['liveForecastResult'] ?? [])['forecast_period'] ?? null,
+            'forecastGaps' => $gaps->count(),
+            'forecastWeak' => $gaps->filter(fn (array $row): bool => ($row['status'] ?? null) !== 'success'
+                || in_array($row['confidence'] ?? null, ['Low', 'Medium'], true))->count(),
+        ]));
+
+        $slug = $dateFrom->format('Ymd').'-'.$dateTo->format('Ymd');
+
+        return $pdf->download("custodian-report-summary-{$slug}.pdf");
     }
 
     public function inventory(Request $request)
@@ -1037,7 +1256,11 @@ class PropertyCustodianController extends Controller
                 'name' => $user->full_name,
             ]);
 
-        // Incoming requests from End Users requiring Custodian action
+        // Incoming requests from End Users requiring Custodian action.
+        // Includes unmet demand (an item requested when stock was zero). It sits
+        // in the same tab because it is the same request queue; the only
+        // difference is that there is nothing to allocate, so the row offers
+        // decline alone. See EndUserController::STATUS_WAITING_FOR_PROCUREMENT.
         $incomingRequests = AssignmentRequest::query()
             ->with([
                 'user:id,first_name,last_name,username,email',
@@ -1045,7 +1268,7 @@ class PropertyCustodianController extends Controller
                 'item.category:category_id,category_name',
                 'requestedCategory:category_id,category_name,requires_serial_number',
             ])
-            ->where('status', 'waiting for approval')
+            ->whereIn('status', ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT])
             ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
             ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'))
             ->orderBy('requested_at', 'desc')
@@ -1053,16 +1276,21 @@ class PropertyCustodianController extends Controller
 
         $incomingRequests->each(function (AssignmentRequest $request): void {
             if ($request->requested_item_name) {
-                $matchingItems = Inventory::query()
-                    ->where('item_name', $request->requested_item_name)
-                    ->where('category_id', $request->requested_category_id)
-                    ->where('unit', $request->requested_unit)
-                    ->where('status', 'available')
-                    ->where('quantity', '>', 0)
-                    ->orderBy('item_id')
-                    ->get();
+                // Matched through the shared matcher rather than an exact
+                // name+unit equality, so a request recorded as "chair" with a
+                // placeholder unit still recognises "Chairs" in stock once the
+                // custodian stocks it. Without this, stock health would stay at
+                // zero forever and the row could never become assignable.
+                $matchingItems = RequestableItemMatcher::candidates(
+                    (string) $request->requested_item_name,
+                    (int) $request->requested_category_id,
+                    $request->requested_unit,
+                )->filter(fn (Inventory $item): bool => $item->status === 'available' && (int) $item->quantity > 0)
+                    ->values();
+
                 $request->matching_inventory_items = $matchingItems;
                 $request->total_available_stock = (int) $matchingItems->sum('quantity');
+
                 return;
             }
 
@@ -1141,44 +1369,11 @@ class PropertyCustodianController extends Controller
             ->orderBy('requested_at', 'desc')
             ->get();
 
-        $auditLedger = StockMovement::query()
-            ->with([
-                'inventory:item_id,item_name,inventory_item_no,unit',
-                'user:id,first_name,last_name,username',
-                'assignmentReturn.recipient:id,role_id,first_name,last_name,username',
-                'assignmentReturn.recipient.role:role_id,role_name',
-                'assignmentReturn.receivedBy:id,role_id,first_name,last_name,username',
-                'assignmentReturn.receivedBy.role:role_id,role_name',
-                'assignmentRequest.user:id,role_id,first_name,last_name,username',
-                'assignmentRequest.user.role:role_id,role_name',
-                'assignmentRequest.targetUser:id,role_id,first_name,last_name,username',
-                'assignmentRequest.targetUser.role:role_id,role_name',
-            ])
-            ->latest('created_at')
-            ->latest('id')
-            ->limit(25)
-            ->get()
-            ->each(function (StockMovement $movement): void {
-                $details = $movement->notes;
-
-                if (in_array($movement->movement_type, ['returned', 'return'], true) && $movement->assignmentReturn) {
-                    $returned = $movement->assignmentReturn;
-                    $recipient = $this->formatLedgerPerson($returned->recipient, 'Unknown recipient');
-                    $receivedBy = $this->formatLedgerPerson($returned->receivedBy, 'Unknown user');
-                    $details = "Returned {$movement->quantity} {$movement->inventory?->unit} from {$recipient} to stockroom. Received by {$receivedBy}.";
-
-                    if ($returned->notes) {
-                        $details .= " Note: {$returned->notes}";
-                    }
-                } elseif ($movement->movement_type === 'assignment' && $movement->assignmentRequest) {
-                    $assignment = $movement->assignmentRequest;
-                    $recipient = $this->formatLedgerPerson($assignment->targetUser, 'Unknown recipient');
-                    $requester = $this->formatLedgerPerson($assignment->user, 'Unknown requester');
-                    $details = "Assigned to {$recipient}; requested by {$requester}.";
-                }
-
-                $movement->setAttribute('display_details', $details ?: 'No additional details recorded.');
-            });
+        // Ledger details come from the shared builder so the custodian ledger
+        // and the school-head audit view render byte-identical text. The
+        // frontend groups adjacent identical rows, which is only honest when
+        // both pages describe movements the same way.
+        $auditLedger = $this->auditLedgerService->latest(25);
 
         return response()->json([
             'title'                  => 'Transactions',
@@ -1197,23 +1392,15 @@ class PropertyCustodianController extends Controller
         ]);
     }
 
-    private function formatLedgerPerson(?User $user, string $fallback): string
-    {
-        if (! $user) {
-            return $fallback;
-        }
-
-        $name = $user->full_name ?: $user->username;
-        $role = $user->role?->role_name;
-
-        return $role ? "{$name} ({$role})" : $name;
-    }
-
     public function approveRequest(Request $request, $id)
     {
         $assignmentRequest = AssignmentRequest::with(['item', 'user'])->findOrFail($id);
 
-        if ($assignmentRequest->status !== 'waiting for approval') {
+        // An unmet request becomes fulfillable as soon as the custodian stocks the
+        // item, so it is approvable too. Approving it now allocates real stock
+        // and creates the normal fulfillment rows; the unmet status only ever
+        // meant "there was nothing to allocate yet".
+        if (! in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT], true)) {
             return redirect()->back()->with('error', 'This request has already been processed.');
         }
 
@@ -1285,7 +1472,9 @@ class PropertyCustodianController extends Controller
 
         $assignmentRequest = AssignmentRequest::findOrFail($id);
 
-        if ($assignmentRequest->status !== 'waiting for approval') {
+        // Unmet demand is declinable too. It was never approvable — there is no
+        // stock to allocate — so decline is its only custodian action.
+        if (! in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT], true)) {
             return redirect()->back()->with('error', 'This request has already been processed.');
         }
 

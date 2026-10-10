@@ -91,12 +91,33 @@ class AdminDashboardController extends Controller
             'metrics' => [
                 'activeUsers' => User::where('status', 'active')->count(),
                 'pendingOnboarding' => User::whereNotNull('temporary_password')->count(),
-                'pendingRequests' => AssignmentRequest::whereIn('status', ['waiting for approval', 'waiting for transfer approval'])->count(),
+                'pendingRequests' => AssignmentRequest::whereIn('status', ['waiting for approval', 'waiting for transfer approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT])->count(),
                 'openMaintenance' => MaintenanceRecord::whereNotIn('status', ['completed', 'cancelled'])->count(),
             ],
             'roleData' => $roleData,
             'requestStatusData' => $requestStatusData,
             'maintenanceStatusData' => $maintenanceStatusData,
+            // Accounts still on temporary passwords, oldest first. A stale
+            // temporary password (past two weeks unclaimed) is a hygiene risk,
+            // so each row carries its age and the flag rather than leaving the
+            // reader to compute it.
+            'onboardingQueue' => User::query()
+                ->with('role:role_id,role_name')
+                ->whereNotNull('temporary_password')
+                ->orderBy('created_at')
+                ->limit(10)
+                ->get()
+                ->map(function ($user) {
+                    $waitingDays = (int) $user->created_at->startOfDay()->diffInDays(now()->startOfDay());
+
+                    return [
+                        'username' => $user->username,
+                        'role_name' => $user->role?->role_name ?? 'No role assigned',
+                        'waiting_days' => $waitingDays,
+                        'stale' => $waitingDays > 14,
+                    ];
+                })
+                ->values(),
             'recentActivity' => UserAuditLog::query()
                 ->latest()
                 ->limit(8)

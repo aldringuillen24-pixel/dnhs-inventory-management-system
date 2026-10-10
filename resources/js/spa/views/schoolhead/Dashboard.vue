@@ -151,6 +151,9 @@ const statusOptions = computed(() => ({
   },
   colors: ['#059669', '#0284c7', '#d97706', '#be123c', '#65a30d', '#9333ea'],
   stroke: { colors: [theme.theme === 'dark' ? '#111827' : '#ffffff'], width: 2 },
+  // Default slice percentages off: the center total, legend and tooltip
+  // already carry the figures.
+  dataLabels: { enabled: false },
   tooltip: { theme: theme.theme === 'dark' ? 'dark' : 'light' },
   noData: { text: 'No data' },
 }));

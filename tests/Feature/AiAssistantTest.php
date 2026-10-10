@@ -1034,9 +1034,9 @@ test('pending clarification is discarded when the user loses assistant access', 
     expect(session()->get($clarificationKey))->toBeNull();
 });
 
-test('expired context is not used for follow-ups', function () {
+test('context survives the session snapshot expiry because it is rebuilt from the turn log', function () {
     $user = persistedAssistantUser();
-    createAssistantInventory($user, 'Projector', 1);
+    $inventory = createAssistantInventory($user, 'Projector', 1);
     config()->set('inventory.ai_context_ttl_minutes', 1);
     $this->travelTo(\Illuminate\Support\Carbon::parse('2026-09-29 10:00:00'));
 
@@ -1048,9 +1048,23 @@ test('expired context is not used for follow-ups', function () {
         ->toBe(now()->copy()->addMinute()->timestamp);
 
     $this->travel(2)->minutes();
+
+    // The snapshot has expired and is discarded on read. The recorded turn is
+    // not, so the topic is rebuilt from it rather than the user being asked
+    // again.
+    $this->postJson(route('ai.chat'), ['message' => 'Where is it?'])
+        ->assertOk()
+        ->assertJsonPath('reply', fn (string $reply): bool => str_contains($reply, 'Projector'));
+
+    expect(session()->get(assistantContextSessionKey($user)))->not->toBeNull();
+
+    // A rebuilt reference is re-authorised and re-read, never trusted as stored.
+    $inventory->update(['status' => 'disposed']);
+
     $this->postJson(route('ai.chat'), ['message' => 'Where is it?'])
         ->assertOk()
         ->assertJsonPath('reply', 'Which item would you like me to locate?');
+
     $this->travelBack();
 });
 
@@ -1447,7 +1461,7 @@ test('a clearly named new request starts a new topic and replaces old context af
         ->assertJsonPath('reply', 'Whiteboard has 4 pieces available.');
 });
 
-test('missing, expired, invalid, and unauthorized contexts prompt clarification and do not guess', function () {
+test('missing, unrebuildable, invalid, and unauthorized contexts prompt clarification and do not guess', function () {
     $user = persistedAssistantUser();
     $inventory = createAssistantInventory($user, 'Projector', 3);
 
@@ -1464,35 +1478,56 @@ test('missing, expired, invalid, and unauthorized contexts prompt clarification 
         ->assertOk()
         ->assertJsonPath('reply', 'What would you like to know about paper?');
 
-    // 2. Expired context
+    // 2. Expired snapshot but a conversation still inside retention
     config()->set('inventory.ai_context_ttl_minutes', 1);
+    config()->set('inventory.ai_conversation_retention_days', 7);
     $this->travelTo(\Illuminate\Support\Carbon::parse('2026-09-29 12:00:00'));
     $this->postJson(route('ai.chat'), ['message' => 'Show details for Projector.'])->assertOk();
 
     $this->travel(5)->minutes();
     $this->postJson(route('ai.chat'), ['message' => 'it'])
         ->assertOk()
-        ->assertJsonPath('reply', 'Which item would you like to check?');
-    $this->postJson(route('ai.chat'), ['message' => 'those'])
+        ->assertJsonPath('reply', fn (string $reply): bool => str_contains($reply, 'Projector'));
+
+    // 2b. A conversation idle for longer than retention is not rebuilt at all.
+    // A fresh user is used because sending a message is itself activity: it
+    // refreshes the conversation, so the aged-out case is only observable on
+    // the first message after the gap.
+    config()->set('inventory.ai_conversation_retention_days', 1);
+    $agedUser = persistedAssistantUser();
+    createAssistantInventory($agedUser, 'Aged Projector', 3);
+    $this->actingAs($agedUser)
+        ->postJson(route('ai.chat'), ['message' => 'Show details for Aged Projector.'])
+        ->assertOk();
+    $this->travel(2)->days();
+    $this->postJson(route('ai.chat'), ['message' => 'it'])
         ->assertOk()
         ->assertJsonPath('reply', 'Which item would you like to check?');
+    $this->actingAs($user);
     $this->postJson(route('ai.chat'), ['message' => 'What about paper?'])
         ->assertOk()
         ->assertJsonPath('reply', 'What would you like to know about paper?');
     $this->travelBack();
 
-    // 3. Invalid context (tampered unknown fields)
-    $tamperedContext = assistantStoredConversationContext($inventory);
+    // 3. Invalid context (tampered unknown fields). A user with no recorded turns
+    // is used so that nothing can be rebuilt, which isolates the tampered
+    // snapshot: it must be discarded, never read.
+    $tamperedUser = persistedAssistantUser();
+    createAssistantInventory($tamperedUser, 'Tampered Projector', 3);
+    $tamperedContext = assistantStoredConversationContext(
+        Inventory::query()->where('item_name', 'Tampered Projector')->firstOrFail()
+    );
     $tamperedContext['tampered_key'] = 'malicious';
-    $this->withSession([
-        assistantContextSessionKey($user) => [
-            'user_id' => $user->id,
+    $this->actingAs($tamperedUser)->withSession([
+        assistantContextSessionKey($tamperedUser) => [
+            'user_id' => $tamperedUser->id,
             'expires_at' => now()->addMinutes(15)->timestamp,
             'context' => $tamperedContext,
         ],
     ])->postJson(route('ai.chat'), ['message' => 'it'])
         ->assertOk()
-        ->assertJsonPath('reply', 'Which item would you like to check?');
+        ->assertJsonPath('reply', 'Which item would you like to check?')
+        ->assertDontSee('Tampered Projector');
 
     // 4. Unauthorized context (End User attempting follow-up on custodian-only capability)
     $endUser = persistedAssistantUser('End User');
@@ -2648,4 +2683,582 @@ test('broad quantity comparisons return one validated unit series', function () 
         'month_one' => '2026-08', 'month_two' => '2026-09',
     ])->assertOk()->assertJsonCount(1, 'result.series');
     $this->travelBack();
+});
+
+test('candidate and entity ids are extracted from every answer shape', function () {
+    $service = app(InventoryAnswerService::class);
+
+    // Grouped shapes carry an `inventory_ids` array, not a flat item id.
+    expect($service->lastCandidateIds([
+        'status' => 'success',
+        'answer' => ['items' => [
+            ['item_name' => 'Epson', 'inventory_ids' => [10, 11], 'unit' => 'piece'],
+            ['item_name' => 'BenQ', 'inventory_ids' => [12], 'unit' => 'piece'],
+        ]],
+    ]))->toBe([10, 11, 12]);
+
+    // Record shapes carry a scalar `inventory_id`.
+    expect($service->lastCandidateIds([
+        'status' => 'success',
+        'answer' => ['inventory_identifiers' => [
+            ['item_name' => 'Epson', 'inventory_id' => 5, 'inventory_no' => 'INV-5'],
+        ]],
+    ]))->toBe([5]);
+
+    // `assigned_items` is a summed integer in one tool, never an inventory id.
+    expect($service->lastCandidateIds([
+        'status' => 'success',
+        'answer' => ['assigned_items' => 7],
+    ]))->toBe([]);
+
+    // A single-item answer is referable but was never offered as a choice.
+    $single = ['status' => 'success', 'answer' => ['item_details' => [
+        'item_name' => 'Epson', 'inventory_ids' => [9], 'unit' => 'piece',
+    ]]];
+    expect($service->lastCandidateIds($single))->toBe([])
+        ->and($service->lastEntityRefs($single))->toBe([9]);
+
+    // A refused turn contributes nothing and an unknown shape never throws.
+    expect($service->lastCandidateIds(['status' => 'forbidden', 'answer' => []]))->toBe([])
+        ->and($service->lastEntityRefs(['status' => 'forbidden', 'answer' => []]))->toBe([])
+        ->and($service->lastCandidateIds(['status' => 'success', 'answer' => ['nope' => 'shape']]))->toBe([])
+        ->and($service->lastCandidateIds([]))->toBe([])
+        ->and($service->lastCandidateIds(['status' => 'success', 'answer' => 'not-an-array']))->toBe([]);
+});
+
+test('a restated clarification naming the item resolves instead of re-asking', function () {
+    $user = persistedAssistantUser();
+    $epson = createAssistantInventory($user, 'Epson Projector', 2);
+    $benq = createAssistantInventory($user, 'BenQ Projector', 4);
+    $service = app(InventoryAnswerService::class);
+
+    $pending = [
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_INVENTORY_STOCK,
+        'item_name' => 'Projector',
+        'response_type' => 'count',
+        'query' => null,
+        'candidate_ids' => [(int) $epson->item_id, (int) $benq->item_id],
+    ];
+
+    $resolved = $service->resolveClarification(
+        $user,
+        $pending,
+        'what is the inventory number of Epson Projector assigned to James dela cruz?'
+    );
+
+    expect($resolved)->not->toBeNull()
+        ->and($resolved['item_name'])->toBe('Epson Projector')
+        ->and($resolved['inventory_id'])->toBe((int) $epson->item_id);
+
+    // A reply naming nothing resolvable must still re-ask.
+    expect($service->resolveClarification($user, $pending, 'what is the inventory number'))->toBeNull();
+
+    // A name outside the displayed set is never used as a general search.
+    expect($service->resolveClarification($user, $pending, 'what about Bond Paper'))->toBeNull();
+});
+
+test('an ordinal reply resolves against the candidates a previous answer offered', function () {
+    $user = persistedAssistantUser();
+    $epson = createAssistantInventory($user, 'Epson Projector', 2);
+    $benq = createAssistantInventory($user, 'BenQ Projector', 4);
+    $service = app(InventoryAnswerService::class);
+
+    $last = [
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_INVENTORY_STOCK,
+        'response_type' => 'count',
+        'candidate_ids' => [(int) $epson->item_id, (int) $benq->item_id],
+    ];
+
+    $second = $service->resolveRememberedSelection($user, $last, 'the second one');
+    expect($second)->not->toBeNull()->and($second['inventory_id'])->toBe((int) $benq->item_id);
+
+    expect($service->resolveRememberedSelection($user, $last, 'the first one')['inventory_id'])
+        ->toBe((int) $epson->item_id);
+
+    // An id outside the remembered set resolves nothing.
+    expect($service->resolveRememberedSelection($user, $last, 'ID 99999'))->toBeNull();
+
+    // One candidate is not a choice, so there is nothing to pick from.
+    expect($service->resolveRememberedSelection($user, [
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_INVENTORY_STOCK,
+        'response_type' => 'count',
+        'candidate_ids' => [(int) $epson->item_id],
+    ], 'the second one'))->toBeNull();
+
+    // A capability the user does not hold resolves nothing at all.
+    expect($service->resolveRememberedSelection(
+        persistedAssistantUser('End User'),
+        $last,
+        'the second one'
+    ))->toBeNull();
+});
+
+test('every answered exchange is appended to the turn log', function () {
+    $user = persistedAssistantUser();
+    createAssistantInventory($user, 'Conversation Projector', 2);
+
+    $this->actingAs($user)
+        ->postJson(route('ai.chat'), ['message' => 'How many Conversation Projector are available?'])
+        ->assertOk();
+
+    $turn = App\Models\AiConversationTurn::query()->where('user_id', $user->id)->first();
+
+    expect($turn)->not->toBeNull()
+        ->and($turn->turn_index)->toBe(1)
+        ->and($turn->status)->toBe('success')
+        ->and($turn->question)->toBe('How many Conversation Projector are available?')
+        ->and(is_array($turn->resolved))->toBeTrue()
+        ->and($turn->resolved['entity_refs'])->toBeArray();
+
+    // A second turn appends. It never overwrites the first.
+    $this->postJson(route('ai.chat'), ['message' => 'How many Conversation Projector are available?'])
+        ->assertOk();
+
+    expect(App\Models\AiConversationTurn::query()->where('user_id', $user->id)->count())->toBe(2)
+        ->and(App\Models\AiConversationTurn::query()
+            ->where('user_id', $user->id)
+            ->orderBy('turn_index')
+            ->pluck('turn_index')
+            ->all())->toBe([1, 2]);
+});
+
+test('losing the assistant for a role purges the recorded turns', function () {
+    $user = persistedAssistantUser();
+    createAssistantInventory($user, 'Purged Projector', 2);
+
+    $this->actingAs($user)
+        ->postJson(route('ai.chat'), ['message' => 'How many Purged Projector are available?'])
+        ->assertOk();
+
+    expect(App\Models\AiConversationTurn::query()->where('user_id', $user->id)->count())->toBe(1);
+
+    $user->update(['role_id' => Role::firstOrCreate(['role_name' => 'End User'])->role_id]);
+
+    $this->postJson(route('ai.chat'), ['message' => 'How many Purged Projector are available?'])
+        ->assertForbidden()
+        ->assertJsonPath('message', 'The AI assistant is not available for your role.');
+
+    expect(App\Models\AiConversationTurn::query()->where('user_id', $user->id)->count())->toBe(0)
+        ->and(App\Models\AiConversationSession::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+function aiReferenceResolution(array $overrides = []): array
+{
+    return array_replace([
+        'resolved_question' => 'Why is the Epson Projector low in stock?',
+        'is_follow_up' => true,
+        'ambiguity' => null,
+        'referenced_item_id' => null,
+        'topic_action' => 'continue_topic',
+    ], $overrides);
+}
+
+test('a self-contained question is never sent for reference resolution', function () {
+    $parser = app(AiIntentParserService::class);
+
+    // A question that names its subject and points at nothing has nothing to
+    // resolve, so no provider call is made for it.
+    expect($parser->needsReferenceResolution('How many Epson Projectors are available?', []))->toBeFalse()
+        ->and($parser->needsReferenceResolution('Show details for Projector.', []))->toBeFalse()
+        ->and($parser->needsReferenceResolution('What is the weather?', []))->toBeFalse();
+
+    // Without any anchor there is nothing to resolve against either.
+    expect($parser->needsReferenceResolution('Why is it low?', []))->toBeFalse();
+
+    // A bare stem has no subject of its own, so it can only mean the last turn.
+    expect($parser->needsReferenceResolution('why?', ['entity_refs' => [7]]))->toBeTrue()
+        ->and($parser->needsReferenceResolution('how many?', ['entity_refs' => [7]]))->toBeTrue()
+        // A stem with a subject already in it is self-contained. Spending a
+        // rewrite on it can only lose information.
+        ->and($parser->needsReferenceResolution('how many assigned?', ['entity_refs' => [7]]))->toBeFalse()
+        ->and($parser->needsReferenceResolution('how many projectors are available?', ['entity_refs' => [7]]))->toBeFalse()
+        // It names its own subject, so there is nothing left to point at.
+        ->and($parser->needsReferenceResolution('why is Epson low?', ['entity_refs' => [7]]))->toBeFalse()
+        // But these point backwards, so they are resolved.
+        ->and($parser->needsReferenceResolution('why is it low?', ['entity_refs' => [7]]))->toBeTrue()
+        ->and($parser->needsReferenceResolution('Tell me about that one', ['entity_refs' => [7]]))->toBeTrue()
+        ->and($parser->needsReferenceResolution('the other one', ['entity_refs' => [7]]))->toBeTrue();
+});
+
+test('reference resolution returns nothing without a provider key', function () {
+    config()->set('services.gemini.api_key', null);
+    $parser = app(AiIntentParserService::class);
+
+    expect($parser->resolveReferences('Why is it low?', ['topic' => ['item_name' => 'Epson']]))->toBeNull();
+});
+
+test('an ungrounded resolution is rejected rather than trusted', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+
+    $user = persistedAssistantUser();
+    $epson = createAssistantInventory($user, 'Epson Projector', 1);
+
+    // Stubs stack and the first match wins, so the three resolutions are served
+    // in order from one sequence.
+    Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::sequence()
+        // The provider invents an item that is in neither the question nor context.
+        ->push(geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'Why is the BenQ Projector low in stock?',
+        ]))))
+        // An id absent from both is rejected the same way.
+        ->push(geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'Why is item 47 low in stock?',
+        ]))))
+        // A rewrite grounded in the context is accepted.
+        ->push(geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'Why is Epson Projector low in stock?',
+            'referenced_item_id' => (int) $epson->item_id,
+        ]))))]);
+    useRealAssistantIntentParser();
+
+    $parser = app(AiIntentParserService::class);
+    $context = [
+        'topic' => ['item_name' => 'Epson Projector'],
+        'entity_refs' => [(int) $epson->item_id],
+        'entity_names' => ['Epson Projector'],
+        'candidate_ids' => [],
+    ];
+
+    expect($parser->resolveReferences('Why is it low?', $context))->toBeNull()
+        ->and($parser->resolveReferences('Why is it low?', $context))->toBeNull();
+
+    $accepted = $parser->resolveReferences('Why is it low?', $context);
+
+    expect($accepted)->not->toBeNull()
+        ->and($accepted['resolved_question'])->toBe('Why is Epson Projector low in stock?')
+        ->and($accepted['ambiguity'])->toBeNull()
+        ->and($accepted['referenced_item_id'])->toBe((int) $epson->item_id);
+});
+
+test('a resolution referencing an item outside the offered set is refused', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+
+    $user = persistedAssistantUser();
+    $epson = createAssistantInventory($user, 'Epson Projector', 1);
+
+    Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response(
+        geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'What about Epson Projector?',
+            'ambiguity' => 'ambiguous_candidate',
+        ])))
+    )]);
+    useRealAssistantIntentParser();
+
+    $parser = app(AiIntentParserService::class);
+
+    // No candidates were offered, so the refusal cannot name any.
+    expect($parser->resolveReferences('What about that one?', [
+        'entity_refs' => [(int) $epson->item_id],
+        'entity_names' => ['Epson Projector'],
+        'candidate_ids' => [],
+    ]))->toBeNull();
+
+    // With candidates offered, the refusal names exactly those.
+    $refused = $parser->resolveReferences('What about that one?', [
+        'entity_refs' => [(int) $epson->item_id],
+        'entity_names' => ['Epson Projector'],
+        'candidate_ids' => [41, 42],
+    ]);
+
+    expect($refused)->not->toBeNull()
+        ->and($refused['ambiguity'])->toBe('ambiguous_candidate')
+        ->and($refused['candidates'])->toBe([41, 42]);
+});
+
+test('a referenced item the user may no longer see is dropped', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+
+    $user = persistedAssistantUser();
+    $epson = createAssistantInventory($user, 'Epson Projector', 1);
+
+    Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response(
+        geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'Show details for Epson Projector.',
+            'is_follow_up' => false,
+            'topic_action' => 'new_topic',
+            'referenced_item_id' => 9999,
+        ])))
+    )]);
+    useRealAssistantIntentParser();
+
+    $resolution = app(AiIntentParserService::class)->resolveReferences('Show details for that.', [
+        'entity_refs' => [(int) $epson->item_id],
+        'entity_names' => ['Epson Projector'],
+        'candidate_ids' => [],
+    ]);
+
+    // The question resolves, but the invented id does not survive.
+    expect($resolution)->not->toBeNull()
+        ->and($resolution['referenced_item_id'])->toBeNull();
+});
+
+test('an oversized context payload drops relevant turns before entity data', function () {
+    $user = persistedAssistantUser();
+    $selector = app(App\Services\Conversation\ConversationContextSelector::class);
+
+    $relevant = [];
+    for ($i = 0; $i < 40; $i++) {
+        $relevant[] = [
+            'question' => str_repeat('Projector question ', 30).$i,
+            'reply' => str_repeat('A very long reply about projectors ', 30).$i,
+            'entity_refs' => [$i + 1],
+            'item_name' => 'Projector',
+        ];
+    }
+
+    $payload = [
+        'recent_turns' => [],
+        'summary' => str_repeat('summary text ', 500),
+        'relevant_turns' => $relevant,
+        'entity_refs' => [7, 8, 9],
+        'entity_names' => ['Epson Projector'],
+        'candidate_ids' => [10, 11],
+        'candidate_names' => ['BenQ Projector'],
+        'topic' => ['item_name' => 'Epson Projector'],
+    ];
+
+    $budgeted = (function (array $payload) use ($selector): array {
+        $method = new ReflectionMethod($selector, 'enforceBudget');
+        $method->setAccessible(true);
+
+        return $method->invoke($selector, $payload);
+    })($payload);
+
+    expect(mb_strlen(json_encode($budgeted) ?: ''))->toBeLessThan(20000)
+        // The structured channels are never the thing that gets dropped.
+        ->and($budgeted['entity_refs'])->toBe([7, 8, 9])
+        ->and($budgeted['candidate_ids'])->toBe([10, 11])
+        ->and($budgeted['entity_names'])->toBe(['Epson Projector'])
+        ->and(count($budgeted['relevant_turns']))->toBeLessThan(40);
+});
+
+test('a resolved reference is what the intent parser actually receives', function () {
+    // The parser must be installed before the first request: Laravel caches the
+    // controller instance, so a parser swapped in later never reaches it.
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+    useRealAssistantIntentParser();
+
+    $user = persistedAssistantUser();
+    createAssistantInventory($user, 'Epson Projector', 2, 'low');
+
+    // "the other one" is used because the short follow-up forms are resolved
+    // locally and never reach the provider. This is the kind of reference the
+    // regexes cannot handle, which is what the resolver exists for.
+    //
+    // Turn one spends two calls: a parse, then an attempted narration. Turn two
+    // spends the rewrite and the parse of that rewrite.
+    Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::sequence()
+        ->push(geminiGenerateContentResponse(json_encode(structuredAssistantParse([
+            'intent' => 'item_status',
+            'item_name' => 'Epson Projector',
+            'response_type' => 'detail',
+        ]))))
+        ->push(geminiGenerateContentResponse('Epson Projector is available in the Library.'))
+        ->push(geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'Explain why Epson Projector is low in stock.',
+        ]))))
+        ->push(geminiGenerateContentResponse(json_encode(structuredAssistantParse([
+            'intent' => 'explanation',
+            'explanation' => true,
+            'explanation_topic' => 'stock',
+            'item_name' => 'Epson Projector',
+            'response_type' => 'explanation',
+        ]))))]);
+
+    $this->actingAs($user)
+        ->postJson(route('ai.chat'), ['message' => 'Show details for Epson Projector.'])
+        ->assertOk();
+
+    $this->postJson(route('ai.chat'), ['message' => 'the other one'])
+        ->assertOk()
+        // Without the rewrite this turn could only be a clarification: "the
+    // other one" names nothing. Being answered at all is the proof.
+    ->assertJsonPath('reply', fn (string $reply): bool => ! str_contains($reply, 'Which inventory item or question'));
+});
+
+test('the ambiguity gate asks instead of answering when a reference cannot be pinned down', function () {
+    // Installed before the first request: Laravel caches the controller instance.
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+    useRealAssistantIntentParser();
+
+    $user = persistedAssistantUser();
+    $epson = createAssistantInventory($user, 'Epson Projector', 2);
+    $benq = createAssistantInventory($user, 'BenQ Projector', 3);
+
+    // Turn one establishes the conversation; the candidates are recorded
+    // directly because the gate can only name candidates a previous answer
+    // actually offered.
+    Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::sequence()
+        ->push(geminiGenerateContentResponse(json_encode(structuredAssistantParse([
+            'intent' => 'item_status',
+            'item_name' => 'Epson Projector',
+            'response_type' => 'detail',
+        ]))))
+        ->push(geminiGenerateContentResponse('Epson Projector is available in the Library.'))
+        ->push(geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'What about Epson Projector?',
+            'ambiguity' => 'ambiguous_candidate',
+        ]))))]);
+
+    $this->actingAs($user)
+        ->postJson(route('ai.chat'), ['message' => 'Show details for Epson Projector.'])
+        ->assertOk();
+
+    $log = app(App\Services\Conversation\ConversationTurnLog::class);
+    $log->record(
+        $user,
+        (string) session('ai.conversation_session_id'),
+        'How many projectors are available?',
+        'Two projector records matched.',
+        ['intent' => 'factual', 'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY, 'response_type' => 'list'],
+        ['status' => 'success'],
+        [(int) $epson->item_id, (int) $benq->item_id],
+        [(int) $epson->item_id, (int) $benq->item_id],
+    );
+
+    $this->postJson(route('ai.chat'), ['message' => 'the other one'])
+        ->assertOk()
+        ->assertJsonPath('reply', fn (string $reply): bool => str_contains($reply, 'I found multiple matches'));
+
+    // Three calls: turn one's two, then the refusal. The parser never ran for
+    // the refusal itself.
+    Http::assertSentCount(3);
+});
+
+test('a no_topic resolution asks what to check rather than guessing', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+    useRealAssistantIntentParser();
+
+    $user = persistedAssistantUser();
+    createAssistantInventory($user, 'Epson Projector', 2);
+
+    Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::sequence()
+        ->push(geminiGenerateContentResponse(json_encode(structuredAssistantParse([
+            'intent' => 'item_status',
+            'item_name' => 'Epson Projector',
+            'response_type' => 'detail',
+        ]))))
+        ->push(geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'the other one',
+            'ambiguity' => 'no_topic',
+        ]))))]);
+
+    $this->actingAs($user)
+        ->postJson(route('ai.chat'), ['message' => 'Show details for Epson Projector.'])
+        ->assertOk();
+
+    $response = $this->postJson(route('ai.chat'), ['message' => 'the other one']);
+
+$response->assertOk()
+    // It must ask rather than answer: nothing identifies a subject, and the
+    // turn has no topic to inherit one from.
+    ->assertJsonPath('reply', fn (string $reply): bool => ! str_contains($reply, 'Epson Projector has'));
+});
+
+test('an ambiguous candidate claim is refused when no candidates were offered', function () {
+    config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
+
+    // A single-item answer offers no candidates, so there is nothing to choose
+    // between and a claim of ambiguity is rejected whole rather than asked.
+    Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response(
+        geminiGenerateContentResponse(json_encode(aiReferenceResolution([
+            'resolved_question' => 'What about Epson Projector?',
+            'ambiguity' => 'ambiguous_candidate',
+        ])))
+    )]);
+
+    expect(app(AiIntentParserService::class)->resolveReferences('what about that one?', [
+        'entity_refs' => [1],
+        'entity_names' => ['Epson Projector'],
+        'candidate_ids' => [],
+    ]))->toBeNull();
+});
+
+test('a question naming a category is answered from that category, not from item names', function () {
+    $user = persistedAssistantUser();
+
+    $consumables = Category::firstOrCreate(['category_name' => 'Consumables']);
+    $office = Category::firstOrCreate(['category_name' => 'Office Equipment']);
+
+    foreach ([['Bond Paper', 5, $consumables], ['Cleaning Soap', 3, $consumables]] as [$name, $qty, $cat]) {
+        Inventory::create([
+            'category_id' => $cat->category_id, 'unit' => 'box', 'user_id' => $user->id,
+            'item_name' => $name, 'description' => $name, 'quantity' => $qty,
+            'unit_cost' => 1, 'date_acquired' => now()->toDateString(), 'status' => 'available',
+        ]);
+    }
+
+    Inventory::create([
+        'category_id' => $office->category_id, 'unit' => 'piece', 'user_id' => $user->id,
+        'item_name' => 'Epson Printer', 'description' => 'printer', 'quantity' => 40,
+        'unit_cost' => 1, 'date_acquired' => now()->toDateString(), 'status' => 'available',
+    ]);
+
+    $service = app(InventoryAnswerService::class);
+
+    // "Consumables" reaches the answer service as an item name, because the
+    // parse contract can only carry a category as a numeric id.
+    $result = $service->answer($user, [
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY,
+        'item_name' => 'Consumables',
+        'response_type' => 'count',
+    ]);
+
+    expect($result['status'])->toBe('success')
+        ->and($result['answer']['item_types'])->toBe(2)
+        ->and($result['answer']['available_count'])->toBe(8);
+
+    // The phrase may keep the word "category" and a singular noun.
+    $byPhrase = $service->answer($user, [
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY,
+        'item_name' => 'consumable category',
+        'response_type' => 'count',
+    ]);
+
+    expect($byPhrase['status'])->toBe('success')
+        ->and($byPhrase['answer']['item_types'])->toBe(2)
+        ->and($byPhrase['answer']['available_count'])->toBe(8);
+
+    // An item that really exists is never reinterpreted as a category.
+    $byItem = $service->answer($user, [
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY,
+        'item_name' => 'Epson Printer',
+        'response_type' => 'count',
+    ]);
+
+    expect($byItem['answer']['available_count'])->toBe(40);
+
+    // A phrase naming neither an item nor a category is left alone.
+    $unknown = $service->answer($user, [
+        'intent' => 'factual',
+        'capability' => AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY,
+        'item_name' => 'Nonexistent Widget',
+        'response_type' => 'count',
+    ]);
+
+    expect($unknown['status'])->not->toBe('success');
+});
+
+test('one user never reads another user conversation turns', function () {
+    $first = persistedAssistantUser();
+    $second = persistedAssistantUser();
+    createAssistantInventory($first, 'Private Projector', 2);
+
+    $this->actingAs($first)
+        ->postJson(route('ai.chat'), ['message' => 'How many Private Projector are available?'])
+        ->assertOk();
+
+    $log = app(App\Services\Conversation\ConversationTurnLog::class);
+    $sessionId = (string) session('ai.conversation_session_id');
+
+    expect($log->recentTurns($first, $sessionId))->not->toBeEmpty()
+        ->and($log->lastCandidateIds($second, $sessionId))->toBe([])
+        ->and($log->entityRegistry($second, $sessionId))->toBe([])
+        ->and($log->recentTurns($second, $sessionId))->toBe([]);
 });

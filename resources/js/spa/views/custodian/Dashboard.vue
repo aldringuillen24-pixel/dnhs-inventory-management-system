@@ -187,7 +187,7 @@
       </div>
 
       <!-- Charts Row -->
-      <div class="compact-grid-2">
+      <div class="grid gap-6 xl:grid-cols-3">
         <!-- Units by Category Bar Chart -->
         <section class="custodian-panel compact-panel flex flex-col justify-between transition-all">
           <div class="compact-panel__header">
@@ -242,6 +242,37 @@
             <div v-else class="compact-empty flex h-40 flex-col items-center justify-center">
               <LucideIcon :icon="ChartPie" class="mb-1.5 h-7 w-7 text-gray-300 dark:text-gray-600" />
               No request status data available
+            </div>
+          </div>
+        </section>
+
+        <!-- Lifespan Mix Donut Chart. Derived from the metrics the endpoint
+             already returns (healthy = total − approaching − expired), so no
+             backend change. The item-level view stays on Reports. -->
+        <section class="custodian-panel compact-panel flex flex-col justify-between transition-all">
+          <div class="compact-panel__header">
+            <div class="min-w-0">
+              <h2 class="compact-panel__title">Lifespan Mix</h2>
+              <p class="compact-panel__subtitle">Healthy, approaching and expired units</p>
+            </div>
+            <span class="compact-chip compact-chip--emerald shrink-0">
+              <span class="h-1.5 w-1.5 rounded-md bg-emerald-500" />
+              Lifecycle
+            </span>
+          </div>
+
+          <div class="compact-panel__body">
+            <apexchart
+              v-if="!loading && lifecycleTotal > 0"
+              type="donut"
+              height="240"
+              :options="lifecycleOptions"
+              :series="lifecycleSeries"
+            />
+            <div v-else-if="loading" class="compact-chart-skeleton" aria-hidden="true" />
+            <div v-else class="compact-empty flex h-40 flex-col items-center justify-center">
+              <LucideIcon :icon="ChartPie" class="mb-1.5 h-7 w-7 text-gray-300 dark:text-gray-600" />
+              No lifespan data available
             </div>
           </div>
         </section>
@@ -376,12 +407,11 @@ const categoryOptions = computed(() => ({
     },
   },
   colors: ['#059669', '#0d9488', '#0284c7', '#6366f1', '#8b5cf6', '#d97706', '#e11d48', '#14b8a6'],
+  // Value labels removed entirely: bar lengths already encode the quantities
+  // and the hover tooltip states the exact figure. No in-chart text left to
+  // misrender.
   dataLabels: {
-    enabled: true,
-    textAnchor: 'start',
-    style: { colors: ['#ffffff'], fontSize: '10px', fontWeight: 600 },
-    formatter: (val) => `${val} units`,
-    offsetX: 6,
+    enabled: false,
   },
   xaxis: {
     categories: categoryData.value.slice(0, 8).map((row) => row.label),
@@ -452,10 +482,94 @@ const statusOptions = computed(() => ({
   },
   colors: ['#059669', '#f59e0b', '#0284c7', '#e11d48', '#8b5cf6', '#10b981'],
   stroke: { colors: [isDark.value ? '#111827' : '#ffffff'], width: 2 },
+  // Segment percentage labels ("92.9%") are on by default and add nothing next
+  // to the center total, legend and tooltip — and render in unstyled dark text.
+  dataLabels: { enabled: false },
   tooltip: {
     theme: isDark.value ? 'dark' : 'light',
   },
   noData: { text: 'No request data available' },
+}));
+
+// Lifespan mix, derived from the metrics payload: healthy units are the total
+// minus the two dated states. No backend change; the item-level lifespan view
+// stays on Reports.
+const lifecycleCounts = computed(() => {
+  const total = Number(metrics.value.inventory ?? 0);
+  const approaching = Number(metrics.value.approachingLifespan ?? 0);
+  const expired = Number(metrics.value.expiredLifespan ?? 0);
+  return {
+    healthy: Math.max(0, total - approaching - expired),
+    approaching: Math.max(0, approaching),
+    expired: Math.max(0, expired),
+  };
+});
+
+const lifecycleTotal = computed(
+  () => lifecycleCounts.value.healthy + lifecycleCounts.value.approaching + lifecycleCounts.value.expired,
+);
+
+const lifecycleSeries = computed(() => [
+  lifecycleCounts.value.healthy,
+  lifecycleCounts.value.approaching,
+  lifecycleCounts.value.expired,
+]);
+
+const lifecycleOptions = computed(() => ({
+  chart: {
+    type: 'donut',
+    foreColor: foreColor.value,
+    fontFamily: 'Outfit, sans-serif',
+  },
+  labels: ['Healthy', 'Approaching', 'Expired'],
+  legend: {
+    position: 'bottom',
+    horizontalAlign: 'center',
+    fontSize: '11px',
+    markers: { radius: 4 },
+    itemMargin: { horizontal: 6, vertical: 2 },
+  },
+  plotOptions: {
+    pie: {
+      donut: {
+        size: '66%',
+        labels: {
+          show: true,
+          name: {
+            show: true,
+            offsetY: -12,
+            fontSize: '10px',
+            fontWeight: 600,
+            color: '#98a2b3',
+          },
+          value: {
+            show: true,
+            offsetY: -2,
+            fontSize: '12px',
+            fontWeight: 700,
+            color: isDark.value ? '#38bdf8' : '#0284c7',
+          },
+          total: {
+            show: true,
+            label: 'Total Units',
+            color: '#98a2b3',
+            fontSize: '12px',
+            fontWeight: 600,
+            formatter: (w) => w.globals.seriesTotals.reduce((a, b) => a + b, 0),
+          },
+        },
+      },
+    },
+  },
+  colors: ['#059669', '#f97316', '#e11d48'],
+  stroke: { colors: [isDark.value ? '#111827' : '#ffffff'], width: 2 },
+  // Same as the requests donut: default slice percentages off, center total on.
+  dataLabels: { enabled: false },
+  tooltip: {
+    theme: isDark.value ? 'dark' : 'light',
+    y: { formatter: (val) => `${val} units` },
+  },
+  noData: { text: 'No lifespan data available' },
 }));
 
 function activityBadgeClass(type) {

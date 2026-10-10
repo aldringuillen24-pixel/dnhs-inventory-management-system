@@ -45,6 +45,9 @@ const classes = computed(() => {
         case 'waiting for approval':
         case 'waiting for transfer approval':
         case 'waiting for custodian approval':
+        // Recorded demand rather than an approval queue — the custodian cannot
+        // fulfil it, so it stays visibly open while procurement plans for it.
+        case 'waiting for procurement':
         case 'pending':
             return 'bg-amber-50 text-amber-700 border border-amber-200/60 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20';
         case 'disposed':
@@ -81,6 +84,7 @@ const dotClass = computed(() => {
         case 'waiting for approval':
         case 'waiting for transfer approval':
         case 'waiting for custodian approval':
+        case 'waiting for procurement':
         case 'pending':
             return 'bg-amber-500 animate-pulse';
         case 'disposed':

@@ -1,6 +1,6 @@
 <template>
   <div v-if="lastPage > 1" class="flex flex-wrap items-center justify-between gap-3">
-    <p class="text-sm text-gray-500 dark:text-gray-400">
+    <p class="text-xs text-gray-500 dark:text-gray-400">
       Showing <span class="font-medium text-gray-800 dark:text-white/90">{{ from ?? 0 }}</span>
       to <span class="font-medium text-gray-800 dark:text-white/90">{{ to ?? 0 }}</span>
       of <span class="font-medium text-gray-800 dark:text-white/90">{{ total }}</span> results
@@ -10,7 +10,7 @@
         v-for="page in window"
         :key="page"
         type="button"
-        class="min-w-9 rounded-md px-2 py-1.5 text-sm font-medium"
+        class="min-w-8 rounded-md px-1.5 py-1 text-xs font-medium"
         :class="
           page === currentPage
             ? 'bg-brand-500 text-white'
@@ -23,7 +23,7 @@
       </button>
     </div>
   </div>
-  <p v-else class="text-sm text-gray-500 dark:text-gray-400">
+  <p v-else class="text-xs text-gray-500 dark:text-gray-400">
     Showing <span class="font-medium text-gray-800 dark:text-white/90">{{ total }}</span> results
   </p>
 </template>

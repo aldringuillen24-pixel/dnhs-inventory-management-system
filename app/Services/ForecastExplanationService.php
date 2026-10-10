@@ -3,10 +3,27 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Services\Concerns\GroundsForecastReply;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class ForecastExplanationService
 {
+    // The same grounding rules the decision-support chat and the Recommendations
+    // tab use. Reusing them is the point: a second copy of this gate is how one
+    // of them quietly stops being applied.
+    use GroundsForecastReply;
+
+    /**
+     * The forecast fields a reply may label with a priority tier.
+     *
+     * Both are read together so a tier can be attributed to the field it
+     * belongs to. "Urgent priority with Low confidence" describes an Urgent row
+     * and a Low-confidence one at the same time, which is why the checks cannot
+     * be done one field at a time.
+     */
+    private const LABELLED_TIER_FIELDS = ['priority', 'confidence'];
+
     public function __construct(
         protected AiCapabilityPolicy $policy,
         protected GeminiApiService $geminiApi,
@@ -24,38 +41,58 @@ class ForecastExplanationService
         }
 
         $payload = $this->safePayload($forecastRow);
-        $localExplanation = $this->localExplanation($payload);
+        $local = fn (string $providerStatus): array => [
+            'status' => 'success',
+            'source' => 'local',
+            'provider_status' => $providerStatus,
+            'payload' => $payload,
+            'explanation' => $this->localExplanation($payload),
+        ];
 
-        if (($payload['forecast_status'] ?? null) !== 'success'
-            || ! is_string(config('services.gemini.api_key'))
-            || trim((string) config('services.gemini.api_key')) === '') {
-            return [
-                'status' => 'success',
-                'source' => 'local',
-                'payload' => $payload,
-                'explanation' => $localExplanation,
-            ];
+        // A row with no estimate has nothing to explain, so no request is made
+        // and the reason is reported rather than implied.
+        if (($payload['forecast_status'] ?? null) !== 'success') {
+            return $local('not_attempted');
         }
 
-        $explanation = $this->geminiApi->generate(
+        if (! is_string(config('services.gemini.api_key')) || trim((string) config('services.gemini.api_key')) === '') {
+            return $local('no_key');
+        }
+
+        $reply = $this->geminiApi->generate(
             $this->systemPrompt($payload),
             'Explain why this calculated forecast may require procurement. Use only the supplied facts.',
             ['temperature' => 0.1, 'maxOutputTokens' => 300]
         );
-        if (is_string($explanation) && $this->isGroundedProviderReply($explanation, $payload)) {
-            return [
-                'status' => 'success',
-                'source' => 'provider',
-                'payload' => $payload,
-                'explanation' => trim($explanation),
-            ];
+
+        if (! is_string($reply) || trim($reply) === '') {
+            return $local('request_failed');
+        }
+
+        $failure = $this->explanationGroundingFailure($reply, $payload);
+
+        if ($failure !== null) {
+            // Recorded so "why did it fall back?" is answerable from the log
+            // instead of guesswork. This service previously fell back silently
+            // on every single call, which is why the failure went unnoticed.
+            Log::warning('Forecast explanation rejected a provider reply.', [
+                'user_id' => $user->id,
+                'item_name' => $payload['item_name'] ?? null,
+                'failed_check' => $failure['check'],
+                'forbidden_claim' => $failure['forbidden_claim'],
+                'unapproved_numbers' => $failure['unapproved_numbers'],
+                'reply' => mb_substr(trim($reply), 0, 400),
+            ]);
+
+            return $local('reply_rejected');
         }
 
         return [
             'status' => 'success',
-            'source' => 'local',
+            'source' => 'provider',
+            'provider_status' => 'ok',
             'payload' => $payload,
-            'explanation' => $localExplanation,
+            'explanation' => trim($reply),
         ];
     }
 
@@ -171,6 +208,8 @@ class ForecastExplanationService
             'forecast_demand' => $row['forecast_demand'] ?? null,
             'safety_stock' => $row['safety_stock'] ?? null,
             'pending_demand' => $row['pending_demand'] ?? $row['pending_requests'] ?? null,
+            'unmet_demand' => $row['unmet_demand'] ?? 0,
+            'unmet_requesters' => $row['unmet_requesters'] ?? 0,
             'suggested_procurement' => $row['suggested_procurement'] ?? null,
             'needs_procurement' => $row['needs_procurement'] ?? false,
             'priority' => $row['priority'] ?? null,
@@ -178,55 +217,154 @@ class ForecastExplanationService
             'calculation_basis' => $row['calculation_basis'] ?? null,
             'advisory_status' => $row['advisory_status'] ?? null,
             'forecast_status' => $row['status'] ?? 'insufficient_data',
+            // History depth. Without these the provider could report that a
+            // figure was uncertain but never say *how* uncertain, which is the
+            // one thing the custodian most needs from an explanation.
+            'historical_months_used' => $row['historical_months_used'] ?? null,
+            'required_months' => $row['required_months'] ?? null,
         ];
     }
 
-    protected function isGroundedProviderReply(string $reply, array $payload): bool
+    protected function explanationGroundingFailure(string $reply, array $payload): ?array
     {
         $reply = trim($reply);
-        if ($reply === ''
-            || ! is_string($payload['item_name'] ?? null)
-            || stripos($reply, $payload['item_name']) === false
-            || preg_match('/\b(?:place|create|submit|approve|buy|purchase\s+order|update\s+(?:the\s+)?inventory|change\s+(?:the\s+)?stock)\b/iu', $reply) === 1) {
-            return false;
+
+        if ($reply === '' || ! is_string($payload['item_name'] ?? null) || ! $this->namesItem($reply, $payload['item_name'])) {
+            return ['check' => 'no_item_named', 'forbidden_claim' => null, 'unapproved_numbers' => []];
         }
 
-        $approvedNumbers = collect($payload)
-            ->filter(fn ($value): bool => is_int($value) || is_float($value) || (is_string($value) && preg_match('/^\d+(?:-\d+)*$/', $value) === 1))
-            ->flatMap(function ($value): array {
-                preg_match_all('/\d+(?:[,.]\d+)*/u', (string) $value, $matches);
+        $forbidden = $this->forbiddenClaim($reply);
 
-                return array_map(fn (string $number): string => str_replace(',', '', $number), $matches[0]);
-            })
-            ->unique();
-        preg_match_all('/(?<![\pL])\d+(?:[,.]\d+)*(?![\pL])/u', $reply, $replyNumbers);
-        foreach ($replyNumbers[0] as $number) {
-            if (! $approvedNumbers->contains(str_replace(',', '', $number))) {
-                return false;
-            }
+        if ($forbidden !== null) {
+            return ['check' => 'forbidden_claim', 'forbidden_claim' => $forbidden, 'unapproved_numbers' => []];
         }
 
+        // Scoped to this one row, so the reply may quote this item's figures only.
+        $unapproved = $this->unapprovedNumbers($reply, $this->numberFacts($payload));
+
+        if ($unapproved !== []) {
+            return ['check' => 'unapproved_number', 'forbidden_claim' => null, 'unapproved_numbers' => $unapproved];
+        }
+
+        // A reply may describe the item's priority, but may not contradict it.
+        // Without this, "set its priority to Urgent" would pass every other check.
+        //
+        // The tier must be the one labelled for THIS field. The old pattern
+        // accepted any tier word within 30 characters of the field name, so a
+        // row whose own confidence is "Low" failed the moment a correct reply
+        // said "Urgent priority with Low confidence": the Low belonging to
+        // confidence was read as a contradiction of priority. Both fields now
+        // resolve to the tier word nearest to their own label.
         foreach (['priority', 'confidence'] as $field) {
             $value = $payload[$field] ?? null;
-            if (is_string($value)
-                && preg_match('/\b'.$field.'\b[^.\n]{0,30}\b(?:Urgent|High|Medium|Normal|Low)\b/iu', $reply, $labelMatch) === 1
-                && preg_match('/\b'.preg_quote($value, '/').'\b/iu', $labelMatch[0]) !== 1) {
-                return false;
+            $stated = $this->statedTierFor($reply, $field);
+
+            if (is_string($value) && $stated !== null && strcasecmp($stated, $value) !== 0) {
+                return ['check' => 'contradicts_'.$field, 'forbidden_claim' => null, 'unapproved_numbers' => []];
             }
         }
 
-        foreach ([
-            'forecast demand' => 'forecast_demand',
-            'safety stock' => 'safety_stock',
-            'available stock' => 'available_stock',
-            'pending demand' => 'pending_demand',
-            'suggested quantity' => 'suggested_procurement',
-        ] as $label => $field) {
-            if (! is_numeric($payload[$field] ?? null)) {
+        return null;
+    }
+
+    /**
+     * The priority tier a reply attributes to one labelled field.
+     *
+     * Reads both natural orders — "High priority" and "priority: High" — and
+     * accepts the tier only when it sits directly beside that field's own label.
+     * A tier belonging to the other field is never returned, which is what the
+     * old wide pattern got wrong.
+     */
+    private function statedTierFor(string $reply, string $field): ?string
+    {
+        // Every tier word and every field label, with byte offsets, so each tier
+        // can be attributed to the label it actually belongs to.
+        if (preg_match_all('/\b(?:Urgent|High|Medium|Normal|Low)\b/iu', $reply, $tiers, PREG_OFFSET_CAPTURE) === 0) {
+            return null;
+        }
+
+        $labels = [];
+        foreach (self::LABELLED_TIER_FIELDS as $name) {
+            if (preg_match_all('/\b'.$name.'\b/iu', $reply, $found, PREG_OFFSET_CAPTURE) > 0) {
+                foreach ($found[0] as [$word, $offset]) {
+                    $labels[] = ['name' => $name, 'offset' => (int) $offset];
+                }
+            }
+        }
+
+        if ($labels === []) {
+            return null;
+        }
+
+        foreach ($tiers[0] as [$tier, $offset]) {
+            $offset = (int) $offset;
+
+            // The label this tier is closest to, in either order. "Urgent
+            // priority" and "priority to Urgent" both resolve to the same pair,
+            // and a tier belonging to the other field is never claimed here.
+            $nearest = null;
+            foreach ($labels as $label) {
+                $distance = abs($label['offset'] - $offset);
+                if ($nearest === null || $distance < $nearest['distance']) {
+                    $nearest = ['name' => $label['name'], 'distance' => $distance];
+                }
+            }
+
+            // Bounded so a tier in a later, unrelated sentence is not attributed
+            // to a label far away. The filler word in "priority to Urgent" is a
+            // few characters, so this is generous for real phrasings.
+            if ($nearest['name'] !== $field || $nearest['distance'] > 40) {
                 continue;
             }
-            $number = preg_quote((string) $payload[$field], '/');
-            if (preg_match('/\b'.$label.'\b[^0-9\n]{0,30}'.$number.'(?!\d)/iu', $reply) !== 1) {
+
+            return $tier;
+        }
+
+        return null;
+    }
+
+    /**
+     * The facts the number check is allowed to draw its allow-list from.
+     *
+     * unapprovedNumbers() reads the period and timestamp from the TOP level of
+     * the facts array, while safePayload() keeps them on the row under
+     * forecast_month. Passing only ['items' => [$payload]] therefore left the
+     * allow-list with no period at all, so a reply naming the forecast month was
+     * failed for its year — even though the system prompt had supplied
+     * forecast_month as an approved fact. Both are projected here, under the
+     * names the shared check already reads.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function numberFacts(array $payload): array
+    {
+        return [
+            'items' => [$payload],
+            'forecast_period' => $payload['forecast_month'] ?? null,
+            'generated_at' => $payload['generated_at'] ?? null,
+        ];
+    }
+
+    /**
+     * Whether a reply names this item.
+     *
+     * A literal substring test also failed a reply that reordered the name —
+     * "The 300ml Air Freshener is Urgent" for an item called
+     * "Air Freshener 300ml" — which names the item perfectly well. Word order is
+     * not a factual claim, so each word of the name is required to be present
+     * instead. The distinctive parts (the numeric size in "300ml") are still
+     * required, so a reply about a different size or product is not accepted.
+     */
+    private function namesItem(string $reply, string $itemName): bool
+    {
+        if (stripos($reply, $itemName) !== false) {
+            return true;
+        }
+
+        $lowered = mb_strtolower($reply);
+        foreach (preg_split('/[^\p{L}\p{N}]+/u', $itemName, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+            if (mb_strlen($word) > 1 && ! str_contains($lowered, mb_strtolower($word))) {
                 return false;
             }
         }
@@ -249,10 +387,13 @@ class ForecastExplanationService
             return "There is not enough verified completed demand history to explain a forecast for {$payload['item_name']}. No ML estimate is available; this is advisory only.";
         }
 
-        if (! $payload['needs_procurement']) {
-            return "{$payload['item_name']} has forecast demand of {$payload['forecast_demand']} {$payload['unit']}, safety stock of {$payload['safety_stock']} {$payload['unit']}, available stock of {$payload['available_stock']} {$payload['unit']}, and pending demand of {$payload['pending_demand']} {$payload['unit']}. The suggested quantity is {$payload['suggested_procurement']} {$payload['unit']}; {$payload['advisory_status']}. This is advisory only.";
-        }
+        // Unmet demand is stated only when it is non-zero, so the common case
+        // reads exactly as it did before this term existed.
+        $unmet = (int) ($payload['unmet_demand'] ?? 0);
+        $unmetClause = $unmet > 0
+            ? ", and unmet staff demand of {$unmet} {$payload['unit']}"
+            : '';
 
-        return "{$payload['item_name']} has forecast demand of {$payload['forecast_demand']} {$payload['unit']}, safety stock of {$payload['safety_stock']} {$payload['unit']}, available stock of {$payload['available_stock']} {$payload['unit']}, and pending demand of {$payload['pending_demand']} {$payload['unit']}. The suggested quantity is {$payload['suggested_procurement']} {$payload['unit']}; {$payload['advisory_status']}. This is advisory only.";
+        return "{$payload['item_name']} has forecast demand of {$payload['forecast_demand']} {$payload['unit']}, safety stock of {$payload['safety_stock']} {$payload['unit']}, available stock of {$payload['available_stock']} {$payload['unit']}, pending demand of {$payload['pending_demand']} {$payload['unit']}{$unmetClause}. The suggested quantity is {$payload['suggested_procurement']} {$payload['unit']}; {$payload['advisory_status']}. This is advisory only.";
     }
 }

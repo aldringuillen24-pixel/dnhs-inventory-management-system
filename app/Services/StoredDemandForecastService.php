@@ -6,8 +6,10 @@ use App\Models\AssignmentRequest;
 use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\User;
+use App\Support\RequestableItemMatcher;
 use App\Support\SampleForecastData;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -292,6 +294,8 @@ class StoredDemandForecastService
             ->groupBy('item_id')
             ->map(fn ($requests): int => (int) $requests->sum('quantity'));
 
+        $unmetDemand = $this->unmetDemandByType();
+
         // A forecast row whose inventory item has since been deleted, or moved
         // to a different category, no longer describes anything real: its
         // "buy N" figure was derived against that item and that category. So
@@ -305,7 +309,11 @@ class StoredDemandForecastService
         // row is still refused below.
         $rows = collect();
         $orphaned = [];
-        foreach ($forecastItems as $item) {
+        $orderedForecastItems = collect($forecastItems)
+            ->sortBy(fn (array $item): int => (int) $item['inventory_id'])
+            ->values();
+
+        foreach ($orderedForecastItems as $item) {
             $record = $inventory->get($item['inventory_id']);
             if (! $record || (int) $record->category_id !== $item['category_id']) {
                 $orphaned[] = (int) $item['inventory_id'];
@@ -313,10 +321,17 @@ class StoredDemandForecastService
                 continue;
             }
 
+            // Unmet demand is keyed by the inventory id it resolved to, so this
+            // lookup can only ever match one row. The previous group-key guard
+            // had to walk rows in id order to avoid double-counting serialized
+            // item types; resolving first makes that unnecessary.
+            $unmet = $unmetDemand->get((int) $record->item_id);
+
             $rows->push($this->validatedForecastRow(
                 $item,
                 $record,
                 (int) ($pendingDemand->get($record->item_id) ?? 0),
+                $unmet,
             ));
         }
 
@@ -563,13 +578,91 @@ class StoredDemandForecastService
                     && $validation['mae'] >= 0));
     }
 
-    private function validatedForecastRow(array $item, Inventory $inventory, int $pendingDemand): array
+    /**
+     * Unmet demand resolved to the inventory row it should boost.
+     *
+     * These are end-user requests raised when stock was zero, so they carry
+     * `item_id = NULL` and cannot be joined on that. Each request is instead
+     * resolved through the shared RequestableItemMatcher to a concrete inventory
+     * row, and the result is keyed by that row's id.
+     *
+     * Keying by the resolved inventory id — rather than by the requested
+     * name/category/unit triple — is what keeps the attribution safe for
+     * serialized categories, where several rows share one item type. Exactly one
+     * row holds a given id, so the quantity cannot be counted twice.
+     *
+     * @return \Illuminate\Support\Collection<int, array{total_quantity:int,requester_count:int}>
+     */
+    private function unmetDemandByType(): Collection
+    {
+        return AssignmentRequest::query()
+            ->where('status', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT)
+            ->whereNotNull('requested_item_name')
+            ->whereNotNull('requested_category_id')
+            ->get(['requested_item_name', 'requested_category_id', 'requested_unit', 'quantity', 'user_id'])
+            // Grouped on the NORMALISED name so "chair" and "Chairs" form one
+            // demand group instead of two competing ones.
+            ->groupBy(fn (AssignmentRequest $request): string => RequestableItemMatcher::normaliseName(
+                (string) $request->requested_item_name
+            ).'|'.(int) $request->requested_category_id.'|'.mb_strtolower(trim((string) $request->requested_unit)))
+            ->map(function ($requests): ?array {
+                $first = $requests->first();
+
+                $inventoryId = RequestableItemMatcher::candidates(
+                    (string) $first->requested_item_name,
+                    (int) $first->requested_category_id,
+                    $first->requested_unit,
+                )->first()?->item_id;
+
+                if (! $inventoryId) {
+                    // No catalogue row matches, so there is no forecast row to
+                    // add to. The demand is still real and still reaches the
+                    // dedicated unmet-requests prompt; it simply cannot raise a
+                    // suggestion for an item the model has never seen.
+                    return null;
+                }
+
+                // requester_count is "how many people are affected", not a
+                // purchase quantity. It is supplied so the AI can say so
+                // accurately, and must never be added to a suggested figure.
+                return [
+                    'inventory_id' => (int) $inventoryId,
+                    'total_quantity' => (int) $requests->sum('quantity'),
+                    'requester_count' => $requests->pluck('user_id')->filter()->unique()->count(),
+                ];
+            })
+            ->filter()
+            // Several request groups can resolve to the same inventory row (a
+            // generic placeholder unit matches any unit). Fold them, or a later
+            // group would silently overwrite an earlier one.
+            ->groupBy('inventory_id')
+            ->map(fn ($entries): array => [
+                'total_quantity' => (int) $entries->sum('total_quantity'),
+                'requester_count' => (int) $entries->sum('requester_count'),
+            ]);
+    }
+
+    /**
+     * @param  array<string, int>|null  $unmet  Unmet quantity this specific row may
+     *                                            claim, or null when another row in
+     *                                            the same name+category+unit group
+     *                                            already claimed it.
+     */
+    private function validatedForecastRow(array $item, Inventory $inventory, int $pendingDemand, ?array $unmet = null): array
     {
         $isSuccessful = $item['status'] === 'success';
         $forecastDemand = $isSuccessful ? $item['predicted_quantity'] : null;
         $availableStock = $inventory->status === 'available' ? max(0, (int) $inventory->quantity) : 0;
         $safetyStock = $isSuccessful ? (int) ceil($forecastDemand * (float) config('forecast.safety_stock_rate', 0.25)) : null;
-        $suggested = $isSuccessful ? max(0, $forecastDemand + $safetyStock - $availableStock - $pendingDemand) : null;
+        // Unmet demand is a POSITIVE term. It could not be folded into
+        // pendingDemand, which subtracts: these are requests that could NOT be
+        // satisfied, so they increase what should be bought rather than reduce
+        // it. Raw quantity, deliberately uncapped — it is what staff asked for.
+        $unmetDemand = $unmet['total_quantity'] ?? 0;
+        $unmetRequesters = $unmet['requester_count'] ?? 0;
+        $suggested = $isSuccessful
+            ? max(0, $forecastDemand + $safetyStock - $availableStock - $pendingDemand + $unmetDemand)
+            : null;
         $priority = $isSuccessful ? $this->priority($availableStock, $pendingDemand, $forecastDemand, $suggested) : 'Normal';
 
         return [
@@ -589,19 +682,26 @@ class StoredDemandForecastService
             'available_stock' => $availableStock,
             'pending_demand' => $pendingDemand,
             'pending_requests' => $pendingDemand,
+            'unmet_demand' => $unmetDemand,
+            'unmet_requesters' => $unmetRequesters,
             'safety_stock' => $safetyStock,
             'suggested_procurement' => $suggested,
             'needs_procurement' => $isSuccessful && $suggested > 0,
             'priority' => $priority,
             'priority_rank' => $this->priorityRank($priority),
             'confidence' => $item['confidence'],
+            // "pending demand" is kept in this string deliberately: tests assert on it.
             'calculation_basis' => $isSuccessful
-                ? 'max(0, forecast demand + safety stock - available stock - pending demand)'
+                ? 'max(0, forecast demand + safety stock - available stock - pending demand + unmet demand)'
                 : 'No procurement calculation: verified history is below the configured minimum.',
             'advisory_status' => ! $isSuccessful ? 'Insufficient history; no estimate' : ($suggested > 0 ? 'Review recommended' : 'No procurement gap identified'),
             'explanation' => ! $isSuccessful
                 ? 'More verified completed demand history is required before an ML forecast can be used.'
-                : ($suggested > 0 ? 'Forecast demand and safety stock exceed stock plus pending demand.' : 'Available stock and pending demand cover forecast demand and safety stock.'),
+                : ($suggested > 0
+                    ? ($unmetDemand > 0
+                        ? 'Forecast demand and safety stock exceed stock plus pending demand, and staff requested this item while it was unavailable.'
+                        : 'Forecast demand and safety stock exceed stock plus pending demand.')
+                    : 'Available stock and pending demand cover forecast demand and safety stock.'),
             'status' => $item['status'],
             'source_type' => 'live',
         ];

@@ -196,6 +196,108 @@ test('inspector onboarding rejects a username already taken', function () {
         ->and($inspector->fresh()->temporary_password)->not->toBeNull();
 });
 
+test('an item with zero available stock is recorded as unmet demand instead of refused', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 0,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $response = $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
+        'item_name' => 'Bond Paper',
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'quantity' => 3,
+        'notes' => 'Needed for the class set.',
+    ]);
+
+    $response->assertRedirect(route('endUser.my-requests'));
+    $response->assertSessionMissing('error');
+    // The confirmation must not promise an approval the custodian cannot give.
+    $response->assertSessionHas('success');
+
+    // Cannot be approved -- there is nothing to allocate -- so it does not enter
+    // the custodian's approval queue.
+    $this->assertDatabaseHas('requests', [
+        'item_id' => null,
+        'requested_item_name' => 'Bond Paper',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'ream',
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 3,
+        'status' => AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
+        'notes' => 'Needed for the class set.',
+    ]);
+});
+
+test('a partial shortfall is still refused rather than recorded as unmet demand', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 4,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    // Stock exists but not enough. That is a quantity the end user can simply
+    // lower, so it stays an error -- only a total absence becomes demand.
+    $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
+        'item_name' => 'Bond Paper',
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'quantity' => 10,
+    ])->assertSessionHas('error', 'Requested quantity exceeds available stock.');
+
+    $this->assertDatabaseMissing('requests', [
+        'requested_item_name' => 'Bond Paper',
+        'user_id' => $this->endUser->id,
+    ]);
+});
+
+test('a satisfied request still enters the custodian approval queue', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 4,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
+        'item_name' => 'Bond Paper',
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'quantity' => 2,
+    ])->assertSessionHas('success', 'Request submitted to property custodian.');
+
+    $this->assertDatabaseHas('requests', [
+        'requested_item_name' => 'Bond Paper',
+        'quantity' => 2,
+        'status' => 'waiting for approval',
+    ]);
+});
+
 test('end user cannot request more than available stock of the selected type', function () {
     $category = Category::create([
         'category_name' => 'Office Supplies',
@@ -307,7 +409,7 @@ test('assignment selector keeps same-name items with different categories and un
             && $items->firstWhere('item_id', $secondItem->item_id)['unit'] === 'ream');
 });
 
-test('end user request selector groups availability by item name category and unit', function () {
+test('request catalogue groups by category and keeps same-name items in different categories distinct', function () {
     $firstCategory = Category::create([
         'category_name' => 'Office Supplies',
         'requires_serial_number' => false,
@@ -316,7 +418,7 @@ test('end user request selector groups availability by item name category and un
         'category_name' => 'Learning Resources',
         'requires_serial_number' => false,
     ]);
-    $firstItem = Inventory::create([
+    Inventory::create([
         'category_id' => $firstCategory->category_id,
         'unit' => 'box',
         'user_id' => $this->propertyCustodian->id,
@@ -325,7 +427,7 @@ test('end user request selector groups availability by item name category and un
         'status' => 'available',
         'date_acquired' => '2026-08-10',
     ]);
-    $secondItem = Inventory::create([
+    Inventory::create([
         'category_id' => $secondCategory->category_id,
         'unit' => 'ream',
         'user_id' => $this->propertyCustodian->id,
@@ -335,14 +437,114 @@ test('end user request selector groups availability by item name category and un
         'date_acquired' => '2026-08-10',
     ]);
 
-    $this->actingAs($this->endUser)
-        ->get(route('endUser.requests'))
+    $payload = $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertViewHas('availableItems', fn ($items) => $items->count() === 2
-            && $items->firstWhere('category_id', $firstCategory->category_id)['quantity'] === 4
-            && $items->firstWhere('category_id', $secondCategory->category_id)['quantity'] === 7)
-        ->assertSee('Bond Paper · Office Supplies · 4 boxes available', false)
-        ->assertSee('Bond Paper · Learning Resources · 7 reams available', false);
+        ->json();
+
+    $categories = collect($payload['categories'])->keyBy('category_name');
+
+    // Same name, different category and unit: two distinct requestable things.
+    expect($categories)->toHaveKeys(['Office Supplies', 'Learning Resources'])
+        ->and($categories['Office Supplies']['items'][0])
+        ->toMatchArray(['item_name' => 'Bond Paper', 'unit' => 'box', 'available_quantity' => 4])
+        ->and($categories['Learning Resources']['items'][0])
+        ->toMatchArray(['item_name' => 'Bond Paper', 'unit' => 'ream', 'available_quantity' => 7])
+        ->and($categories['Office Supplies']['available_item_count'])->toBe(1);
+});
+
+test('request catalogue includes a category that has never been catalogued', function () {
+    // A category with zero inventory rows must still be selectable: it is
+    // exactly the case where an end user needs to ask for something the school
+    // has never stocked.
+    Category::create([
+        'category_name' => 'Sports Equipment',
+        'requires_serial_number' => false,
+    ]);
+
+    $withStock = Category::create([
+        'category_name' => 'Custodial Supplies',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $withStock->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 4,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $payload = $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.requests'))
+        ->assertOk()
+        ->json();
+
+    $names = collect($payload['categories'])->pluck('category_name');
+
+    expect($names)->toContain('Sports Equipment', 'Custodial Supplies');
+
+    $empty = collect($payload['categories'])->firstWhere('category_name', 'Sports Equipment');
+
+    // Listed, empty, and flagged so the modal knows to ask for a typed name
+    // rather than offering a picker with nothing in it.
+    expect($empty['items'])->toBe([])
+        ->and($empty['available_item_count'])->toBe(0);
+});
+
+test('a request naming an item in an uncatalogued category is recorded as unmet demand', function () {
+    $category = Category::create([
+        'category_name' => 'Music Equipment',
+        'requires_serial_number' => false,
+    ]);
+
+    $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
+        'item_name' => 'Basketball',
+        'category_id' => $category->category_id,
+        'unit' => 'units',
+        'quantity' => 2,
+        'notes' => 'For the intramurals.',
+    ])->assertSessionMissing('error');
+
+    $this->assertDatabaseHas('requests', [
+        'item_id' => null,
+        'requested_item_name' => 'Basketball',
+        'requested_category_id' => $category->category_id,
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 2,
+        'status' => AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
+    ]);
+});
+
+test('request catalogue lists out-of-stock item types so they stay requestable', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 0,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $payload = $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.requests'))
+        ->assertOk()
+        ->json();
+
+    $listed = collect($payload['categories'])->firstWhere('category_name', 'Office Supplies');
+
+    // Present but zero: the end user must be able to name the item they want,
+    // otherwise a category with no stock offers nothing to request at all.
+    expect($listed['items'])->toHaveCount(1)
+        ->and($listed['items'][0]['available_quantity'])->toBe(0)
+        ->and($listed['available_item_count'])->toBe(0);
 });
 
 test('custodian assigns exact matching stock records and records each allocation', function () {
@@ -1481,7 +1683,7 @@ test('end user acceptance creates an assignment movement linked to its transacti
         ->and($movement->notes)->toContain("request #{$assignment->id}");
 });
 
-test('end user cannot request assigned inventory as available stock', function () {
+test('assigned inventory is never counted as available stock', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -1497,6 +1699,11 @@ test('end user cannot request assigned inventory as available stock', function (
         'date_acquired' => '2026-08-10',
     ]);
 
+    // An assigned unit is held by someone, so it cannot satisfy a request. That
+    // leaves zero available, which is now recorded as unmet demand rather than
+    // refused -- the end user is stating a real need the system cannot fill.
+    // The invariant under test is that the assigned unit is NOT available, not
+    // that the request is rejected.
     $response = $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
         'item_name' => $inventory->item_name,
         'category_id' => $category->category_id,
@@ -1504,11 +1711,15 @@ test('end user cannot request assigned inventory as available stock', function (
         'quantity' => 1,
     ]);
 
-    $response->assertRedirect();
-    $response->assertSessionHas('error', 'Requested quantity exceeds available stock.');
-    $this->assertDatabaseMissing('requests', [
-        'requested_item_name' => $inventory->item_name,
+    $response->assertRedirect(route('endUser.my-requests'));
+    $response->assertSessionMissing('error');
+
+    $this->assertDatabaseHas('requests', [
+        'requested_item_name' => 'Assigned Laptop',
         'user_id' => $this->endUser->id,
+        'quantity' => 1,
+        // Not approvable: there is nothing to allocate.
+        'status' => AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
     ]);
 });
 

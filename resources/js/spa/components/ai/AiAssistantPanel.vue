@@ -372,7 +372,23 @@ function activeConversationKey() {
 // gestures over the panel never move the page behind it.
 watch(open, (visible) => {
   document.body.style.overflow = visible ? 'hidden' : '';
+
+  // The message log is behind `v-if="open"`, so closing the drawer destroys it and
+  // reopening mounts a fresh element at scrollTop 0 — which left a restored
+  // conversation showing its oldest message instead of the newest. Jump back to
+  // the bottom whenever the drawer becomes visible again.
+  if (visible && !showHistory.value) {
+    scrollDown();
+  }
 }, { immediate: true });
+
+// Same problem when returning from the history list: the log is re-created by
+// the v-else branch, so it also needs re-anchoring to the latest message.
+watch(showHistory, (historyVisible) => {
+  if (open.value && !historyVisible) {
+    scrollDown();
+  }
+});
 
 onUnmounted(() => {
   document.body.style.overflow = '';

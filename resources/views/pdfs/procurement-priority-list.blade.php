@@ -278,7 +278,11 @@
                             Insufficient verified history; no ML estimate available.
                         @else
                             Demand {{ $item['forecast_demand'] }} + buffer {{ $item['safety_stock'] }}
-                            − stock {{ $item['available_stock'] }} − pending {{ $item['pending_demand'] }};
+                            − stock {{ $item['available_stock'] }} − pending {{ $item['pending_demand'] }}
+                            @if (($item['unmet_demand'] ?? 0) > 0)
+                                + unmet {{ $item['unmet_demand'] }} (staff requested while unavailable)
+                            @endif
+                            ;
                             {{ $item['advisory_status'] ?? '—' }} ({{ $item['confidence'] ?? '—' }} confidence).
                         @endif
                     </td>

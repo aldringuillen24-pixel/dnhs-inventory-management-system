@@ -314,7 +314,7 @@
                 <th class="px-4 py-3.5 text-right">Unit Cost</th>
                 <th class="px-4 py-3.5 text-right">Total Cost</th>
                 <th class="px-4 py-3.5">Condition / Status</th>
-                <th class="px-4 py-3.5 text-right">Actions</th>
+                <th v-if="workspace !== 'all'" class="px-4 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-white/5">
@@ -369,7 +369,23 @@
                         </div>
                         <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
                           <button
-                            v-if="lifespanChip(row)"
+                            v-if="lifespanRemainingFraction(row) !== null"
+                            type="button"
+                            class="flex w-20 items-center rounded-full py-1 transition-opacity hover:opacity-75 focus-visible:outline-2 focus-visible:outline-emerald-500"
+                            :title="lifespanBarTitle(row)"
+                            :aria-label="`${lifespanBarTitle(row)}. Show lifespan details.`"
+                            @click="openRecordModal(row)"
+                          >
+                            <span class="h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-white/10">
+                              <span
+                                class="block h-full min-w-[3px] rounded-full"
+                                :class="lifespanBarFillClass(row)"
+                                :style="{ width: lifespanBarWidth(row) }"
+                              ></span>
+                            </span>
+                          </button>
+                          <button
+                            v-else-if="lifespanChip(row)"
                             type="button"
                             class="rounded-md px-1.5 py-0.5 font-medium transition-colors"
                             :class="lifespanChipClass(row)"
@@ -435,8 +451,8 @@
                     <StatusBadge :status="row.status" />
                   </td>
 
-                  <!-- Actions -->
-                  <td class="px-4 py-3.5 text-right">
+                  <!-- Actions: display-only under All Inventory -->
+                  <td v-if="workspace !== 'all'" class="px-4 py-3.5 text-right">
                     <div class="inline-flex items-center gap-1.5">
                       <!-- Details Toggle -->
                       <button
@@ -562,7 +578,7 @@
 
               <!-- Empty State -->
               <tr v-if="!filteredRows.length">
-                <td colspan="8" class="px-4 py-16 text-center text-sm text-gray-500 dark:text-gray-400">
+                <td :colspan="workspace === 'all' ? 7 : 8" class="px-4 py-16 text-center text-sm text-gray-500 dark:text-gray-400">
                   <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-gray-100 text-gray-400 dark:bg-white/5 dark:text-gray-500 mb-3">
                     <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
@@ -1990,6 +2006,88 @@ function lifespanEndClass(row) {
   return lifespanTone(row) === 'expired'
     ? 'text-rose-600 dark:text-rose-400'
     : '';
+}
+
+// Lifespan bar: fraction of life remaining, from the same two dates the chip
+// used. Null when either date is missing or invalid, and the template falls
+// back to the text chip rather than drawing a misleading bar.
+function lifespanSpan(row) {
+  const end = lifespanEndDate(row);
+  const startValue = row?.date_acquired;
+  if (!end || !startValue) {
+    return null;
+  }
+  const start = new Date(startValue);
+  if (Number.isNaN(start.getTime()) || end.getTime() <= start.getTime()) {
+    return null;
+  }
+  return { start, end };
+}
+
+function lifespanRemainingFraction(row) {
+  const span = lifespanSpan(row);
+  if (!span) {
+    return null;
+  }
+  const now = Date.now();
+  if (now >= span.end.getTime()) {
+    return 0;
+  }
+  if (now <= span.start.getTime()) {
+    return 1;
+  }
+  return (span.end.getTime() - now) / (span.end.getTime() - span.start.getTime());
+}
+
+function lifespanRemainingLabel(row) {
+  const span = lifespanSpan(row);
+  if (!span) {
+    return '';
+  }
+  const now = Date.now();
+  if (now >= span.end.getTime()) {
+    return 'Expired';
+  }
+  const months = Math.floor((span.end.getTime() - now) / (30.44 * 24 * 60 * 60 * 1000));
+  if (months >= 24) {
+    return `${(months / 12).toFixed(1)} yrs remaining`;
+  }
+  if (months >= 1) {
+    return `${months} mo${months === 1 ? '' : 's'} remaining`;
+  }
+  const days = Math.max(1, Math.floor((span.end.getTime() - now) / (24 * 60 * 60 * 1000)));
+  return `${days} day${days === 1 ? '' : 's'} remaining`;
+}
+
+function lifespanBarTitle(row) {
+  const end = lifespanEndDate(row);
+  const date = end ? end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const remaining = lifespanRemainingLabel(row);
+  if (remaining === 'Expired') {
+    return date ? `Expired · Expected expiry was ${date}` : 'Expired';
+  }
+  return date ? `${remaining} · Expected expiry ${date}` : remaining;
+}
+
+function lifespanBarWidth(row) {
+  const fraction = lifespanRemainingFraction(row);
+  if (fraction === null) {
+    return '0%';
+  }
+  return `${(Math.max(0, Math.min(1, fraction)) * 100).toFixed(1)}%`;
+}
+
+function lifespanBarFillClass(row) {
+  switch (lifespanTone(row)) {
+    case 'expired':
+      return 'bg-rose-500';
+    case 'approaching':
+      return 'bg-amber-500';
+    case 'healthy':
+      return 'bg-emerald-500';
+    default:
+      return 'bg-gray-400';
+  }
 }
 
 function formatMovementDate(movement) {

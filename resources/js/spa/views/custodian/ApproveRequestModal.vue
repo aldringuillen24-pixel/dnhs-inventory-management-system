@@ -151,7 +151,10 @@ const requesterName = computed(() => props.request?.user?.first_name
     ? `${props.request.user.first_name} ${props.request.user.last_name ?? ''}`.trim()
     : (props.request?.user?.username ?? 'Unknown User'));
 const itemName = computed(() => props.request?.requested_item_name ?? props.request?.item?.item_name ?? 'Unknown item');
-const categoryName = computed(() => props.request?.requestedCategory?.category_name ?? props.request?.item?.category?.category_name ?? 'General');
+// Relation keys are snake_cased by Laravel on serialization, so this is
+// `requested_category`, never `requestedCategory`. Reading the camelCase name
+// made every item-type request fall back to 'General'.
+const categoryName = computed(() => props.request?.requested_category?.category_name ?? props.request?.item?.category?.category_name ?? 'General');
 const unitName = computed(() => props.request?.requested_unit ?? props.request?.item?.unit ?? '');
 const totalStock = computed(() => props.request?.total_available_stock ?? props.request?.item?.quantity ?? 0);
 const canApprove = computed(() => {

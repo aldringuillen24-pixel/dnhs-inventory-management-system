@@ -56,6 +56,13 @@ class AiIntentParserService
     private const TOPIC_ACTIONS = ['continue_topic', 'new_topic', 'unclear'];
 
     /**
+     * Why a question could not be resolved.
+     *
+     * Used by the ambiguity gate. `null` means the question stands on its own.
+     */
+    private const AMBIGUITIES = ['no_entity', 'ambiguous_candidate', 'no_topic'];
+
+    /**
      * How many recent exchanges are shown to the classifier. Kept small so the
      * classification prompt stays small and predictable.
      */
@@ -123,6 +130,430 @@ class AiIntentParserService
     }
 
     /**
+ * Resolve references in a question against the assembled conversation context.
+ *
+ * This runs before the intent parser, and the parser receives the resolved
+ * question rather than the raw one. It is a separate call with a separate
+ * schema on purpose: the intent contract is validated with a strict both-ways
+ * key diff, so extending it would invalidate every existing fixture.
+ *
+ * Returns null whenever it cannot produce a resolution that is grounded in the
+ * user's own words. A null is a no-op, and the caller passes the raw question
+ * through exactly as before, so a provider failure can never remove an answer
+ * that used to work.
+ *
+ * @param  array<string, mixed>  $context  Assembled by the context selector.
+ * @return array<string, mixed>|null
+ */
+public function resolveReferences(string $question, array $context): ?array
+{
+    if (! $this->needsReferenceResolution($question, $context)) {
+        return null;
+    }
+
+    if (! is_string(config('services.gemini.api_key')) || trim((string) config('services.gemini.api_key')) === '') {
+        return null;
+    }
+
+    try {
+        $content = $this->geminiApi->generate(
+            $this->referenceResolutionPrompt(),
+            json_encode([
+                'question' => $question,
+                'context' => $context,
+            ], JSON_UNESCAPED_SLASHES) ?: '',
+            [
+                'responseFormat' => [
+                    'text' => [
+                        'mimeType' => 'APPLICATION_JSON',
+                        'schema' => $this->referenceResponseSchema(),
+                    ],
+                ],
+                'temperature' => 0,
+                'maxOutputTokens' => 256,
+            ]
+        );
+
+        if (! is_string($content)) {
+            return null;
+        }
+
+        $decoded = json_decode($content, true);
+        if (! is_array($decoded)) {
+            return null;
+        }
+
+        $validated = $this->validateReferenceResolution($decoded, $question, $context);
+        if ($validated === null) {
+            Log::warning('Reference resolution was rejected.', [
+                'reason' => 'not grounded in the question or the context',
+                'resolved_question' => $decoded['resolved_question'] ?? null,
+                'question' => $question,
+                'names' => $this->contextNames($context),
+                'model' => config('services.gemini.model'),
+            ]);
+        }
+
+        return $validated;
+    } catch (\Throwable $exception) {
+        Log::warning('Reference resolution failed: '.$exception->getMessage());
+
+        return null;
+    }
+}
+
+/**
+ * Whether a question is worth a resolution call.
+ *
+ * A question that names a concrete subject and points at nothing has nothing to
+ * resolve, and asking the provider anyway would cost a round trip on the
+ * majority of turns for no gain. This is a cheap deterministic gate, not a
+ * second classifier: it only decides whether to call, never what the answer is.
+ *
+ * @param  array<string, mixed>  $context
+ */
+public function needsReferenceResolution(string $question, array $context): bool
+{
+    $normalized = mb_strtolower(trim($question));
+    if ($normalized === '' || mb_strlen($normalized) > 255) {
+        return false;
+    }
+
+    // Two shapes need resolving. A question that is nothing but a follow-up stem
+    // has no subject of its own, so it can only mean whatever came before. And a
+    // question carrying a referring word is pointing at something, not naming
+    // it.
+    $isBareStem = preg_match('/^(?:why|how many|where|who|explain|again)\b[\s?.!]*$/u', $normalized) === 1;
+
+    $pointsAtSomethingElse = preg_match(
+        '/\b(?:it|its|this|that|those|these|they|them|their|the same|the other|the previous|the first|the second|the third|again|also)\b/u',
+        $normalized
+    ) === 1;
+
+    if (! $isBareStem && ! $pointsAtSomethingElse) {
+        return false;
+    }
+
+    // A referring word only matters if there is something to resolve it against.
+    // Without an anchor the rewrite has nothing to draw on, so asking would
+    // spend a call and risk a rewrite the grounding check can only reject.
+    return $this->hasResolvableAnchor($context);
+}
+
+/**
+ * @param  array<string, mixed>  $context
+ */
+private function hasResolvableAnchor(array $context): bool
+{
+    foreach (['entity_refs', 'candidate_ids'] as $key) {
+        $value = $context[$key] ?? null;
+        if (is_array($value) && $value !== []) {
+            return true;
+        }
+    }
+
+    foreach (['recent_turns', 'relevant_turns'] as $key) {
+        if (($context[$key] ?? null) !== [] && ($context[$key] ?? null) !== null) {
+            return true;
+        }
+    }
+
+    if (is_string($context['summary'] ?? null) && trim($context['summary']) !== '') {
+        return true;
+    }
+
+    // A topic that names an item is itself an anchor: "why?" against it has
+    // something to resolve to even when no ids were recorded.
+    $topic = $context['topic'] ?? null;
+    if (is_array($topic) && is_string($topic['item_name'] ?? null) && trim($topic['item_name']) !== '') {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Validate a resolution, then hold it to the grounding rule.
+ *
+ * Grounding is checked against the raw question and the structured context, not
+ * against the model's own rewrite. Without this the parser's selector grounding
+ * would run against a sentence the model produced, and an invented name would
+ * pass simply by appearing in its own output.
+ *
+ * @param  array<string, mixed>  $decoded
+ * @param  array<string, mixed>  $context
+ * @return array<string, mixed>|null
+ */
+private function validateReferenceResolution(array $decoded, string $question, array $context): ?array
+{
+    $expected = [
+        'resolved_question',
+        'is_follow_up',
+        'ambiguity',
+        'referenced_item_id',
+        'topic_action',
+    ];
+
+    if (array_diff(array_keys($decoded), $expected) !== []
+        || array_diff($expected, array_keys($decoded)) !== []) {
+        return null;
+    }
+
+    $resolvedQuestion = $decoded['resolved_question'];
+    $isFollowUp = $decoded['is_follow_up'];
+    $ambiguity = $decoded['ambiguity'];
+    $referencedItemId = $decoded['referenced_item_id'];
+    $topicAction = $decoded['topic_action'];
+
+    if (! is_string($resolvedQuestion)
+        || trim($resolvedQuestion) === ''
+        || mb_strlen(trim($resolvedQuestion)) > 1000
+        || ! is_bool($isFollowUp)
+        || ! (is_null($ambiguity) || in_array($ambiguity, self::AMBIGUITIES, true))
+        || ! (is_null($referencedItemId) || (is_int($referencedItemId) && $referencedItemId > 0))
+        || ! in_array($topicAction, self::TOPIC_ACTIONS, true)) {
+        return null;
+    }
+
+    if (! $this->resolutionIsGrounded($resolvedQuestion, $question, $context)) {
+        return null;
+    }
+
+    // An ordinal is only meaningful against a set the user was actually shown.
+    $candidates = [];
+    if ($ambiguity === 'ambiguous_candidate') {
+        $candidates = $this->cleanIds($context['candidate_ids'] ?? []);
+        if ($candidates === []) {
+            return null;
+        }
+    }
+
+    // A referenced item the user may no longer see resolves to nothing.
+    if (is_int($referencedItemId) && ! in_array($referencedItemId, $this->groundedIds($context), true)) {
+        $referencedItemId = null;
+    }
+
+    return [
+        'resolved_question' => trim($resolvedQuestion),
+        'is_follow_up' => $isFollowUp,
+        'ambiguity' => $ambiguity,
+        'candidates' => $candidates,
+        'referenced_item_id' => $referencedItemId,
+        'topic_action' => $topicAction,
+    ];
+}
+
+/**
+ * The grounding rule, applied to the rewrite.
+ *
+ * Every inventory id in the resolved question must appear in the source question
+ * or in the ids the context offers. Every item name must appear in the source
+ * question or in the names the context offers. Anything else is rejected whole.
+ *
+ * @param  array<string, mixed>  $context
+ */
+private function resolutionIsGrounded(string $resolvedQuestion, string $question, array $context): bool
+{
+    $allowedIds = $this->groundedIds($context);
+
+    foreach ($this->numbersIn($resolvedQuestion) as $number) {
+        if ($number > 0 && in_array($number, $this->numbersIn($question), true)) {
+            continue;
+        }
+        if (! in_array($number, $allowedIds, true)) {
+            return false;
+        }
+    }
+
+    $allowedNames = $this->contextNames($context);
+
+    // A name only has to be justified when the rewrite introduced one. Names
+    // already present in the question are the user's own words.
+    foreach ($this->namesIn($resolvedQuestion) as $name) {
+        if ($this->nameAppearsInQuestion($name, $question)) {
+            continue;
+        }
+        if (! $this->nameAppearsIn($name, $allowedNames)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * @param  array<string, mixed>  $context
+ * @return array<int, int>
+ */
+private function groundedIds(array $context): array
+{
+    $ids = [];
+    foreach (['entity_refs', 'candidate_ids'] as $key) {
+        $ids = [...$ids, ...$this->cleanIds($context[$key] ?? [])];
+    }
+
+    foreach (['relevant_turns', 'recent_turns'] as $key) {
+        foreach ((array) ($context[$key] ?? []) as $turn) {
+            if (! is_array($turn)) {
+                continue;
+            }
+            $ids = [...$ids, ...$this->cleanIds($turn['entity_refs'] ?? []), ...$this->cleanIds($turn['candidate_ids'] ?? [])];
+        }
+    }
+
+    return $this->cleanIds($ids);
+}
+
+/**
+ * Item names the context is willing to justify, gathered from its structured
+ * data rather than from reply prose.
+ *
+ * @param  array<string, mixed>  $context
+ * @return array<int, string>
+ */
+private function contextNames(array $context): array
+{
+    $names = [];
+
+    foreach (['entity_names', 'candidate_names'] as $key) {
+        foreach ((array) ($context[$key] ?? []) as $name) {
+            if (is_string($name) && trim($name) !== '') {
+                $names[] = trim($name);
+            }
+        }
+    }
+
+    foreach (['topic'] as $key) {
+        $topic = $context[$key] ?? null;
+        if (is_array($topic) && is_string($topic['item_name'] ?? null)) {
+            $names[] = trim($topic['item_name']);
+        }
+    }
+
+    return array_values(array_unique(array_filter($names)));
+}
+
+/**
+ * @param  array<int, string>  $names
+ */
+private function nameAppearsIn(string $name, array $names): bool
+{
+    foreach ($names as $candidate) {
+        if (mb_strtolower(trim($candidate)) === mb_strtolower(trim($name))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+private function nameAppearsInQuestion(string $name, string $question): bool
+{
+    return $this->selectorAppearsInQuestion($name, $question);
+}
+
+/**
+ * @return array<int, int>
+ */
+private function numbersIn(string $text): array
+{
+    preg_match_all('/(?<!\d)(\d+)(?!\d)/u', $text, $matches);
+
+    return array_values(array_unique(array_map('intval', $matches[1] ?? [])));
+}
+
+/**
+ * @return array<int, string>
+ */
+private function namesIn(string $text): array
+{
+    // Capitalised runs are the only reliable signal available without a
+    // dictionary. Lowercase function words are excluded so ordinary phrasing is
+    // never mistaken for an entity the model introduced.
+    preg_match_all('/\b[A-Z][A-Za-z0-9\'-]*(?:\s+[A-Z][A-Za-z0-9\'-]*)*\b/u', $text, $matches);
+
+    $noise = [
+        'I', 'A', 'An', 'The', 'Is', 'Are', 'Was', 'Were', 'Do', 'Does', 'Did',
+        'What', 'Which', 'Who', 'Whose', 'Where', 'When', 'Why', 'How', 'And',
+        'Or', 'It', 'This', 'That', 'These', 'Those', 'They', 'There', 'Then',
+        'Of', 'In', 'On', 'At', 'To', 'For', 'From', 'By', 'With', 'Has', 'Have',
+        'Had', 'Can', 'Could', 'Should', 'Would', 'Will', 'Please', 'List',
+        'Show', 'Tell', 'Give', 'Check', 'Explain', 'Item', 'Items', 'Number',
+        'Available', 'Left', 'Stock', 'Location', 'Assigned',
+    ];
+
+    return array_values(array_unique(array_filter(
+        array_map('trim', $matches[0] ?? []),
+        fn (string $name): bool => $name !== '' && ! in_array($name, $noise, true) && mb_strlen($name) > 1
+    )));
+}
+
+/**
+ * @return array<int, int>
+ */
+private function cleanIds(mixed $ids): array
+{
+    if (! is_array($ids)) {
+        return [];
+    }
+
+    $clean = [];
+    foreach ($ids as $id) {
+        if (is_int($id) && $id > 0) {
+            $clean[] = $id;
+        } elseif (is_string($id) && ctype_digit($id) && (int) $id > 0) {
+            $clean[] = (int) $id;
+        }
+    }
+
+    return array_values(array_unique($clean));
+}
+
+private function referenceResolutionPrompt(): string
+{
+    return 'Rewrite one user question so it stands on its own, and report whether it can be answered. '
+        .'Return one JSON object with exactly these keys: resolved_question, is_follow_up, ambiguity, referenced_item_id, topic_action. '
+        .'resolved_question must replace pronouns such as "it", "that one", "those", "the second one" and "the other projector" with the item they refer to, using only what the context supplies. Never invent an item, an id, a name, or a cause. If the question cannot be resolved, return it unchanged. '
+        .'is_follow_up is true only when the question depends on an earlier turn. '
+        .'ambiguity must be null when the question can be answered, no_entity when it needs an item but none can be identified, ambiguous_candidate when more than one supplied candidate could be meant, or no_topic when it asks something but no earlier topic applies. '
+        .'referenced_item_id must be the exact inventory id the question resolves to, or null when none. '
+        .'topic_action must be continue_topic, new_topic, or unclear. '
+        .'Never return SQL, permissions, database instructions, answers, or additional keys.';
+}
+
+/**
+ * The reference resolution schema, deliberately separate from the intent schema.
+ *
+ * They are validated by different rules and consumed by different stages, and
+ * the intent schema's both-ways key diff must stay exactly as it is.
+ */
+private function referenceResponseSchema(): array
+{
+    return [
+        'type' => 'OBJECT',
+        'properties' => [
+            'resolved_question' => ['type' => 'STRING', 'maxLength' => 1000],
+            'is_follow_up' => ['type' => 'BOOLEAN'],
+            'ambiguity' => [
+                'type' => 'STRING',
+                'nullable' => true,
+                'enum' => self::AMBIGUITIES,
+            ],
+            'referenced_item_id' => ['type' => 'INTEGER', 'nullable' => true, 'minimum' => 1],
+            'topic_action' => ['type' => 'STRING', 'enum' => self::TOPIC_ACTIONS],
+        ],
+        'required' => [
+            'resolved_question',
+            'is_follow_up',
+            'ambiguity',
+            'referenced_item_id',
+            'topic_action',
+        ],
+        'additionalProperties' => false,
+    ];
+}
+
+/**
  * Route a question to a capability, plus an execution plan.
  *
  * The plan is additive: every pre-existing key is exactly what it was, and the

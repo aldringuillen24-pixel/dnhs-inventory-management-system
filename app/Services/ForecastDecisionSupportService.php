@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Services\Concerns\GroundsForecastReply;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
@@ -19,35 +20,37 @@ use Illuminate\Support\Facades\Log;
  */
 class ForecastDecisionSupportService
 {
+    // The grounding rules live in a shared trait because the Recommendations tab
+    // validates provider replies against the same forecast facts and must not
+    // drift into a weaker copy of the safety gate.
+    use GroundsForecastReply;
+
     public const PROMPT_PURCHASE_FIRST = 'purchase_first';
     public const PROMPT_DEFERRABLE = 'deferrable';
     public const PROMPT_VERIFY_FIRST = 'verify_first';
     public const PROMPT_NEXT_STEPS = 'next_steps';
+    public const PROMPT_WHY_THESE = 'why_these';
 
     public const PROMPT_TYPES = [
         self::PROMPT_PURCHASE_FIRST,
         self::PROMPT_DEFERRABLE,
         self::PROMPT_VERIFY_FIRST,
         self::PROMPT_NEXT_STEPS,
+        self::PROMPT_WHY_THESE,
     ];
 
     /** Maximum rows returned to the caller or listed on the exported PDF. */
     public const MAX_SELECTED_ITEMS = 10;
 
-    /** Confidence ordering used when ranking rows that need verification. */
-    private const CONFIDENCE_SCORE = [
-        'Low' => 0,
-        'Medium' => 1,
-        'High' => 2,
-    ];
-
     /**
-     * A whole, standalone quantity. `(?!\d)` matters: without it the regex can
-     * backtrack to a shorter prefix, so "300ml" in an item name would be read as
-     * the quantity 30. A digit run glued to a letter is part of a product name,
-     * not a claim about stock.
+     * Maximum rows a single question may ask for.
+     *
+     * The default answer stays at MAX_SELECTED_ITEMS: the reply layouts are
+     * written around ten rows. A custodian who names a larger number gets up
+     * to this many server-ranked rows instead, with the cap disclosed rather
+     * than applied silently.
      */
-    private const QUANTITY_PATTERN = '/(?<![\pL\d])\d+(?:[,.]\d+)*(?!\d)(?![\pL])/u';
+    public const MAX_REQUESTED_ITEMS = 25;
 
     public function __construct(
         protected AiCapabilityPolicy $policy,
@@ -63,6 +66,7 @@ class ForecastDecisionSupportService
             self::PROMPT_DEFERRABLE => 'What can wait?',
             self::PROMPT_VERIFY_FIRST => 'Which rows need verification first?',
             self::PROMPT_NEXT_STEPS => 'What step should I do next?',
+            self::PROMPT_WHY_THESE => 'Why are these items on the list?',
             default => 'What should we purchase first?',
         };
     }
@@ -99,7 +103,8 @@ class ForecastDecisionSupportService
         }
 
         $rows = collect($forecast['rows'] ?? []);
-        $selection = $this->resolveSelection($rows, $promptType, $context);
+        [$maxItems, $clampedFrom] = $this->requestedMaxItems($context['max_items'] ?? null);
+        $selection = $this->resolveSelection($rows, $promptType, $context, $maxItems);
 
         $selected = $selection['rows'];
         $facts = $this->buildFacts($forecast, $selected, $promptType, $selection['scope']);
@@ -120,7 +125,8 @@ class ForecastDecisionSupportService
 
             if (! is_string($reply) || trim($reply) === '') {
                 $providerStatus = 'request_failed';
-            } elseif ($this->isGroundedReply($reply, $facts)) {
+            } elseif ($this->isGroundedReply($reply, $facts)
+                && $this->listsEveryItem($reply, $facts, $promptType)) {
                 $answer = trim($reply);
                 $source = 'provider';
                 $providerStatus = 'ok';
@@ -128,11 +134,13 @@ class ForecastDecisionSupportService
                 // A reply arrived but failed grounding. Keep the local summary,
                 // but record which check failed so "why did it fall back?" is
                 // answerable from the logs instead of guesswork.
+                $failedCheck = $this->groundingFailure($reply, $facts)
+                    ?? ($this->listsEveryItem($reply, $facts, $promptType) ? null : 'incomplete_list');
                 $providerStatus = 'reply_rejected';
                 Log::warning('Forecast decision support rejected a provider reply.', [
                     'prompt_type' => $promptType,
                     'user_id' => $user->id,
-                    'failed_check' => $this->groundingFailure($reply, $facts),
+                    'failed_check' => $failedCheck,
                     'forbidden_claim' => $this->forbiddenClaim($reply),
                     'unapproved_numbers' => $this->unapprovedNumbers(trim($reply), $facts),
                     'reply' => mb_substr(trim($reply), 0, 800),
@@ -140,7 +148,7 @@ class ForecastDecisionSupportService
             }
         }
 
-        return [
+        $result = [
             'status' => 'success',
             'source' => $source,
             'provider_status' => $providerStatus,
@@ -154,6 +162,225 @@ class ForecastDecisionSupportService
             'summary' => $forecast['summary'] ?? [],
             'scope' => $selection['scope'],
         ];
+
+        // Set only when the requested count exceeded the cap, so the chat can
+        // disclose the cap instead of silently returning fewer rows. Absent
+        // otherwise, keeping the response shape unchanged for existing callers.
+        if ($clampedFrom !== null) {
+            $result['notice'] = "Showing the top {$maxItems} of the {$clampedFrom} requested. "
+                .'The chat lists at most '.self::MAX_REQUESTED_ITEMS.' items per answer — '
+                .'open Demand Forecast for the full ranking and PDF export.';
+        }
+
+        return $result;
+    }
+
+    /**
+     * The row cap for one answer: the requested count when sane, clamped to
+     * the hard ceiling otherwise.
+     *
+     * @return array{0:int,1:?int} The applied cap and the requested count when
+     *                             it was clamped, null when nothing was cut.
+     */
+    private function requestedMaxItems(mixed $value): array
+    {
+        if (! is_int($value) || $value < 1) {
+            return [self::MAX_SELECTED_ITEMS, null];
+        }
+
+        if ($value > self::MAX_REQUESTED_ITEMS) {
+            return [self::MAX_REQUESTED_ITEMS, $value];
+        }
+
+        return [$value, null];
+    }
+
+    /**
+     * Parses a free-text procurement question the pattern matcher could not
+     * classify, without answering it.
+     *
+     * This is the fallback behind the frontend's pattern list: patterns stay
+     * free and instant, and only an unrecognised phrasing spends one small
+     * provider call. The provider returns a strict form only — never prose,
+     * never data — and every field is validated against the question and the
+     * prior answer before anything acts on it. An unusable parse returns null
+     * so the caller falls back to its guidance message.
+     *
+     * @param  array<int>  $priorIds Inventory ids from the previous answer.
+     * @param  array<string>  $priorNames Item names from the previous answer.
+     * @return array{prompt_type:string,item_name:?string,inventory_id:?int,count:?int}|null
+     */
+    public function parseQuestion(User $user, string $question, array $priorIds = [], array $priorNames = []): ?array
+    {
+        if (! $this->policy->allows($user, AiCapabilityPolicy::VIEW_PROCUREMENT_PRIORITIES)) {
+            return null;
+        }
+
+        if (! is_string(config('services.gemini.api_key')) || trim((string) config('services.gemini.api_key')) === '') {
+            return null;
+        }
+
+        try {
+            $content = $this->geminiApi->generate(
+                $this->parseSystemPrompt(),
+                json_encode([
+                    'question' => mb_substr(trim($question), 0, 500),
+                    'prior_items' => array_values(array_filter(array_map(
+                        fn (mixed $name): ?string => is_string($name) && trim($name) !== '' ? mb_substr(trim($name), 0, 255) : null,
+                        $priorNames,
+                    ))),
+                ], JSON_UNESCAPED_SLASHES) ?: '',
+                [
+                    'responseFormat' => [
+                        'text' => [
+                            'mimeType' => 'APPLICATION_JSON',
+                            'schema' => $this->parseResponseSchema(),
+                        ],
+                    ],
+                    'temperature' => 0,
+                    'maxOutputTokens' => 256,
+                ]
+            );
+
+            if (! is_string($content)) {
+                return null;
+            }
+
+            $decoded = json_decode($content, true);
+
+            return is_array($decoded)
+                ? $this->validateParse($decoded, $question, $priorIds, $priorNames)
+                : null;
+        } catch (\Throwable $exception) {
+            Log::warning('Forecast question parsing failed: '.$exception->getMessage());
+
+            return null;
+        }
+    }
+
+    private function parseSystemPrompt(): string
+    {
+        return 'Classify one procurement question about an inventory demand forecast. Do not answer it, access data, or propose actions. '
+            .'Return one JSON object with exactly these keys: prompt_type, item_name, inventory_id, count. '
+            .'prompt_type must be purchase_first, deferrable, verify_first, next_steps, or why_these. '
+            .'purchase_first ranks what to buy first; deferrable lists what can wait; verify_first lists rows needing verification; '
+            .'next_steps gives the ordered next actions; why_these explains why listed items were selected. '
+            .'item_name must be the exact product name from the question, or null when none is named. '
+            .'inventory_id must be the integer inventory id from the question, or null when none is given. '
+            .'count must be the number of items asked for (11 in "give me 11 items"), or null when none is asked for. '
+            .'Never return SQL, permissions, database instructions, answers, or additional keys.';
+    }
+
+    private function parseResponseSchema(): array
+    {
+        return [
+            'type' => 'OBJECT',
+            'properties' => [
+                'prompt_type' => ['type' => 'STRING', 'enum' => self::PROMPT_TYPES],
+                'item_name' => ['type' => 'STRING', 'nullable' => true, 'maxLength' => 255],
+                'inventory_id' => ['type' => 'INTEGER', 'nullable' => true, 'minimum' => 1],
+                'count' => ['type' => 'INTEGER', 'nullable' => true, 'minimum' => 1],
+            ],
+            'required' => ['prompt_type', 'item_name', 'inventory_id', 'count'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * Validates a parsed question, then holds it to the grounding rule.
+     *
+     * A name or id the provider invents is rejected whole: names must appear
+     * in the question or name an item from the prior answer, and ids must
+     * appear in the question or belong to the prior answer. Without this the
+     * parser could talk the chat into answering about an item nobody named.
+     *
+     * @param  array<string, mixed>  $decoded
+     * @param  array<int>  $priorIds
+     * @param  array<string>  $priorNames
+     * @return array{prompt_type:string,item_name:?string,inventory_id:?int,count:?int}|null
+     */
+    private function validateParse(array $decoded, string $question, array $priorIds, array $priorNames = []): ?array
+    {
+        $expected = ['prompt_type', 'item_name', 'inventory_id', 'count'];
+
+        if (array_diff(array_keys($decoded), $expected) !== []
+            || array_diff($expected, array_keys($decoded)) !== []) {
+            return null;
+        }
+
+        $promptType = $decoded['prompt_type'];
+        $itemName = $decoded['item_name'];
+        $inventoryId = $decoded['inventory_id'];
+        $count = $decoded['count'];
+
+        if (! is_string($promptType) || ! in_array($promptType, self::PROMPT_TYPES, true)
+            || ! (is_null($itemName) || (is_string($itemName) && trim($itemName) !== '' && mb_strlen(trim($itemName)) <= 255))
+            || ! (is_null($inventoryId) || (is_int($inventoryId) && $inventoryId > 0))
+            || ! (is_null($count) || (is_int($count) && $count >= 1 && $count <= 1000))) {
+            return null;
+        }
+
+        $cleanIds = [];
+        foreach ((array) $priorIds as $id) {
+            if (is_int($id) && $id > 0) {
+                $cleanIds[] = $id;
+            } elseif (is_string($id) && ctype_digit($id) && (int) $id > 0) {
+                $cleanIds[] = (int) $id;
+            }
+        }
+        $cleanIds = array_values(array_unique($cleanIds));
+
+        if (is_string($itemName) && ! $this->parseNameIsGrounded($itemName, $question, $priorNames)) {
+            return null;
+        }
+
+        if (is_int($inventoryId)
+            && preg_match('/(?<!\d)'.preg_quote((string) $inventoryId, '/').'(?!\d)/u', $question) !== 1
+            && ! in_array($inventoryId, $cleanIds, true)) {
+            return null;
+        }
+
+        return [
+            'prompt_type' => $promptType,
+            'item_name' => is_string($itemName) ? trim($itemName) : null,
+            'inventory_id' => $inventoryId,
+            'count' => $count,
+        ];
+    }
+
+    /**
+     * Whether a parsed name comes from the user's own words or the list they
+     * were just shown.
+     *
+     * The name must appear in the question itself, or name an item from the
+     * prior answer — so "the toner" may resolve to the listed Toner Cartridge,
+     * but a name from neither is rejected. Names from the prior answer are
+     * still resolved by the caller against its own list, never trusted from
+     * the parse alone.
+     *
+     * @param  array<string>  $priorNames
+     */
+    private function parseNameIsGrounded(string $itemName, string $question, array $priorNames = []): bool
+    {
+        if (mb_stripos($question, $itemName) !== false) {
+            return true;
+        }
+
+        $needle = mb_strtolower(trim($itemName));
+
+        foreach ((array) $priorNames as $prior) {
+            if (! is_string($prior) || trim($prior) === '') {
+                continue;
+            }
+
+            $candidate = mb_strtolower(trim($prior));
+
+            if ($candidate === $needle || str_contains($candidate, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -168,7 +395,7 @@ class ForecastDecisionSupportService
      * @param  array{inventory_ids?:array<int>,prompt_type?:string}  $context
      * @return array{rows: \Illuminate\Support\Collection, scope: string}
      */
-    private function resolveSelection(Collection $rows, string $promptType, array $context): array
+    private function resolveSelection(Collection $rows, string $promptType, array $context, int $maxItems = self::MAX_SELECTED_ITEMS): array
     {
         $priorIds = array_values(array_filter(array_map(
             'intval',
@@ -176,7 +403,7 @@ class ForecastDecisionSupportService
         ), fn (int $id): bool => $id > 0));
 
         if ($priorIds === []) {
-            return ['rows' => $this->selectRows($rows, $promptType), 'scope' => 'full'];
+            return ['rows' => $this->selectRows($rows, $promptType, $maxItems), 'scope' => 'full'];
         }
 
         $known = $rows->whereIn('inventory_id', $priorIds)->values();
@@ -184,7 +411,7 @@ class ForecastDecisionSupportService
         if ($known->isEmpty()) {
             // Every prior id is gone (items deleted, model retrained). Fall back
             // to the full ranking rather than answering about nothing.
-            return ['rows' => $this->selectRows($rows, $promptType), 'scope' => 'full'];
+            return ['rows' => $this->selectRows($rows, $promptType, $maxItems), 'scope' => 'full'];
         }
 
         // Preserve the order the previous answer established, so "the second
@@ -192,7 +419,7 @@ class ForecastDecisionSupportService
         $ordered = collect($priorIds)
             ->map(fn (int $id) => $known->firstWhere('inventory_id', $id))
             ->filter()
-            ->take(self::MAX_SELECTED_ITEMS)
+            ->take($maxItems)
             ->values();
 
         // A follow-up asking a *different* kind of question re-filters within the
@@ -221,7 +448,8 @@ class ForecastDecisionSupportService
                     || in_array($row['confidence'] ?? null, ['Low', 'Medium'], true))
                 ->values(),
             // purchase_first keeps the prior order: every one of these items
-            // already has a gap, which is why they were on the list.
+            // already has a gap, which is why they were on the list. why_these
+            // explains that same list, so it keeps it untouched as well.
             default => $rows,
         };
     }
@@ -230,8 +458,15 @@ class ForecastDecisionSupportService
      * Ranks the forecast rows for a question. Ordering is deterministic and
      * derived only from fields the ML forecast already calculated.
      */
-    public function selectRows(Collection $rows, string $promptType): Collection
+    public function selectRows(Collection $rows, string $promptType, int $maxItems = self::MAX_SELECTED_ITEMS): Collection
     {
+        // A named count ("give me 5 items") narrows the same ranking rather
+        // than redefining it. Out-of-range values fall back to the default so
+        // a bad count can never empty or explode an answer.
+        $take = $maxItems >= 1 && $maxItems <= self::MAX_REQUESTED_ITEMS
+            ? $maxItems
+            : self::MAX_SELECTED_ITEMS;
+
         return match ($promptType) {
             // The actionable items: everything with a gap, most urgent first.
             // Identical to purchase_first on purpose — the next-steps answer
@@ -241,36 +476,37 @@ class ForecastDecisionSupportService
                 ->sortByDesc(fn (array $row): int => (int) ($row['priority_rank'] ?? 0) * 1000000
                     + (int) ($row['suggested_procurement'] ?? 0))
                 ->values()
-                ->take(self::MAX_SELECTED_ITEMS),
+                ->take($take),
             self::PROMPT_DEFERRABLE => $rows
                 ->filter(fn (array $row): bool => ($row['status'] ?? null) === 'success'
                     && ($row['needs_procurement'] ?? false) === false
                     && is_int($row['suggested_procurement'] ?? null))
                 ->sortByDesc(fn (array $row): int => (int) ($row['available_stock'] ?? 0))
                 ->values()
-                ->take(self::MAX_SELECTED_ITEMS),
+                ->take($take),
             self::PROMPT_VERIFY_FIRST => $rows
                 ->filter(fn (array $row): bool => ($row['status'] ?? null) !== 'success'
                     || in_array($row['confidence'] ?? null, ['Low', 'Medium'], true))
                 ->sortBy(fn (array $row): int => $this->confidenceScore($row) * 1000 + (int) ($row['priority_rank'] ?? 0))
                 ->values()
-                ->take(self::MAX_SELECTED_ITEMS),
+                ->take($take),
+            // The explanation prompt reasons about the same ranking the
+            // custodian was just shown: everything with a gap, most urgent
+            // first. Identical to purchase_first on purpose — the question is
+            // about that list, so the selection must be that list.
+            self::PROMPT_WHY_THESE => $rows
+                ->filter(fn (array $row): bool => ($row['needs_procurement'] ?? false) === true)
+                ->sortByDesc(fn (array $row): int => (int) ($row['priority_rank'] ?? 0) * 1000000
+                    + (int) ($row['suggested_procurement'] ?? 0))
+                ->values()
+                ->take($take),
             default => $rows
                 ->filter(fn (array $row): bool => ($row['needs_procurement'] ?? false) === true)
                 ->sortByDesc(fn (array $row): int => (int) ($row['priority_rank'] ?? 0) * 1000000
                     + (int) ($row['suggested_procurement'] ?? 0))
                 ->values()
-                ->take(self::MAX_SELECTED_ITEMS),
+                ->take($take),
         };
-    }
-
-    private function confidenceScore(array $row): int
-    {
-        if (($row['status'] ?? null) !== 'success') {
-            return self::CONFIDENCE_SCORE['Low'];
-        }
-
-        return self::CONFIDENCE_SCORE[$row['confidence'] ?? ''] ?? self::CONFIDENCE_SCORE['High'];
     }
 
     private function presentRow(array $row): array
@@ -289,6 +525,11 @@ class ForecastDecisionSupportService
             'confidence' => $row['confidence'] ?? null,
             'advisory_status' => $row['advisory_status'] ?? null,
             'status' => $row['status'] ?? null,
+            // History depth, so the explanation prompt may honestly say how
+            // many verified months a figure rests on. The grounding check
+            // already approves these two fields wherever they appear.
+            'historical_months_used' => $row['historical_months_used'] ?? null,
+            'required_months' => $row['required_months'] ?? null,
         ];
     }
 
@@ -313,45 +554,70 @@ class ForecastDecisionSupportService
                 .'Answer only about them, in the order given. Do not introduce items that are not listed.';
         }
 
+        // Selection-scoped aggregates for the explanation prompt only. The
+        // other prompts never read this key, and the grounding check approves
+        // numbers solely from keys it knows, so their gates are unchanged.
+        if ($promptType === self::PROMPT_WHY_THESE) {
+            $facts['selection_state'] = $this->selectionState($selected);
+        }
+
         $facts['cycle_state'] = $this->cycleState(collect($forecast['rows'] ?? []));
 
         return $facts;
     }
 
     /**
-     * Aggregate counts the next-steps answer is built from.
+     * Whether a ranking reply names every selected item.
      *
-     * These are computed here rather than narrated by the provider, so every
-     * step and every number in a "what do I do next" answer traces to the model
-     * output instead of being improvised.
+     * The grounding gate approves every number a reply states, but it cannot
+     * tell that an item is missing: a reply covering 10 of 11 selected rows
+     * says nothing false, it is only incomplete — and the chat then disagrees
+     * with the PDF, which renders all 11 server rows. The ranking prompts
+     * (purchase_first, deferrable, verify_first) lay every row out, so each
+     * one must name each selected item; anything less falls back to the
+     * deterministic list, which loops all rows and is always complete.
+     * Prose prompts (why_these, next_steps) intentionally name only examples
+     * and are exempt.
+     */
+    private function listsEveryItem(string $reply, array $facts, string $promptType): bool
+    {
+        if (! in_array($promptType, [self::PROMPT_PURCHASE_FIRST, self::PROMPT_DEFERRABLE, self::PROMPT_VERIFY_FIRST], true)) {
+            return true;
+        }
+
+        foreach ((array) ($facts['items'] ?? []) as $item) {
+            $name = is_array($item) ? ($item['item_name'] ?? null) : null;
+
+            if (! is_string($name) || $name === '' || mb_stripos($reply, $name) === false) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Aggregate counts over the selected list alone.
+     *
+     * cycleState() describes the whole forecast, which is the wrong scope for
+     * an explanation of one list: quoting whole-forecast counts would answer a
+     * different question. These are computed from the same rows the reply is
+     * about, so every count the provider states traces to the selection.
      *
      * @return array<string, int>
      */
-    private function cycleState(Collection $rows): array
+    private function selectionState(Collection $selected): array
     {
-        $gaps = $rows->filter(fn (array $row): bool => ($row['needs_procurement'] ?? false) === true);
-
         return [
-            'items_forecasted' => $rows->where('status', 'success')->count(),
-            'items_with_gap' => $gaps->count(),
-            'urgent' => $gaps->where('priority', 'Urgent')->count(),
-            'high' => $gaps->where('priority', 'High')->count(),
-            'medium' => $gaps->where('priority', 'Medium')->count(),
-            'deferrable' => $rows->filter(fn (array $row): bool => ($row['status'] ?? null) === 'success'
-                && ($row['needs_procurement'] ?? false) === false)->count(),
-            'insufficient_history' => $rows->where('status', 'insufficient_history')->count(),
-            // Rows matching the verify-first filter across the WHOLE forecast,
-            // not just this selection. Without it the provider states this total
-            // itself, which the grounding check then rejects as an invented
-            // figure, so a correct reply was silently downgraded.
-            'verify_first_total' => $rows->filter(fn (array $row): bool => ($row['status'] ?? null) !== 'success'
+            'total' => $selected->count(),
+            'urgent' => $selected->where('priority', 'Urgent')->count(),
+            'high' => $selected->where('priority', 'High')->count(),
+            'medium' => $selected->where('priority', 'Medium')->count(),
+            // Listed items resting on limited verified history: the ones worth
+            // a verification step before ordering.
+            'weak_history' => $selected->filter(fn (array $row): bool => ($row['status'] ?? null) !== 'success'
                 || in_array($row['confidence'] ?? null, ['Low', 'Medium'], true))->count(),
-            // Rows that would be acted on but rest on weak history. These are the
-            // ones worth a verification step; counting every Low/Medium row,
-            // including items nobody is buying, produced a warning about all 99.
-            'gaps_needing_verification' => $gaps->filter(fn (array $row): bool => ($row['status'] ?? null) !== 'success'
-                || in_array($row['confidence'] ?? null, ['Low', 'Medium'], true))->count(),
-            'suggested_units' => (int) $gaps->sum(fn (array $row): int => (int) ($row['suggested_procurement'] ?? 0)),
+            'suggested_units' => (int) $selected->sum(fn (array $row): int => (int) ($row['suggested_procurement'] ?? 0)),
         ];
     }
 
@@ -373,6 +639,29 @@ class ForecastDecisionSupportService
                 ."6. Never name the data fields you were given. Write plain English, so say \"62 High priority items\", "
                 ."not \"62 items in cycle state\" and never mention gaps_needing_verification or selected_count.\n"
                 ."7. Keep it under 160 words.\n";
+        }
+
+        if ($promptType === self::PROMPT_WHY_THESE) {
+            return "You are the decision support layer on top of a locally calculated inventory demand forecast.\n\n"
+                ."The approved facts below were computed by the server from verified completed stock-out history. "
+                ."They are the only data you have. You cannot query a database, and you must not recalculate, adjust, "
+                ."round up, or invent any quantity.\n\n"
+                ."The custodian was just shown a ranked list of items and asks: \"Why are these items on the list?\"\n\n"
+                ."The 'items' list is that ranking, in order. The 'selection_state' block counts what those items share.\n\n"
+                ."Rules:\n"
+                ."1. Explain in prose why these items were selected: every one of them has a procurement gap — forecast demand plus safety stock exceeds available stock plus pending demand — ordered most urgent first.\n"
+                ."2. Every figure you write must already appear in selection_state or the items. Counts about THESE items come from selection_state; cycle_state describes the whole forecast and must not be used for claims about this list.\n"
+                ."3. Name the first-listed (highest-priority) item as the lead example, using its exact item_name.\n"
+                ."4. If the weak-history count in selection_state is not zero, say that many of the listed items rest on limited verified history and that usage should be confirmed before ordering. If it is zero, say the estimates rest on enough verified history instead.\n"
+                ."5. Do not state or estimate any price, peso amount, cost, budget, supplier, or brand. None were supplied.\n"
+                ."6. You may recommend what to procure. Never claim an order was placed or approved, or that inventory or stock was changed. "
+                ."You only advise; a custodian approves separately.\n"
+                ."7. Never name the data fields you were given. Write plain English, so say \"9 High priority items\", "
+                ."not \"9 items in selection state\" and never mention selection_state, cycle_state, gaps_needing_verification or selected_count.\n"
+                ."8. If an item's status is not \"success\", say it lacks enough verified history for an estimate and should be "
+                ."verified before use. Do not produce a suggested quantity for it.\n"
+                ."9. No list layout and no formula line: this answer is prose, not a ranking. Keep it under 160 words.\n"
+                ."10. Close with one line noting the forecast is advisory only.\n";
         }
 
         return "You are the decision support layer on top of a locally calculated inventory demand forecast.\n\n"
@@ -399,177 +688,8 @@ class ForecastDecisionSupportService
             ."     Priority · Confidence confidence · X + Y - Z - W\n"
             ."   The second line repeats the four numbers in the formula order. Do not spell out "
             ."'demand', 'buffer', 'stock' or 'pending' again, and do not repeat the formula per item.\n"
+            ."   List every item in the approved facts, in the order given, omitting none. A shorter list is a wrong answer.\n"
             ."10. Close with one line noting the forecast is advisory only.\n";
-    }
-
-    /**
-     * A provider reply is accepted only when it mentions a selected item, does
-     * not claim to have acted, and contains no number the forecast did not
-     * calculate. On rejection the failing check is returned so the caller can
-     * log a real cause instead of a blanket "provider unavailable".
-     */
-    private function isGroundedReply(string $reply, array $facts): bool
-    {
-        return $this->groundingFailure($reply, $facts) === null;
-    }
-
-    /**
-     * @return string|null The name of the first failing check, or null when the
-     *                     reply is acceptable.
-     */
-    private function groundingFailure(string $reply, array $facts): ?string
-    {
-        $reply = trim($reply);
-        $items = $facts['items'] ?? [];
-
-        if ($reply === '' || ! is_array($items) || $items === []) {
-            return 'no_items';
-        }
-
-        // Recommending what to procure is this layer's whole job, so "buy" and
-        // "purchase" are allowed. What is forbidden is claiming the assistant
-        // acted: no order placed or approved, no inventory or stock changed, and
-        // no price or supplier, because the forecast carries no cost data and a
-        // fabricated peso figure would be the most damaging possible error here.
-        if ($this->forbiddenClaim($reply) !== null) {
-            return 'forbidden_claim';
-        }
-
-        // A next-steps answer is about the workflow, not specific items, so it
-        // legitimately references counts alone ("address the 62 High priority
-        // items"). Requiring an item name there rejected correct guidance. Every
-        // other prompt still must name a real selected item, and the number and
-        // forbidden-claim checks apply to all of them.
-        if (($facts['prompt_type'] ?? null) !== self::PROMPT_NEXT_STEPS) {
-            $names = collect($items)->pluck('item_name')->filter(fn (mixed $name): bool => is_string($name) && $name !== '');
-            if ($names->isEmpty() || $names->first(fn (string $name): bool => stripos($reply, $name) !== false) === null) {
-                return 'no_item_named';
-            }
-        }
-
-        return $this->unapprovedNumbers($reply, $facts) === [] ? null : 'unapproved_number';
-    }
-
-    /**
-     * Detects a reply claiming the system acted, or quoting a cost the forecast
-     * never supplied.
-     */
-    private function forbiddenClaim(string $reply): ?string
-    {
-        $patterns = [
-            'acted_on_order' => '/\b(?:i\s+(?:have\s+)?(?:placed|created|submitted|approved)\s+(?:the\s+|a\s+|your\s+)?(?:order|purchase)|order\s+(?:has\s+been|was)\s+(?:placed|approved)|(?:placed|approved)\s+(?:the\s+|a\s+)?(?:purchase\s+)?order)\b/iu',
-            'changed_inventory' => '/\b(?:update[ds]?\s+(?:the\s+)?inventory|changed?\s+(?:the\s+)?stock)\b/iu',
-            'invented_cost' => '/(?:₱|\bphp\b|\bphp\s+\d)/iu',
-        ];
-
-        foreach ($patterns as $name => $pattern) {
-            if (preg_match($pattern, $reply) === 1) {
-                return $name;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * The numbers a reply states that the forecast never calculated.
-     *
-     * Approved values are the per-item quantities, the forecast period and its
-     * generated-at stamp, the summary totals, and the list sizes this layer
-     * itself chose. That last group matters: a reply saying "here are the top
-     * 10" states the size of the list we handed it, which is a fact, not an
-     * invented quantity. Rejecting it silently sent every well-written ranked
-     * answer back to the local template.
-     *
-     * @return array<int, string>
-     */
-    private function unapprovedNumbers(string $reply, array $facts): array
-    {
-        $items = $facts['items'] ?? [];
-
-        $approved = collect(is_array($items) ? $items : [])
-            ->flatMap(fn (array $item): array => [
-                $item['forecast_demand'] ?? null,
-                $item['safety_stock'] ?? null,
-                $item['available_stock'] ?? null,
-                $item['pending_demand'] ?? null,
-                $item['suggested_procurement'] ?? null,
-            ])
-            ->filter(fn (mixed $value): bool => is_int($value) || is_float($value))
-            ->map(fn (int|float $value): string => (string) $value);
-
-        foreach ([$facts['forecast_period'] ?? null, $facts['generated_at'] ?? null] as $stamp) {
-            if (! is_string($stamp)) {
-                continue;
-            }
-
-            preg_match_all('/\d+/', $stamp, $stampNumbers);
-            $approved = $approved->merge($stampNumbers[0]);
-        }
-
-        foreach ((array) ($facts['forecast_summary'] ?? []) as $total) {
-            if (is_int($total) || is_float($total)) {
-                $approved->push((string) $total);
-            }
-        }
-
-        // The server-computed cycle counts (urgent, high, items_with_gap,
-        // suggested_units, …) are approved facts too. A next-steps reply that
-        // quotes "the 62 High priority items" is restating a count this class
-        // calculated, and rejecting it pushed every well-formed guidance answer
-        // back to the local template.
-        foreach ((array) ($facts['cycle_state'] ?? []) as $count) {
-            if (is_int($count) || is_float($count)) {
-                $approved->push((string) $count);
-            }
-        }
-
-        // The size of the list this layer selected, so a reply may count its own
-        // items without that count being read as fabricated data.
-        foreach (['selected_count', 'max_items_shown'] as $size) {
-            if (is_int($facts[$size] ?? null)) {
-                $approved->push((string) $facts[$size]);
-            }
-        }
-
-        // Digits inside supplied item and category names are approved facts too.
-        // "Crayon Set 24 Colors" contains a standalone 24, and a reply quoting
-        // that name correctly must not be rejected for it. Only digit runs
-        // glued to a letter (300ml) are excluded, by QUANTITY_PATTERN.
-        foreach (collect(is_array($items) ? $items : []) as $item) {
-            foreach (['item_name', 'category'] as $field) {
-                if (! is_string($item[$field] ?? null)) {
-                    continue;
-                }
-
-                preg_match_all('/\d+/', $item[$field], $nameNumbers);
-                $approved = $approved->merge($nameNumbers[0]);
-            }
-        }
-
-        $approved = $approved->unique()->values();
-
-        preg_match_all(self::QUANTITY_PATTERN, $this->stripListOrdinals($reply), $matches);
-
-        return collect($matches[0])
-            ->map(fn (string $number): string => str_replace(',', '', $number))
-            ->reject(fn (string $number): bool => $approved->contains($number))
-            ->unique()
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Removes list position markers before the number check.
-     *
-     * A position ("1.", "2)") is not a claim about a quantity, and both the
-     * local answer and a provider reply may legitimately number their items.
-     * Handles markers at the start of a line and after a sentence break, since
-     * a numbered list is not always written one item per line.
-     */
-    private function stripListOrdinals(string $text): string
-    {
-        return (string) preg_replace('/(?:(?<=\.)|^)\s*\d{1,3}[.)]\s+/m', '', $text);
     }
 
     private function localAnswer(array $facts): string
@@ -578,11 +698,15 @@ class ForecastDecisionSupportService
         if (($facts['prompt_type'] ?? null) === self::PROMPT_NEXT_STEPS) {
             return $this->localNextSteps($facts);
         }
+        if (($facts['prompt_type'] ?? null) === self::PROMPT_WHY_THESE) {
+            return $this->localWhyThese($facts);
+        }
 
         if (! is_array($items) || $items === []) {
             return match ($facts['prompt_type'] ?? self::PROMPT_PURCHASE_FIRST) {
                 self::PROMPT_DEFERRABLE => 'No item currently has stock and pending demand covering its forecast demand and safety stock, so nothing can be deferred from this forecast cycle.',
                 self::PROMPT_VERIFY_FIRST => 'Every forecast row rests on enough verified completed history to be usable. No row needs verification before ordering this cycle.',
+                self::PROMPT_WHY_THESE => 'There is no procurement gap in this forecast, so there is no list to explain.',
                 default => 'No item in this forecast has a procurement gap, so there is nothing to purchase first this cycle.',
             };
         }
@@ -598,6 +722,64 @@ class ForecastDecisionSupportService
         }
 
         $lines[] = 'This is advisory only and does not create orders. Refresh model training before acting on a new result.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * The deterministic "why are these on the list" answer.
+     *
+     * Prose, not a ranking: it states the shared basis the selection was made
+     * on, the priority mix, and the history caveat. Every count comes from
+     * selectionState(), every name from the items, so the fallback cannot
+     * miscount or misname even when the provider is unreachable.
+     */
+    private function localWhyThese(array $facts): string
+    {
+        $items = is_array($facts['items'] ?? null) ? $facts['items'] : [];
+        $state = is_array($facts['selection_state'] ?? null) ? $facts['selection_state'] : [];
+        $period = is_string($facts['forecast_period'] ?? null) ? $facts['forecast_period'] : 'this cycle';
+        $total = (int) ($state['total'] ?? count($items));
+        $urgent = (int) ($state['urgent'] ?? 0);
+        $high = (int) ($state['high'] ?? 0);
+        $medium = (int) ($state['medium'] ?? 0);
+        $weak = (int) ($state['weak_history'] ?? 0);
+
+        $lead = collect($items)
+            ->pluck('item_name')
+            ->filter(fn (mixed $name): bool => is_string($name) && $name !== '')
+            ->take(3)
+            ->implode(', ');
+
+        $lines = [
+            "These {$total} items are on the list because each has a procurement gap for {$period}: "
+            .'forecast demand plus safety stock exceeds available stock plus pending demand.',
+        ];
+
+        $mix = [];
+        if ($urgent > 0) {
+            $mix[] = $urgent.' Urgent';
+        }
+        if ($high > 0) {
+            $mix[] = $high.' High';
+        }
+        if ($medium > 0) {
+            $mix[] = $medium.' Medium';
+        }
+        if ($mix !== []) {
+            $lines[] = 'The mix is '.implode(', ', $mix).($lead !== '' ? ', led by '.$lead.'.' : '.');
+        } elseif ($lead !== '') {
+            $lines[] = 'Led by '.$lead.'.';
+        }
+
+        if ($weak > 0) {
+            $lines[] = $weak.' of the '.$total.' rest'.($weak === 1 ? 's' : '')
+                .' on limited verified history — confirm actual usage before ordering.';
+        } else {
+            $lines[] = 'The estimates rest on enough verified history to be usable.';
+        }
+
+        $lines[] = 'This is advisory only and does not create orders.';
 
         return implode("\n", $lines);
     }
@@ -680,35 +862,4 @@ class ForecastDecisionSupportService
         return implode("\n", $lines);
     }
 
-    /**
-     * One entry in the deterministic ranked list.
-     *
-     * Uses the same two-line shape the provider is instructed to produce, so the
-     * fallback reads identically rather than switching to a wall of prose. The
-     * formula is stated once by the caller, not repeated per item.
-     */
-    private function localItemLine(array $item): string
-    {
-        $name = $item['item_name'] ?? 'Item';
-        $unit = $item['unit'] ?? 'units';
-
-        if (($item['status'] ?? null) !== 'success') {
-            return "**{$name}** — no estimate\nInsufficient verified history · verify usage before procuring.";
-        }
-
-        $suggested = (int) ($item['suggested_procurement'] ?? 0);
-        $figures = sprintf(
-            '%s + %s - %s - %s',
-            $item['forecast_demand'],
-            $item['safety_stock'],
-            $item['available_stock'],
-            $item['pending_demand']
-        );
-
-        if ($suggested <= 0) {
-            return "**{$name}** — 0 {$unit}\n{$item['priority']} · {$item['confidence']} confidence · {$figures}";
-        }
-
-        return "**{$name}** — {$suggested} {$unit}\n{$item['priority']} · {$item['confidence']} confidence · {$figures}";
-    }
 }

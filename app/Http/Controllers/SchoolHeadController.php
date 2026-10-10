@@ -9,6 +9,7 @@ use App\Models\StockMovement;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserAuditLog;
+use App\Services\AuditLedgerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
@@ -62,12 +63,13 @@ class SchoolHeadController extends Controller
                 'waiting for approval',
                 'waiting for transfer approval',
                 'waiting for custodian approval',
+                AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
             ])
             ->get(['status', 'target_user_id']);
         $pendingRequestData = [
             [
                 'label' => 'Item Requests',
-                'value' => $pendingRequests->filter(fn ($request) => $request->status === 'waiting for approval' && $custodianIds->contains($request->target_user_id))->count(),
+                'value' => $pendingRequests->filter(fn ($request) => ($request->status === 'waiting for approval' || $request->status === AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT) && $custodianIds->contains($request->target_user_id))->count(),
             ],
             [
                 'label' => 'Transfer Requests',
@@ -184,7 +186,50 @@ class SchoolHeadController extends Controller
                 'lowStock' => $categories->where('available', '<=', 3)->count(),
                 'value' => (float) $inventory->sum(fn ($item) => $effective($item) * $item->unit_cost),
             ],
+            'monitorRows' => $this->monitorRows($effective),
         ]);
+    }
+
+    /**
+     * Item-level monitor rows: every state the custodian workbench shows,
+     * shaped for read-only display.
+     *
+     * Holder names resolve through the same assignment link the custodian
+     * views use; rows without one report no holder rather than inventing one.
+     * Quantities honor the issued-out rule (assigned units live in
+     * transactions), so the monitor can never disagree with the workbench.
+     *
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    private function monitorRows(callable $effective): \Illuminate\Support\Collection
+    {
+        return Inventory::query()
+            ->with([
+                'category:category_id,category_name',
+                'assignedTo:id,first_name,last_name,username',
+                'transactions' => fn ($query) => $query->where('status', 'assigned')->with('assignmentReturns:id,transaction_id,quantity'),
+            ])
+            ->orderBy('item_name')
+            ->get()
+            ->map(function ($item) use ($effective) {
+                $holder = $item->assignedTo
+                    ? (trim($item->assignedTo->first_name.' '.$item->assignedTo->last_name) ?: $item->assignedTo->username)
+                    : null;
+
+                return [
+                    'item_id' => $item->item_id,
+                    'item_name' => $item->item_name,
+                    'inventory_item_no' => $item->inventory_item_no,
+                    'category' => $item->category?->category_name ?? 'Uncategorized',
+                    'unit' => $item->unit,
+                    'status' => $item->status,
+                    'status_label' => ucwords(str_replace('_', ' ', (string) $item->status)),
+                    'quantity' => $effective($item),
+                    'holder_name' => $holder,
+                    'expected_end_date' => $item->expected_end_date?->format('Y-m-d'),
+                ];
+            })
+            ->values();
     }
 
     public function reports(Request $request): JsonResponse
@@ -225,11 +270,20 @@ class SchoolHeadController extends Controller
         $logs = UserAuditLog::query()
             ->with(['actor', 'targetUser'])
             ->orderByDesc('created_at')
-            ->paginate(20);
+            ->paginate(10);
+
+        // Item-movement ledger, same builder as the custodian view so both
+        // pages describe each movement identically. Returned whole (capped)
+        // rather than paginated: pagination slices records before grouping and
+        // would split one batch across pages. The frontend paginates the
+        // groups instead, so a ×15 batch is never cut in two. Read-only by
+        // design: the school-head role has no movement endpoints to act through.
+        $movements = app(AuditLedgerService::class)->latest(100);
 
         return response()->json([
             'title' => 'Audit Logs',
             'logs' => $logs,
+            'movements' => $movements,
         ]);
     }
 

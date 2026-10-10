@@ -1,17 +1,17 @@
 <template>
   <section
-    class="flex h-full min-h-0 flex-col border-gray-200/80 bg-gray-50/40 dark:border-gray-800 dark:bg-gray-950/40 lg:border-r"
+    class="flex h-full min-h-0 flex-col border-emerald-200/80 bg-emerald-50/50 dark:border-emerald-900/60 dark:bg-emerald-950/20 lg:border-r"
     aria-label="AI decision support"
   >
     <!-- Header -->
-    <header class="shrink-0 border-b border-gray-200/80 px-3.5 py-2.5 dark:border-gray-800">
+    <header class="shrink-0 border-b border-emerald-200/80 px-3.5 py-2.5 dark:border-emerald-900/60">
       <div class="flex items-center gap-2">
-        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-emerald-700 text-white">
+        <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-emerald-600 text-white">
           <LucideIcon :icon="Sparkles" class="h-3.5 w-3.5" />
         </span>
         <div class="min-w-0 flex-1">
-          <h2 class="truncate text-sm font-bold text-gray-900 dark:text-white">AI Decision Support</h2>
-          <p class="text-[11px] leading-tight text-gray-500 dark:text-gray-400">
+          <h2 class="truncate text-sm font-bold text-emerald-950 dark:text-emerald-50">AI Decision Support</h2>
+          <p class="text-[11px] leading-tight text-emerald-800/80 dark:text-emerald-300/80">
             {{ forecastPeriod || 'Current forecast' }} · all {{ totalItems }} items
             <span v-if="tableFiltered" class="block text-amber-700 dark:text-amber-400">
               ignores the table filter
@@ -21,7 +21,7 @@
         <button
           v-if="messages.length"
           type="button"
-          class="shrink-0 rounded p-1 text-gray-400 hover:bg-gray-200/70 hover:text-gray-700 disabled:opacity-50 dark:hover:bg-white/5 dark:hover:text-gray-200"
+          class="shrink-0 rounded p-1 text-emerald-700/60 hover:bg-emerald-200/60 hover:text-emerald-900 disabled:opacity-50 dark:text-emerald-300/60 dark:hover:bg-emerald-900/50 dark:hover:text-emerald-100"
           :disabled="busy"
           title="Clear conversation"
           aria-label="Clear conversation"
@@ -29,14 +29,54 @@
         >
           <LucideIcon :icon="RotateCcw" class="h-3.5 w-3.5" />
         </button>
+        <button
+          type="button"
+          class="shrink-0 rounded p-1 text-emerald-700/60 hover:bg-emerald-200/60 hover:text-emerald-900 disabled:opacity-50 dark:text-emerald-300/60 dark:hover:bg-emerald-900/50 dark:hover:text-emerald-100"
+          :disabled="busy"
+          title="New chat"
+          aria-label="New chat"
+          @click="newChat"
+        >
+          <LucideIcon :icon="MessageSquarePlus" class="h-3.5 w-3.5" />
+        </button>
+        <button
+          v-if="conversations.length > 0"
+          type="button"
+          class="shrink-0 rounded p-1 text-emerald-700/60 hover:bg-emerald-200/60 hover:text-emerald-900 disabled:opacity-50 dark:text-emerald-300/60 dark:hover:bg-emerald-900/50 dark:hover:text-emerald-100"
+          :disabled="busy"
+          title="Chat history"
+          aria-label="Chat history"
+          @click="showHistory = !showHistory"
+        >
+          <LucideIcon :icon="History" class="h-3.5 w-3.5" />
+        </button>
       </div>
     </header>
 
     <!-- Thread -->
-    <div ref="logRef" class="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3" aria-live="polite">
+    <!-- Saved chats -->
+    <div v-if="showHistory" class="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
+      <div class="flex items-center justify-between">
+        <h3 class="text-xs font-bold text-emerald-950 dark:text-emerald-50">Chat history</h3>
+        <span class="text-[10px] text-emerald-700/70 dark:text-emerald-400/70">{{ conversations.length }} saved</span>
+      </div>
+      <div v-if="conversations.length === 0" class="text-xs text-emerald-700/70 dark:text-emerald-300/70">No saved conversations.</div>
+      <div v-else class="space-y-2">
+        <div v-for="conversation in conversations" :key="conversation.id" class="group flex cursor-pointer items-center gap-2 rounded-md border border-emerald-200 bg-white p-2.5 transition hover:border-emerald-400 hover:bg-emerald-100/60 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:hover:border-emerald-500/60">
+          <button type="button" :disabled="busy" @click="loadConversation(conversation)" class="min-w-0 flex-1 text-left disabled:opacity-50">
+            <span class="block truncate text-xs font-semibold text-emerald-900 dark:text-emerald-100">{{ conversation.title }}</span>
+            <span class="mt-0.5 block text-[10px] text-emerald-700/70 dark:text-emerald-400/70">{{ conversation.updatedAt }}</span>
+          </button>
+          <button type="button" :disabled="busy" @click="deleteConversation(conversation.id)" class="rounded p-1 text-emerald-700/60 hover:text-red-500 disabled:opacity-50 dark:text-emerald-300/60" title="Delete conversation" aria-label="Delete conversation">
+            <LucideIcon :icon="Trash2" class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+    <div v-else ref="logRef" class="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3" aria-live="polite">
       <!-- Intro: flags risk now that the Confidence column is off the table -->
-      <div class="rounded-md border border-gray-200 bg-white px-3 py-2.5 text-xs leading-relaxed text-gray-600 shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-        <p class="font-semibold text-gray-800 dark:text-gray-100">{{ openerHeadline }}</p>
+      <div class="rounded-md border border-emerald-200 bg-white px-3 py-2.5 text-xs leading-relaxed text-emerald-800 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200">
+        <p class="font-semibold text-emerald-900 dark:text-emerald-100">{{ openerHeadline }}</p>
         <p class="mt-1">{{ openerDetail }}</p>
       </div>
 
@@ -49,8 +89,8 @@
         <div
           class="max-w-[92%] rounded-md px-3 py-2 text-xs leading-relaxed shadow-sm"
           :class="message.role === 'user'
-            ? 'bg-emerald-700 text-white'
-            : 'border border-gray-200 bg-white text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-200'"
+            ? 'bg-emerald-600 text-white'
+            : 'border border-emerald-200 bg-white text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100'"
         >
           <p class="whitespace-pre-line" v-html="renderMarkdown(message.text)"></p>
 
@@ -59,6 +99,11 @@
                guidance) carry no source and are never labelled a fallback. -->
           <p v-if="sourceNote(message)" class="mt-1.5 text-[10px] italic opacity-70">
             {{ sourceNote(message) }}
+          </p>
+
+          <!-- Only when a requested count exceeded the chat ceiling. -->
+          <p v-if="message.notice" class="mt-1.5 text-[10px] italic opacity-70">
+            {{ message.notice }}
           </p>
 
           <!-- Export: the AI orders, the forecast supplies the numbers. -->
@@ -85,7 +130,7 @@
 
       <!-- Typing indicator -->
       <div v-if="busy" class="flex justify-start">
-        <div class="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
+        <div class="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
           <span class="inline-flex items-center gap-1">
             <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-600"></span>
             <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-600 [animation-delay:150ms]"></span>
@@ -96,16 +141,16 @@
     </div>
 
     <!-- Quick prompts -->
-    <div v-if="!hasForecast" class="shrink-0 px-3 py-3 text-xs text-gray-500 dark:text-gray-400">
+    <div v-if="!hasForecast" class="shrink-0 px-3 py-3 text-xs text-emerald-800/80 dark:text-emerald-300/80">
       Decision support needs a trained forecast. Refresh model training, then ask again.
     </div>
-    <div v-else class="shrink-0 border-t border-gray-200/80 px-3 py-2.5 dark:border-gray-800">
+    <div v-else class="shrink-0 border-t border-emerald-200/80 px-3 py-2.5 dark:border-emerald-900/60">
       <div class="mb-2 flex flex-wrap gap-1.5">
         <button
           v-for="prompt in quickPrompts"
           :key="prompt.type"
           type="button"
-          class="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-emerald-600/60 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-200"
+          class="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-medium text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 hover:text-emerald-900 disabled:opacity-50 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:border-emerald-500/60 dark:hover:bg-emerald-900/50 dark:hover:text-emerald-100"
           :disabled="busy"
           @click="askPrompt(prompt)"
         >
@@ -119,12 +164,12 @@
           rows="2"
           placeholder="Ask about the current forecast…"
           aria-label="Ask about the current forecast"
-          class="min-h-[2.5rem] w-full resize-none rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          class="min-h-[2.5rem] w-full resize-none rounded-md border border-emerald-200 bg-white px-2.5 py-1.5 text-xs text-emerald-900 placeholder:text-emerald-500 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-100 dark:placeholder:text-emerald-500/80"
           @keydown.enter.exact.prevent="submitQuestion"
         ></textarea>
         <button
           type="submit"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50"
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
           :disabled="busy || !question.trim()"
           aria-label="Send question"
           title="Send question"
@@ -132,7 +177,7 @@
           <LucideIcon :icon="Send" class="h-4 w-4" />
         </button>
       </form>
-      <p class="mt-1.5 text-[10px] leading-snug text-gray-400 dark:text-gray-500">
+      <p class="mt-1.5 text-[10px] leading-snug text-emerald-700/70 dark:text-emerald-400/70">
         Advisory only. Nothing here creates orders or changes stock.
       </p>
     </div>
@@ -140,11 +185,12 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue';
-import { FileDown, RotateCcw, Send, Sparkles } from 'lucide';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { FileDown, History, MessageSquarePlus, RotateCcw, Send, Sparkles, Trash2 } from 'lucide';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import api from '../../lib/axios';
+import { useAuthStore } from '../../stores/auth';
 import LucideIcon from '../ui/data-display/LucideIcon.vue';
 
 const props = defineProps({
@@ -187,6 +233,136 @@ const question = ref('');
 const busy = ref(false);
 const exportingKey = ref(null);
 let keySeed = 0;
+
+const authStore = useAuthStore();
+
+// Saved threads, same model as the inventory assistant: per-user localStorage,
+// at most 20, titled by the first user message. Unlike the assistant, the live
+// thread is never restored — a page refresh always starts empty.
+const showHistory = ref(false);
+const conversations = ref([]);
+
+function historyKey() {
+    return `dnhs-forecast-conversations.${authStore.user?.id ?? 'guest'}`;
+}
+
+function loadConversations() {
+    try {
+        conversations.value = JSON.parse(localStorage.getItem(historyKey()) || '[]');
+    } catch {
+        conversations.value = [];
+    }
+}
+
+function persistConversations() {
+    localStorage.setItem(historyKey(), JSON.stringify(conversations.value));
+}
+
+// Archive the current thread, if it asked anything. Tab switches clear
+// without archiving (see clearThread), so the history holds conversations,
+// not fragments.
+function archiveConversation() {
+    const userMessages = messages.value.filter((message) => message.role === 'user');
+
+    if (userMessages.length === 0) return;
+
+    const conversation = {
+        id: Date.now(),
+        title: String(userMessages[0].text ?? '').slice(0, 42),
+        messages: messages.value,
+        updatedAt: new Date().toLocaleString(),
+    };
+
+    conversations.value = [conversation, ...conversations.value.filter((item) => item.id !== conversation.id)].slice(0, 20);
+    persistConversations();
+}
+
+async function newChat() {
+    if (busy.value) return;
+
+    busy.value = true;
+
+    try {
+        // Clears the server-side forecast context, so the archived thread's
+        // follow-up state cannot leak into the next conversation.
+        await api.post('/ai/chat/reset', {}, { skipToast: true });
+        archiveConversation();
+        messages.value = [];
+        lastAnswerItems.value = [];
+        lastPromptType.value = 'purchase_first';
+        question.value = '';
+        showHistory.value = false;
+    } catch {
+        pushAssistant('Unable to start a new chat. Please try again.');
+    } finally {
+        busy.value = false;
+        scrollToBottom();
+    }
+}
+
+async function loadConversation(conversation) {
+    if (busy.value) return;
+
+    busy.value = true;
+
+    try {
+        await api.post('/ai/chat/reset', {}, { skipToast: true });
+        // Re-key so restored messages can never collide with new ones.
+        messages.value = (conversation.messages ?? []).map((message) => ({ ...message, key: nextKey() }));
+
+        // Rebuild the follow-up context from the replayed answer, so "the
+        // second one" keeps working on a reopened thread. Names come from the
+        // current forecast, never from the saved text.
+        const lastAnswered = [...messages.value].reverse().find(
+            (message) => message.role === 'ai' && Array.isArray(message.inventoryIds) && message.inventoryIds.length > 0,
+        );
+
+        if (lastAnswered) {
+            lastAnswerItems.value = lastAnswered.inventoryIds.map((id) => ({
+                inventory_id: id,
+                item_name: props.items.find((row) => Number(row.inventory_id) === Number(id))?.item_name ?? '',
+            }));
+            lastPromptType.value = typeof lastAnswered.promptType === 'string' && lastAnswered.promptType !== ''
+                ? lastAnswered.promptType
+                : 'purchase_first';
+        } else {
+            lastAnswerItems.value = [];
+            lastPromptType.value = 'purchase_first';
+        }
+
+        showHistory.value = false;
+    } catch {
+        pushAssistant('Unable to open this chat. Please try again.');
+    } finally {
+        busy.value = false;
+        scrollToBottom();
+    }
+}
+
+function deleteConversation(id) {
+    conversations.value = conversations.value.filter((conversation) => conversation.id !== id);
+    persistConversations();
+}
+
+onMounted(() => {
+    loadConversations();
+});
+
+// Reload per-user history when the signed-in user changes.
+watch(
+    () => authStore.user?.id,
+    () => {
+        loadConversations();
+    },
+);
+
+// Returning from the history list re-creates the log element, so re-anchor to
+// the latest message the same way the inventory assistant does.
+watch(showHistory, (historyVisible) => {
+    if (!historyVisible) {
+        scrollToBottom();
+    }
+});
 
 const openerHeadline = computed(() => {
     if (! props.hasForecast) {
@@ -273,9 +449,12 @@ function sourceNote(message) {
         case 'request_failed':
             return 'Deterministic summary — the AI provider could not be reached.';
         case 'reply_rejected':
-            return 'Deterministic summary — the AI reply cited figures the forecast did not calculate, so the verified numbers are shown instead.';
+            // A rejection can now mean an unapproved figure, a claimed cost, or a
+            // contradiction of the item's priority, so this wording covers all
+            // three rather than naming only the first.
+            return 'Deterministic summary — the AI reply went beyond what the forecast calculated, so the verified answer is shown instead.';
         case 'not_attempted':
-            return 'Deterministic summary — the AI provider was not contacted.';
+            return 'Deterministic summary — the AI provider was not contacted, because there is no estimate to explain.';
         default:
             return 'Deterministic summary — calculated directly from the forecast.';
     }
@@ -299,7 +478,7 @@ function scrollToBottom() {
 const lastAnswerItems = ref([]);
 const lastPromptType = ref('purchase_first');
 
-async function run(promptType, label, contextIds = null) {
+async function run(promptType, label, contextIds = null, maxItems = null) {
     busy.value = true;
     messages.value = [...messages.value, { key: nextKey(), role: 'user', text: label }];
     scrollToBottom();
@@ -310,6 +489,9 @@ async function run(promptType, label, contextIds = null) {
         const { data } = await api.post('/custodian/reports/forecast/decision-support', {
             prompt_type: promptType,
             ...(ids.length ? { inventory_ids: ids } : {}),
+            // A named count narrows the same server ranking. The backend owns
+            // the ceiling: it clamps and discloses the cap in `notice`.
+            ...(maxItems ? { max_items: maxItems } : {}),
         }, { skipToast: true });
 
         lastAnswerItems.value = (data.items ?? []).map((item) => ({
@@ -329,6 +511,9 @@ async function run(promptType, label, contextIds = null) {
                 promptType: data.prompt_type,
                 scope: data.scope,
                 inventoryIds: data.inventory_ids ?? [],
+                // Set only when the server clamped a requested count: the cap
+                // is disclosed under the answer instead of applied silently.
+                notice: data.notice ?? null,
             },
         ];
     } catch (requestError) {
@@ -389,7 +574,10 @@ async function askAboutItem(item) {
             inventory_id: item.inventory_id,
         }, { skipToast: true });
 
-        pushAssistant(data.explanation, { source: data.source ?? 'local' });
+        pushAssistant(data.explanation, {
+            source: data.source ?? 'local',
+            providerStatus: data.provider_status,
+        });
     } catch (requestError) {
         pushAssistant(requestError?.response?.data?.message ?? 'Could not explain that item from the current forecast.');
     } finally {
@@ -417,7 +605,7 @@ function guidance(text, message) {
  * anything not recognisably about this forecast gets guidance rather than a
  * guessed answer, so a greeting never returns a procurement list.
  */
-function submitQuestion() {
+async function submitQuestion() {
     const text = question.value.trim();
 
     if (text === '' || busy.value) return;
@@ -468,10 +656,24 @@ function submitQuestion() {
         return;
     }
 
+    // A bare "why" over the whole previous list ("why those?", "why these?",
+    // "why all of them?") asks what those items have in common. The why_these
+    // prompt answers exactly that in one request, instead of re-rendering the
+    // same ranking. A why about a subset ("why is the second one urgent?")
+    // keeps the existing path below.
+    if (ASKS_WHY.test(lowered) && followUpIds !== null && isWholePriorList(followUpIds)) {
+        run('why_these', text, followUpIds);
+
+        return;
+    }
+
     const promptType = classify(lowered);
 
     if (promptType !== null) {
-        run(promptType, text, followUpIds);
+        // A named count ("give me 5 items") narrows the same ranking rather
+        // than redefining it. The server clamps to its ceiling and discloses
+        // the cap, so a large number is never silently cut.
+        run(promptType, text, followUpIds, extractRequestedCount(lowered));
 
         return;
     }
@@ -484,11 +686,137 @@ function submitQuestion() {
         return;
     }
 
+    // Patterns missed entirely: ask the fallback parser what was meant. One
+    // small call that returns a strict form only — never an answer — and the
+    // form is resolved against this forecast before anything runs. When the
+    // parse is unusable, the guidance below is unchanged.
+    if (await runParsedQuestion(text, lowered, followUpIds)) {
+        return;
+    }
+
     {
         guidance(text, 'I can only answer procurement questions about this forecast. Try: '
             + '"what should we purchase first?", "what can wait?", "which rows need verification?", '
             + '"what step should I do next?", or name an item ("how many Bond Paper do I need?").');
     }
+}
+
+/**
+ * A requested list size ("give me 5 items", "top 20"), or null when the
+ * question names none. Positional references ("item 10", "the 10th") are not
+ * counts and are left for the follow-up resolver.
+ */
+function extractRequestedCount(lowered) {
+    const direct = lowered.match(/(?:give|show|list|send|display)\s+(?:me\s+|us\s+)?(\d{1,3})\s+items?\b/)
+        || lowered.match(/(?:top|first)\s+(\d{1,3})\b/);
+
+    if (!direct) return null;
+
+    const count = parseInt(direct[1], 10);
+
+    return Number.isInteger(count) && count > 0 ? count : null;
+}
+
+/**
+ * Runs a fallback parse of an unrecognised question.
+ *
+ * Returns true when the parse produced an answer, false when the caller should
+ * fall through to its guidance message. A why about one resolved item uses
+ * the single-item explanation endpoint; a why about the whole prior list uses
+ * the explanation prompt; everything else runs its parsed prompt with its
+ * parsed count. Unresolvable parses are never executed.
+ */
+async function runParsedQuestion(text, lowered, followUpIds) {
+    const parse = await tryParseQuestion(text, followUpIds);
+
+    if (!parse) return false;
+
+    let ids = Array.isArray(followUpIds) ? [...followUpIds] : [];
+
+    if (parse.inventory_id) {
+        ids = [parse.inventory_id];
+    } else if (parse.item_name) {
+        const hit = matchParsedItem(parse.item_name);
+
+        if (!hit) return false;
+
+        ids = [hit.inventory_id];
+    }
+
+    if (ASKS_WHY.test(lowered)) {
+        if (ids.length === 1) {
+            const item = props.items.find((row) => Number(row.inventory_id) === Number(ids[0]));
+
+            if (!item) return false;
+
+            askAboutItem(item);
+
+            return true;
+        }
+
+        if (ids.length > 1 && isWholePriorList(ids)) {
+            run('why_these', text, ids);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    run(parse.prompt_type, text, ids.length ? ids : null, parse.count);
+
+    return true;
+}
+
+/**
+ * Asks the server what an unrecognised question meant.
+ *
+ * One small provider call returning a strict form only. Null on any failure —
+ * no key, no response, unusable parse — so the chat degrades to the same
+ * guidance it showed before this fallback existed.
+ */
+async function tryParseQuestion(text, contextIds) {
+    busy.value = true;
+
+    try {
+        const { data } = await api.post('/custodian/reports/forecast/parse-question', {
+            message: text,
+            ...((Array.isArray(contextIds) && contextIds.length) ? {
+                inventory_ids: contextIds,
+                item_names: lastAnswerItems.value
+                    .filter((item) => contextIds.includes(item.inventory_id))
+                    .map((item) => item.item_name),
+            } : {}),
+        }, { skipToast: true });
+
+        return data?.status === 'ok' && data.parse ? data.parse : null;
+    } catch {
+        return null;
+    } finally {
+        busy.value = false;
+    }
+}
+
+/**
+ * Resolves a parsed item name against this forecast.
+ *
+ * The full forecast list first (complete objects for the explanation path),
+ * then the previous answer's identities. A name found in neither resolves to
+ * nothing, and the caller falls back to guidance.
+ */
+function matchParsedItem(name) {
+    const needle = String(name ?? '').toLowerCase();
+
+    if (needle === '') return null;
+
+    const full = props.items.find((row) => String(row.item_name ?? '').toLowerCase().includes(needle))
+        ?? props.items.find((row) => needle.includes(String(row.item_name ?? '').toLowerCase()));
+
+    if (full) return full;
+
+    return lastAnswerItems.value.find((item) => String(item.item_name ?? '').toLowerCase().includes(needle))
+        ?? lastAnswerItems.value.find((item) => needle.includes(String(item.item_name ?? '').toLowerCase()))
+        ?? null;
 }
 
 /**
@@ -521,6 +849,20 @@ function classify(lowered) {
         return 'purchase_first';
     }
 
+    // Count-plus-ranking phrasing the main pattern misses: "give me 10 items to
+    // procure first" never says "recommend", "list", or "buy", so it fell
+    // through to guidance even though it asks for the ranked purchase list.
+    // Kept in this branch (not a new one) so nothing else in the flow changes:
+    // one classify() hit still means one run() and one provider call.
+    // "to procure" / "procure first" cannot collide with the earlier branches,
+    // which are checked first and contain none of these words.
+    if (/\b(?:items?|ones?)\s+to\s+(?:procure|buy|order|get|purchase|restock)\b/.test(t)
+        || /\b(?:buy|order|purchase|procure|restock)\s+first\b/.test(t)
+        || /\b(?:top|first)\s+\d+\b/.test(t)
+        || /\bgive\s+me\s+(?:the\s+)?\d+\s+items?\b/.test(t)) {
+        return 'purchase_first';
+    }
+
     return null;
 }
 
@@ -538,18 +880,25 @@ function resolveFollowUp(lowered) {
     const ids = [];
 
     // "the second one", "item 3", "the first and third"
-    const ordinals = [...lowered.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\b/g)].map((match) => parseInt(match[1], 10));
+    const ordinals = [...lowered.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\b/g)]
+        .filter((match) => !isRequestedCount(lowered, match))
+        .map((match) => parseInt(match[1], 10));
     ordinals.forEach((position) => {
         const item = items[position - 1];
         if (item && !ids.includes(item.inventory_id)) ids.push(item.inventory_id);
     });
 
-    // "the first", "the last one"
-    if (/\bfirst\b/.test(lowered) && !ordinals.length) {
+    // "the first", "the last one" — but not the ranking sense of the word:
+    // "first" in "procure first" or "first 10" asks for the ranked list, it does
+    // not mean "the first one". Without this, filtering the requested count
+    // above merely moved the misread from the 10th item to the 1st one.
+    const firstMatch = lowered.match(/\bfirst\b/);
+    if (firstMatch && !ordinals.length && !isRankingSense(lowered, firstMatch.index, firstMatch[0].length)) {
         const item = items[0];
         if (item) ids.push(item.inventory_id);
     }
-    if (/\b(last|final)\b/.test(lowered)) {
+    const lastMatch = lowered.match(/\b(last|final)\b/);
+    if (lastMatch && !isRankingSense(lowered, lastMatch.index, lastMatch[0].length)) {
         const item = items[items.length - 1];
         if (item) ids.push(item.inventory_id);
     }
@@ -562,14 +911,76 @@ function resolveFollowUp(lowered) {
         }
     });
 
-    if (ids.length === 0) return null;
+    if (ids.length === 0 && !/\b(all|rest|others|everything|them|these|those)\b/.test(lowered)) return null;
 
     // "all of them", "the rest", "everything else" means the whole prior list.
+    // Checked before the empty return: these phrasings name no ordinal or item,
+    // so ids is empty here by construction, and this check could never run
+    // after it — which is why "why those?" fell through to guidance.
     if (/\b(all|rest|others|everything|them|these|those)\b/.test(lowered)) {
         return items.map((item) => item.inventory_id);
     }
 
     return ids;
+}
+
+/**
+ * Whether the resolved ids are exactly the previous answer's whole list.
+ *
+ * Only then is a bare "why those?" a question about what the listed items
+ * have in common. A subset ("the second one") keeps the narrower path.
+ */
+function isWholePriorList(ids) {
+    if (!Array.isArray(ids) || lastAnswerItems.value.length === 0) return false;
+    if (ids.length !== lastAnswerItems.value.length) return false;
+
+    const prior = new Set(lastAnswerItems.value.map((item) => item.inventory_id));
+
+    return ids.every((id) => prior.has(id));
+}
+
+/**
+ * Whether a digit in the question is a quantity being asked for, not a position
+ * in the previous answer.
+ *
+ * "give me 10 items" asks for ten items; only ordinal forms ("the 10th",
+ * "item 10", "number 10") refer back to a listed position. Without this, the
+ * 10 in "give me 10 items to procure first" was read as "the 10th item" and the
+ * question was answered about a single item instead of the ranked list.
+ */
+function isRequestedCount(lowered, match) {
+    const after = lowered.slice(match.index + match[0].length);
+
+    // "10 items", "first 10 items"
+    if (/^\s+items\b/.test(after)) return true;
+
+    const before = lowered.slice(0, match.index);
+
+    // "give me 10", "show 5", "top 10" (without "items" after it)
+    if (/(?:give|show|list|get|send|display)\s+(?:me\s+|us\s+)?$/.test(before)) return true;
+    if (/(?:^|\s)(?:top|first)\s+$/.test(before)) return true;
+
+    return false;
+}
+
+/**
+ * Whether "first"/"last"/"final" is used in the ranking sense ("procure
+ * first", "first 10", "last 5") rather than as a reference ("the first one").
+ *
+ * Only the ranking sense is excluded. A standalone "the first", "first one",
+ * or "the last one" still narrows to that position, exactly as before.
+ */
+function isRankingSense(text, index, length) {
+    const before = text.slice(0, index);
+    const after = text.slice(index + length);
+
+    // "procure first", "buy first", "to order first"
+    if (/(?:procure|buy|order|purchase|restock|get)\s+(?:the\s+)?$/.test(before)) return true;
+
+    // "first 10", "last 5"
+    if (/^\s*\d/.test(after)) return true;
+
+    return false;
 }
 
 async function exportList(message) {
@@ -622,5 +1033,8 @@ function clearThread() {
     lastAnswerItems.value = [];
 }
 
-defineExpose({ clearThread });
+// askAboutItem is exposed so the Recommendations tab can hand an item straight
+// to the single-item explanation endpoint. It was already the path for "why is
+// <item> urgent?" inside this chat; it simply was not reachable from outside.
+defineExpose({ clearThread, askAboutItem });
 </script>

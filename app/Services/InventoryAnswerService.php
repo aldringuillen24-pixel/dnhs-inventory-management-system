@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\User;
 use App\Services\Response\LocalAnswerComposer;
@@ -31,12 +32,277 @@ class InventoryAnswerService
     }
 
     /**
+     * Answer a question, scoping it to a named category when that is what the
+     * user meant.
+     *
      * @param  array<string, mixed>  $routedQuestion
      * @return array<string, mixed>
      */
     public function answer(User $user, array $routedQuestion): array
     {
-        return $this->toolRouter->dispatch($user, $routedQuestion);
+        return $this->toolRouter->dispatch($user, $this->scopeToNamedCategory($user, $routedQuestion));
+    }
+
+    /**
+     * Turn "how many consumables are there?" into a category-scoped count.
+     *
+     * The parse contract can only carry a category as a numeric `category_id`,
+     * and a user never states an id, so a question naming a category arrived as
+     * an item name. Nothing matched an item called "consumables", so it answered
+     * zero, or, when the word did not read as an item name at all, silently
+     * counted the whole school instead. Both were confidently wrong.
+     *
+     * The recognition lives here, at the boundary, rather than in the parse
+     * schema: adding a key to that schema would invalidate every existing
+     * fixture, and no tool needs to change because the stock path already
+     * honours `category_id`.
+     *
+     * Deliberately narrow. It fires only when the phrase names no inventory
+     * record at all, so a real item can never be reinterpreted as a category.
+     * The router re-checks the capability named here, so this grants nothing the
+     * role did not already hold.
+     *
+     * @param  array<string, mixed>  $routedQuestion
+     * @return array<string, mixed>
+     */
+    private function scopeToNamedCategory(User $user, array $routedQuestion): array
+    {
+        $itemName = $routedQuestion['item_name'] ?? null;
+        $capability = $routedQuestion['capability'] ?? null;
+
+        if (! is_string($itemName) || trim($itemName) === '' || isset($routedQuestion['category_id'])) {
+            return $routedQuestion;
+        }
+
+        // Recognising a category means reading inventory, and that must never
+        // happen for a role that may not ask. The router refuses this request
+        // without querying anything, and it has to keep doing so.
+        if (! is_string($capability) || ! $this->policy->allows($user, $capability)) {
+            return $routedQuestion;
+        }
+
+        // An item that really exists always wins over a category reading. Only the
+        // existence of a match matters here, so the narrowest column set is
+        // asked for: this lookup must not pull fields a real answer would not.
+        $existing = $this->matchingInventoryRecords(trim($itemName), array_filter([
+            'unit' => $routedQuestion['unit'] ?? null,
+            'serial_number' => $routedQuestion['serial_number'] ?? null,
+        ], fn ($value): bool => $value !== null), ['item_id']);
+
+        if ($existing->isNotEmpty()) {
+            return $routedQuestion;
+        }
+
+        $categoryId = $this->categoryNamedBy($itemName);
+        if ($categoryId === null) {
+            return $routedQuestion;
+        }
+
+        $scoped = $routedQuestion;
+        $scoped['item_name'] = null;
+        $scoped['category_id'] = $categoryId;
+        $scoped['filters'] = array_merge(
+            is_array($routedQuestion['filters'] ?? null) ? $routedQuestion['filters'] : [],
+            ['category_id' => $categoryId],
+        );
+
+        // Warehouse availability ignores a category scope and would report every
+        // item in the school. The stock path applies it.
+        if (($routedQuestion['capability'] ?? null) === AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY) {
+            $scoped['capability'] = AiCapabilityPolicy::VIEW_INVENTORY_STOCK;
+        }
+
+        return $scoped;
+    }
+
+    /**
+     * The id of the category a phrase names, or null when it names none.
+     *
+     * Case, spacing, hyphens and a trailing plural are ignored, and the word
+     * "category" is tolerated because that is how the phrase arrives.
+     */
+    private function categoryNamedBy(string $phrase): ?int
+    {
+        $needle = $this->normaliseCategoryPhrase($phrase);
+        if ($needle === '') {
+            return null;
+        }
+
+        $match = Category::query()
+            ->get(['category_id', 'category_name'])
+            ->first(function (Category $category) use ($needle): bool {
+                $name = $this->normaliseCategoryPhrase((string) $category->category_name);
+
+                return $name !== '' && ($name === $needle || $this->singular($name) === $this->singular($needle));
+            });
+
+        return $match === null ? null : (int) $match->category_id;
+    }
+
+    private function normaliseCategoryPhrase(string $phrase): string
+    {
+        $text = mb_strtolower(trim($phrase));
+        $text = preg_replace('/\bcategor(?:y|ies)\b/u', ' ', $text) ?? $text;
+        $text = preg_replace('/[^\pL\pN]+/u', ' ', $text) ?? $text;
+        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+
+        return trim($text);
+    }
+
+    private function singular(string $value): string
+    {
+        return preg_match('/[^s]s$/u', $value) === 1 ? substr($value, 0, -1) : $value;
+    }
+
+    /**
+     * Answer keys that carry rows a user was shown and could refer back to.
+     *
+     * Ordered by how commonly they appear, not by importance. Anything not in
+     * this list is ignored, which keeps a scalar answer such as a bare count
+     * from being mistaken for a list of referable items.
+     */
+    private const LISTED_ANSWER_KEYS = [
+        'items',
+        'status_items',
+        'location_items',
+        'ready_to_dispose_items',
+        'disposal_records',
+        'maintenance_records',
+        'assignment_records',
+        'purchase_history',
+        'inventory_identifiers',
+        'assigned_items',
+    ];
+
+    /**
+     * The inventory ids a successful answer put in front of the user.
+     *
+     * This is the only thing that can resolve an ordinal reference such as "the
+     * second one", because counting items in reply prose is fragile. It is read
+     * from the answer that was already produced, so it never re-queries.
+     *
+     * Answer rows do not carry a flat `item_id`: grouped shapes carry an
+     * `inventory_ids` array, record shapes carry `inventory_id`, and
+     * `assigned_items` is a list in one tool and a summed integer in another.
+     * Both are handled, and an unrecognised shape yields an empty array.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<int, int>
+     */
+    public function lastCandidateIds(array $result): array
+    {
+        if (($result['status'] ?? null) !== 'success') {
+            return [];
+        }
+
+        $answer = $result['answer'] ?? null;
+        if (! is_array($answer)) {
+            return [];
+        }
+
+        $ids = [];
+        foreach (self::LISTED_ANSWER_KEYS as $key) {
+            if (! array_key_exists($key, $answer)) {
+                continue;
+            }
+
+            // `assigned_items` is a list in AssignmentTool and a summed integer
+            // in InventoryTool. Anything that is not a list of rows is ignored.
+            if (! is_array($answer[$key]) || ! array_is_list($answer[$key])) {
+                continue;
+            }
+
+            foreach ($answer[$key] as $row) {
+                if (is_array($row)) {
+                    $ids = [...$ids, ...$this->inventoryIdsIn($row)];
+                }
+            }
+        }
+
+        return $ids === [] ? [] : $this->uniqueInventoryIds($ids);
+    }
+
+    /**
+     * The inventory ids an answer resolved against, whether or not they were
+     * listed.
+     *
+     * Wider than `lastCandidateIds()` because it also covers a single-item
+     * answer such as `item_details`, where one item is referable without ever
+     * having been offered as a choice.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<int, int>
+     */
+    public function lastEntityRefs(array $result): array
+    {
+        if (($result['status'] ?? null) !== 'success') {
+            return [];
+        }
+
+        $answer = $result['answer'] ?? null;
+        if (! is_array($answer)) {
+            return [];
+        }
+
+        $ids = $this->lastCandidateIds($result);
+
+        $details = $answer['item_details'] ?? null;
+        if (is_array($details)) {
+            $ids = [...$ids, ...$this->inventoryIdsIn($details)];
+        }
+
+        return $ids === [] ? [] : $this->uniqueInventoryIds($ids);
+    }
+
+    /**
+     * Every inventory id one answer row refers to.
+     *
+     * Total by construction: a row that carries none of the recognised keys
+     * contributes nothing rather than failing.
+     *
+     * @param  array<string, mixed>  $row
+     * @return array<int, int>
+     */
+    private function inventoryIdsIn(array $row): array
+    {
+        $ids = [];
+
+        foreach (['inventory_ids', 'inventory_id', 'item_id'] as $key) {
+            if (! array_key_exists($key, $row)) {
+                continue;
+            }
+
+            $value = $row[$key];
+
+            if (is_array($value)) {
+                foreach ($value as $candidate) {
+                    if (is_int($candidate) && $candidate > 0) {
+                        $ids[] = $candidate;
+                    } elseif (is_string($candidate) && ctype_digit($candidate) && (int) $candidate > 0) {
+                        $ids[] = (int) $candidate;
+                    }
+                }
+
+                continue;
+            }
+
+            if (is_int($value) && $value > 0) {
+                $ids[] = $value;
+            } elseif (is_string($value) && ctype_digit($value) && (int) $value > 0) {
+                $ids[] = (int) $value;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  array<int, int>  $ids
+     * @return array<int, int>
+     */
+    private function uniqueInventoryIds(array $ids): array
+    {
+        return array_values(array_unique($ids, SORT_REGULAR));
     }
 
     public function conversationContext(User $user, array $routedQuestion, array $result): ?array
@@ -360,7 +626,15 @@ class InventoryAnswerService
             $itemName = trim($selection);
             if ($itemName === '' || mb_strlen($itemName) > 255
                 || $this->matchingInventoryRecords($itemName)->isEmpty()) {
-                return null;
+                // A user may answer a pending clarification by restating the
+                // whole question rather than naming the item on its own. The
+                // sentence is not itself an item name, so the direct match above
+                // fails; fall back to the one item the sentence does name.
+                $itemName = $this->resolveRestatedItemName($selection) ?? '';
+
+                if ($itemName === '') {
+                    return null;
+                }
             }
 
             return [
@@ -447,7 +721,17 @@ class InventoryAnswerService
         }
 
         if ($matches->count() !== 1) {
-            return null;
+            // Not a menu selection. Accept a restatement of the question as an
+            // answer when it names exactly one of the candidates actually
+            // offered. Selection stays scoped to the displayed set, so a name
+            // outside it is never resolved and this cannot become a search.
+            $restated = $this->resolveRestatedCandidate($selection, $items);
+
+            if ($restated === null) {
+                return null;
+            }
+
+            $matches = collect([$restated]);
         }
 
         $item = $matches->first();
@@ -469,7 +753,215 @@ class InventoryAnswerService
         ];
     }
 
-    public function clarificationReply(User $user, array $pending): string
+    /**
+     * Find the single item named inside a restated question.
+     *
+     * Used when a pending clarification asked which item is meant and the user
+     * replied with the whole question again. Matching is by item name appearing
+     * in the reply, and it must resolve to exactly one record: zero or several
+     * leaves the question ambiguous and the assistant re-asks.
+     */
+    private function resolveRestatedItemName(string $selection): ?string
+    {
+        $needle = $this->normalizeClarificationSelection($selection);
+        if ($needle === '' || mb_strlen($needle) > 1000) {
+            return null;
+        }
+
+        $named = $this->matchingInventoryRecords(null)
+            ->filter(fn (Inventory $item): bool => $this->selectionNamesItem($needle, (string) $item->item_name))
+            ->unique(fn (Inventory $item): int => (int) $item->item_id)
+            ->values();
+
+        return $named->count() === 1 ? (string) $named->first()->item_name : null;
+    }
+
+    /**
+     * Find the single offered candidate named inside a restated question.
+     *
+     * Scoped to the candidates that were displayed, which is what keeps a
+     * restatement from turning a clarification into a general search.
+     */
+    private function resolveRestatedCandidate(string $selection, $items): ?Inventory
+    {
+        $needle = $this->normalizeClarificationSelection($selection);
+        if ($needle === '' || mb_strlen($needle) > 1000) {
+            return null;
+        }
+
+        $matches = $items->filter(
+            fn (Inventory $item): bool => $this->selectionNamesItem($needle, (string) $item->item_name)
+        );
+
+        return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    /**
+     * Whether a normalised reply contains a normalised item name.
+     *
+     * Whole-word bounded on both sides, so "epson" does not match a record
+     * named "epson projector extra" and "ep" does not match "epson".
+     */
+    private function selectionNamesItem(string $needle, string $itemName): bool
+    {
+        $name = $this->normalizeClarificationSelection($itemName);
+        if ($name === '' || mb_strlen($name) > 255) {
+            return false;
+        }
+
+        $pattern = preg_quote($name, '/');
+        $pattern = preg_replace('/([^ ]+)$/u', '$1s?', $pattern) ?? $pattern;
+
+        return preg_match('/(?<![\pL\pN])'.$pattern.'(?![\pL\pN])/u', $needle) === 1;
+    }
+
+    /**
+ * Resolve an ordinal reply against the candidate ids a previous answer offered.
+ *
+ * A pending clarification is not the only way a user points at something they
+ * were shown. After an answer that listed several items, "the second one" has
+ * nothing to select from today, because the list was never kept. This resolves
+ * such a reply against the last successful turn's candidate set and re-runs the
+ * action that turn was answering.
+ *
+ * Returns null whenever the reply is not a bare selection, the set is too small
+ * to be meaningful, the item no longer exists, or the user may no longer see
+ * it. In every one of those cases the caller falls through to the normal path,
+ * so nothing that works today changes.
+ *
+ * @param  array{intent: string|null, capability: string|null, response_type: string|null, candidate_ids: array<int, int>}  $last
+ * @return array<string, mixed>|null
+ */
+public function resolveRememberedSelection(User $user, array $last, string $selection): ?array
+{
+    $capability = $last['capability'] ?? null;
+    $candidateIds = $last['candidate_ids'] ?? [];
+
+    if (! is_string($capability)
+        || ! $this->policy->allows($user, $capability)
+        || ! is_array($candidateIds)
+        || array_is_list($candidateIds) === false
+        || count($candidateIds) < 2
+        || count($candidateIds) > 20) {
+        return null;
+    }
+
+    $item = $this->candidateFromSelection($candidateIds, $selection);
+    if ($item === null) {
+        return null;
+    }
+
+    $intent = in_array($last['intent'] ?? null, ['factual', 'explanation'], true)
+        ? $last['intent']
+        : 'factual';
+    $responseType = in_array($last['response_type'] ?? null, ['detail', 'count', 'list', 'explanation'], true)
+        ? $last['response_type']
+        : 'detail';
+
+    return [
+        'original_question' => $selection,
+        'normalized_question' => mb_strtolower(trim($selection)),
+        'canonical_question_key' => hash('sha256', mb_strtolower(trim($selection))),
+        'classification_confidence' => 'application_validated',
+        'intent' => $intent,
+        'capability' => $capability,
+        'item_name' => $item->item_name,
+        'inventory_id' => (int) $item->item_id,
+        'category_id' => (int) $item->category_id,
+        'unit' => $item->unit,
+        'serial_number' => $item->serial_number,
+        'needs_external_explanation' => $intent === 'explanation',
+        'needs_clarification' => false,
+        'vague' => false,
+        'follow_up' => true,
+        'starts_new_topic' => false,
+        'topic_action' => 'continue_topic',
+        'response_type' => $responseType,
+        'query' => null,
+        'filters' => [],
+        'request_type' => $intent,
+        'entity_candidate' => $item->item_name,
+        'entity_candidate_status' => 'resolved',
+        'ambiguous' => false,
+    ];
+}
+
+/**
+ * Pick one item out of a candidate id set using the same selection grammar the
+ * pending clarification already accepts.
+ *
+ * One implementation, so an ordinal means the same thing in both places.
+ *
+ * @param  array<int, mixed>  $candidateIds
+ */
+private function candidateFromSelection(array $candidateIds, string $selection): ?Inventory
+{
+    $selectionText = $this->normalizeClarificationSelection($selection);
+    if ($selectionText === '') {
+        return null;
+    }
+
+    $ids = [];
+    foreach ($candidateIds as $id) {
+        if (is_int($id) && $id > 0) {
+            $ids[] = $id;
+        }
+    }
+    $ids = array_values(array_unique($ids));
+
+    if ($ids === [] || count($ids) > 20) {
+        return null;
+    }
+
+    $items = Inventory::query()
+        ->whereIn('item_id', $ids)
+        ->where('status', '!=', 'disposed')
+        ->get();
+
+    if ($items->count() !== count($ids)) {
+        // A candidate the user was shown no longer exists, or is now disposed.
+        // Falling through asks rather than answering about a stale record.
+        return null;
+    }
+
+    $selectedId = null;
+    if (preg_match('/^(?:the )?(first|second|third)(?: one| item| match)?$/u', $selectionText, $matches) === 1) {
+        $index = ['first' => 0, 'second' => 1, 'third' => 2][$matches[1]];
+        $selectedId = $index < count($ids) ? $ids[$index] : null;
+    } elseif (preg_match('/\b(?:inventory\s*)?(?:id|number)\s+(\d+)\b/', $selectionText, $matches) === 1) {
+        $selectedId = (int) $matches[1];
+    } elseif (preg_match('/^\d+$/', $selectionText) === 1) {
+        $selectedId = (int) $selectionText;
+    }
+
+    if ($selectedId !== null) {
+        return $items->firstWhere('item_id', $selectedId);
+    }
+
+    // Serial number and asset tag, matched exactly as the clarification does.
+    return $items->first(function (Inventory $item) use ($selectionText): bool {
+        $serialSelection = preg_replace('/^(?:serial(?: number)?|sn)\s+/u', '', $selectionText) ?? $selectionText;
+
+        if ($item->serial_number) {
+            $serial = $this->normalizeClarificationSelection((string) $item->serial_number);
+            if ($serial !== '' && ($selectionText === $serial || $serialSelection === $serial)) {
+                return true;
+            }
+        }
+
+        if ($item->inventory_item_no) {
+            $tag = $this->normalizeClarificationSelection((string) $item->inventory_item_no);
+            $tagSelection = preg_replace('/^(?:asset )?tag\s+/u', '', $selectionText) ?? $selectionText;
+            if ($tag !== '' && ($selectionText === $tag || $tagSelection === $tag)) {
+                return true;
+            }
+        }
+
+        return false;
+    });
+}
+
+public function clarificationReply(User $user, array $pending): string
     {
         if (! $this->canResolveClarification($user, $pending)) {
             return 'Which item would you like to check?';

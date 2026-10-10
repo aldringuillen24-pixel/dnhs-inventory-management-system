@@ -47,7 +47,14 @@ class GeminiApiService
             }
 
             $parts = $response->json('candidates.0.content.parts', []);
+            // Reasoning models (Gemma 4 and others) return their scratchpad as a
+            // part flagged "thought": true alongside the real answer. Plucking
+            // every 'text' field would splice that scratchpad into the reply the
+            // user reads, and it can exhaust maxOutputTokens before the model
+            // writes an answer at all — which looks like an empty response. Only
+            // answer parts are collected.
             $text = collect(is_array($parts) ? $parts : [])
+                ->reject(fn (mixed $part): bool => is_array($part) && ($part['thought'] ?? false) === true)
                 ->pluck('text')
                 ->filter(fn ($part): bool => is_string($part))
                 ->implode('');

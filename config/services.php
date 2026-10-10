@@ -38,8 +38,10 @@ return [
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
         'model' => env('GEMINI_MODEL', 'gemini-3.1-flash-lite'),
-        'connect_timeout' => env('GEMINI_CONNECT_TIMEOUT', 5),
-        'timeout' => env('GEMINI_TIMEOUT', 12),
+        // Generous by default: reasoning models take ~14s per call before they
+        // answer, and a 12s ceiling turned every request into a cURL error 28.
+        'connect_timeout' => env('GEMINI_CONNECT_TIMEOUT', 10),
+        'timeout' => env('GEMINI_TIMEOUT', 90),
     ],
 
 ];

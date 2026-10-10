@@ -1,8 +1,8 @@
 <template>
   <div>
     <div class="mb-4">
-      <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Inventory Overview</h1>
-      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Read-only inventory summary and the queue of items awaiting inspection.</p>
+      <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Inspection</h1>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Items flagged by the property custodian and awaiting inspection.</p>
     </div>
 
     <div v-if="error" class="rounded-md border border-error-200 bg-error-50 p-4 text-xs text-error-700 dark:border-error-800 dark:bg-error-500/10 dark:text-error-400">
@@ -18,69 +18,8 @@
         <MetricCard compact dense micro title="Value" :value="money(metrics.value)" subtitle="Pesos" :loading="loading" />
       </div>
 
-      <div class="mt-4 border-b border-gray-200 dark:border-gray-800">
-        <nav class="-mb-px flex gap-1 overflow-x-auto" aria-label="Inventory Overview sections">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            type="button"
-            class="inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-xs font-medium transition-colors"
-            :class="activeTab === tab.key
-              ? 'border-emerald-600 text-emerald-700 dark:border-emerald-400 dark:text-emerald-300'
-              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
-            :aria-pressed="activeTab === tab.key"
-            @click="activeTab = tab.key"
-          >
-            {{ tab.label }}
-            <span
-              v-if="tab.key === 'inspection'"
-              class="rounded-md px-2 py-0.5 text-[10px] font-bold"
-              :class="queueTotal > 0
-                ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300'
-                : 'bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-gray-400'"
-            >
-              {{ format(queueTotal) }}
-            </span>
-          </button>
-        </nav>
-      </div>
-
-      <!-- Category summary -->
-      <div v-show="activeTab === 'summary'" class="mt-4 overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <table class="w-full min-w-[48rem] text-left text-xs">
-          <thead>
-            <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400">
-              <th class="px-4 py-3.5">Category</th>
-              <th class="px-4 py-3.5 text-right">Total</th>
-              <th class="px-4 py-3.5 text-right">Available</th>
-              <th class="px-4 py-3.5 text-right">Assigned</th>
-              <th class="px-4 py-3.5 text-right">Value</th>
-            </tr>
-          </thead>
-          <tbody v-if="loading" class="divide-y divide-gray-100 dark:divide-white/5" aria-hidden="true">
-            <tr v-for="row in 5" :key="row">
-              <td v-for="column in 5" :key="column" class="px-4 py-3.5">
-                <div class="compact-skeleton h-3" :class="column === 1 ? 'w-2/3' : 'ml-auto w-12'" />
-              </td>
-            </tr>
-          </tbody>
-          <tbody v-else class="divide-y divide-gray-100 dark:divide-white/5">
-            <tr v-for="row in categories" :key="row.name" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
-              <td class="px-4 py-3.5 font-semibold text-gray-900 dark:text-white">{{ row.name }}</td>
-              <td class="px-4 py-3.5 text-right">{{ format(row.total) }}</td>
-              <td class="px-4 py-3.5 text-right">{{ format(row.available) }}</td>
-              <td class="px-4 py-3.5 text-right">{{ format(row.assigned) }}</td>
-              <td class="px-4 py-3.5 text-right">₱{{ money(row.value) }}</td>
-            </tr>
-            <tr v-if="!loading && !categories.length">
-              <td colspan="5" class="px-4 py-8 text-center text-xs text-gray-500">No inventory to show.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
       <!-- Inspection queue -->
-      <div v-show="activeTab === 'inspection'" class="mt-4">
+      <div class="mt-4">
         <div class="mb-2.5 flex flex-wrap items-center justify-between gap-2.5">
           <p class="text-[11px] text-gray-500 dark:text-gray-400">
             {{ queueTotal }} item record(s) flagged by the property custodian and awaiting inspection.
@@ -172,13 +111,6 @@ import InspectItemModal from './InspectItemModal.vue';
 const loading = ref(true);
 const error = ref('');
 const metrics = ref({});
-const categories = ref([]);
-
-const activeTab = ref('summary');
-const tabs = [
-  { key: 'summary', label: 'Category Summary' },
-  { key: 'inspection', label: 'Under Inspection' },
-];
 
 const queue = ref([]);
 const queueTotal = ref(0);
@@ -231,7 +163,6 @@ async function load(options = {}) {
     },
     applyData: (data) => {
       metrics.value = data.metrics ?? {};
-      categories.value = data.categories ?? [];
     },
     onStart: () => {
       loading.value = true;

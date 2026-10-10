@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\AssignmentRequest;
+use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\Inventory;
 use App\Models\User;
 use App\Services\InventoryOperationService;
+use App\Support\RequestableItemMatcher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Carbon;
@@ -15,6 +17,12 @@ use Illuminate\Validation\Rule;
 
 class EndUserController extends Controller
 {
+    /**
+     * See AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT. Aliased here so the
+     * request flow reads in terms of the status it writes.
+     */
+    public const STATUS_WAITING_FOR_PROCUREMENT = AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT;
+
     public function dashboard(Request $request)
     {
         $user = $request->user();
@@ -29,7 +37,7 @@ class EndUserController extends Controller
         $pendingRequests = AssignmentRequest::query()
             ->with('targetUser.role')
             ->where('user_id', $user->id)
-            ->whereIn('status', ['waiting for approval', 'waiting for transfer approval'])
+            ->whereIn('status', ['waiting for approval', 'waiting for transfer approval', self::STATUS_WAITING_FOR_PROCUREMENT])
             ->get(['status', 'target_user_id']);
         $pendingReturns = AssignmentRequest::query()
             ->where('user_id', $user->id)
@@ -39,13 +47,21 @@ class EndUserController extends Controller
         $pendingRequestData = collect([
             [
                 'label' => 'Item Requests',
-                'value' => $pendingRequests->filter(fn ($request) => $request->status === 'waiting for approval' && $request->targetUser?->role?->role_name === 'Property Custodian')->count(),
+                // A procurement request is an open item request too: the end user
+                // is waiting on it, and it is reported separately below so the
+                // unresolved ones are visible rather than hidden inside a
+                // fulfilled-looking count.
+                'value' => $pendingRequests->filter(fn ($request) => ($request->status === 'waiting for approval' || $request->status === self::STATUS_WAITING_FOR_PROCUREMENT) && $request->targetUser?->role?->role_name === 'Property Custodian')->count(),
             ],
             [
                 'label' => 'Transfer Requests',
                 'value' => $pendingRequests->filter(fn ($request) => $request->status === 'waiting for transfer approval' || ($request->status === 'waiting for approval' && $request->targetUser?->role?->role_name !== 'Property Custodian'))->count(),
             ],
             ['label' => 'Return Requests', 'value' => $pendingReturns],
+            [
+                'label' => 'Waiting on Procurement',
+                'value' => $pendingRequests->filter(fn ($request) => $request->status === self::STATUS_WAITING_FOR_PROCUREMENT)->count(),
+            ],
         ]);
 
         $today = now()->startOfDay();
@@ -152,41 +168,97 @@ class EndUserController extends Controller
             ->orderBy('requested_at', 'desc')
             ->get();
 
-        // Show available totals by requestable item type, not by physical stock row.
-        $inventoryItems = Inventory::query()
+        // Catalogue of every requestable item type, not only the types holding
+        // stock right now. An out-of-stock item has to stay selectable, or a
+        // category with nothing available would offer the end user no name to
+        // ask for and no way to record the demand at all.
+        //
+        // Availability is looked up per type rather than summed over this
+        // query, because this query is deliberately NOT filtered to available
+        // rows — that is the whole point of it.
+        $availableByType = Inventory::query()
             ->where('status', 'available')
             ->where('quantity', '>', 0)
             ->select('item_name', 'category_id', 'unit')
             ->selectRaw('SUM(quantity) as available_quantity')
-            ->with('category:category_id,category_name')
             ->groupBy('item_name', 'category_id', 'unit')
-            ->orderBy('item_name')
-            ->orderBy('category_id')
-            ->orderBy('unit')
             ->get()
-            ->map(function (Inventory $item) {
+            ->mapWithKeys(fn (Inventory $item): array => [
+                self::itemTypeKey($item->item_name, $item->category_id, $item->unit) => (int) $item->available_quantity,
+            ]);
+
+        // Every category, not only the ones that happen to hold stock. A
+        // category with no inventory rows at all is exactly the case an end user
+        // needs to raise: they want something the school has never catalogued.
+        // Deriving this list from inventory hid those entirely.
+        $categories = Category::query()
+            ->orderBy('category_name')
+            ->get()
+            ->map(function (Category $category) use ($availableByType): array {
+                $listed = Inventory::query()
+                    ->where('category_id', $category->category_id)
+                    ->select('item_name', 'category_id', 'unit')
+                    ->distinct()
+                    ->orderBy('item_name')
+                    ->orderBy('unit')
+                    ->get()
+                    // Grouped by name + category + unit, so same-named items in
+                    // different categories or units remain distinct things.
+                    ->map(fn (Inventory $item): array => [
+                        'item_name' => $item->item_name,
+                        'category_id' => (int) $category->category_id,
+                        'unit' => $item->unit,
+                        'available_quantity' => (int) $availableByType->get(
+                            self::itemTypeKey($item->item_name, $item->category_id, $item->unit),
+                            0
+                        ),
+                    ])
+                    ->values()
+                    ->all();
+
                 return [
-                    'item_name' => $item->item_name,
-                    'category_id' => $item->category_id,
-                    'category_name' => $item->category?->category_name,
-                    'unit' => $item->unit,
-                    'quantity' => (int) $item->available_quantity,
+                    'category_id' => (int) $category->category_id,
+                    'category_name' => $category->category_name,
+                    // Drives the modal: a category with nothing available shows
+                    // the out-of-stock message and the feedback box instead of
+                    // a pickable list.
+                    'available_item_count' => count(array_filter(
+                        $listed,
+                        fn (array $item): bool => $item['available_quantity'] > 0
+                    )),
+                    'items' => $listed,
                 ];
-            })->values();
+            })
+            ->values();
 
         $pendingIncomingCount = $incomingRequests
             ->whereIn('status', ['waiting for approval', 'waiting for transfer approval'])
             ->count();
-        $myPendingCount = $myRequests->where('status', 'waiting for approval')->count();
+        $myPendingCount = $myRequests
+            ->whereIn('status', ['waiting for approval', self::STATUS_WAITING_FOR_PROCUREMENT])
+            ->count();
 
         return response()->json([
             'title'                => 'Requests',
             'myRequests'           => $myRequests,
             'incomingRequests'     => $incomingRequests,
-            'availableItems'       => $inventoryItems,
+            'categories'           => $categories,
             'pendingIncomingCount' => $pendingIncomingCount,
             'myPendingCount'       => $myPendingCount,
         ]);
+    }
+
+    /**
+     * Stable key for a requestable item type.
+     *
+     * An item name alone is not an identity: the same name can exist under two
+     * categories or two units, and those are different requestable things.
+     *
+     * @see storeRequest()
+     */
+    private static function itemTypeKey(string $itemName, mixed $categoryId, mixed $unit): string
+    {
+        return $itemName.'|'.(int) $categoryId.'|'.$unit;
     }
 
     public function requestHistory()
@@ -221,16 +293,16 @@ class EndUserController extends Controller
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $availableQuantity = Inventory::query()
-            ->where('item_name', $validated['item_name'])
-            ->where('category_id', $validated['category_id'])
-            ->where('unit', $validated['unit'])
-            ->where('status', 'available')
-            ->sum('quantity');
-
-        if ($validated['quantity'] > $availableQuantity) {
-            return redirect()->back()->with(['error' => 'Requested quantity exceeds available stock.']);
-        }
+        // Availability is resolved through the same matcher the custodian's stock
+        // health column and the allocation validation use. Exact string equality
+        // would disagree with them: an end user typing "chair" against a
+        // catalogue that says "Chairs" would be recorded as having no stock when
+        // 19 chairs are sitting on the shelf.
+        $availableQuantity = RequestableItemMatcher::availableQuantity(
+            $validated['item_name'],
+            (int) $validated['category_id'],
+            $validated['unit'],
+        );
 
         $custodian = User::whereHas('role', function ($query) {
             $query->where('role_name', 'Property Custodian');
@@ -240,6 +312,18 @@ class EndUserController extends Controller
             return redirect()->back()->with(['error' => 'No property custodian is available to receive this request.']);
         }
 
+        // Three cases, not two. A total absence of stock is a legitimate need
+        // the end user must still be able to state, so it is recorded as unmet
+        // demand instead of being refused. A PARTIAL shortfall is different: it
+        // is a quantity the end user can simply correct, so it stays an error.
+        if ($availableQuantity === 0) {
+            $status = self::STATUS_WAITING_FOR_PROCUREMENT;
+        } elseif ($validated['quantity'] > $availableQuantity) {
+            return redirect()->back()->with(['error' => 'Requested quantity exceeds available stock.']);
+        } else {
+            $status = 'waiting for approval';
+        }
+
         $assignmentRequest = AssignmentRequest::create([
             'requested_item_name' => $validated['item_name'],
             'requested_category_id' => $validated['category_id'],
@@ -247,16 +331,23 @@ class EndUserController extends Controller
             'user_id' => Auth::id(),
             'target_user_id' => $custodian->id,
             'quantity' => $validated['quantity'],
-            'status' => 'waiting for approval',
+            'status' => $status,
             'notes' => $validated['notes'] ?? null,
             'requested_at' => now(),
         ]);
 
         if (!$assignmentRequest) {
             return redirect()->back()->withErrors(['item_name' => 'Failed to create request. Please try again.']);
-        } else {
-            return redirect()->route('endUser.my-requests')->with('success', 'Request submitted to property custodian.');
         }
+
+        // The confirmation must not promise an approval the custodian cannot
+        // give. Unmet demand goes to procurement, not to an approval queue.
+        if ($status === self::STATUS_WAITING_FOR_PROCUREMENT) {
+            return redirect()->route('endUser.my-requests')
+                ->with('success', 'No stock is available for this item. Your request was recorded and will inform procurement.');
+        }
+
+        return redirect()->route('endUser.my-requests')->with('success', 'Request submitted to property custodian.');
     }
 
     public function myAssignedItems(Request $request)
@@ -324,7 +415,7 @@ class EndUserController extends Controller
             // Fulfilled item-type requests are represented by their exact inventory fulfillment rows.
             ->where(function ($query) {
                 $query->whereNotNull('item_id')
-                    ->orWhere('status', 'waiting for approval');
+                    ->orWhereIn('status', ['waiting for approval', self::STATUS_WAITING_FOR_PROCUREMENT]);
             })
             ->get()
             ->map(function ($request) {

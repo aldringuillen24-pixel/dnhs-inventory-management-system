@@ -190,7 +190,14 @@ trait InteractsWithInventory
 
     protected function groupInventoryRecords($records)
     {
-        $records->loadMissing('transactions.assignmentReturns');
+        // `matchingInventoryRecords()` returns a plain collection when nothing
+        // matched, and a plain collection has no eager loading. Calling
+        // loadMissing() on one raised a 500 for any question naming an item that
+        // does not exist, such as "What about paper?". Grouping an empty set is
+        // still correct, so the eager load is simply skipped when unsupported.
+        if (method_exists($records, 'loadMissing')) {
+            $records->loadMissing('transactions.assignmentReturns');
+        }
 
         return $records->groupBy(fn (Inventory $item): string => strtolower(trim($item->item_name)))
             ->map(function ($group): array {

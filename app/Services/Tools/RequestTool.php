@@ -38,7 +38,14 @@ class RequestTool implements ToolContract
     {
         if (($request['query'] ?? null) === 'pending_count') {
             $count = AssignmentRequest::query()->where('user_id', $user->id)
-                ->whereIn('status', ['waiting for approval', 'waiting for transfer approval', 'waiting for custodian approval'])
+                ->whereIn('status', [
+                    'waiting for approval',
+                    'waiting for transfer approval',
+                    'waiting for custodian approval',
+                    // An unmet request is still open on the end user's side, so
+                    // it belongs in their pending count.
+                    AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
+                ])
                 ->count();
 
             return $this->result('success', $request['intent'], $request['capability'], ['pending_count' => $count]);
@@ -62,6 +69,7 @@ class RequestTool implements ToolContract
             'waiting for approval',
             'waiting for transfer approval',
             'waiting for custodian approval',
+            AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
         ])->get(['item_id', 'requested_item_name', 'requested_unit', 'quantity', 'requested_at'])->load('item:item_id,item_name,unit')
             ->map(fn (AssignmentRequest $itemRequest): array => [
                 'item_name' => $itemRequest->item?->item_name ?? $itemRequest->requested_item_name ?? 'Item',

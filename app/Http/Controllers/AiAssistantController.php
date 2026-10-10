@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Services\AiInventoryService;
 use App\Services\AiCapabilityPolicy;
 use App\Services\Conversation\ConversationContextManager;
+use App\Services\Conversation\ConversationTurnLog;
+use App\Services\Conversation\ConversationContextSelector;
 use App\Services\Forecast\ForecastChatHandoff;
 use App\Services\InventoryAnswerService;
 use App\Services\Response\AnswerComposer;
@@ -27,6 +29,8 @@ class AiAssistantController extends Controller
         protected InventoryComparisonService $comparisonService,
         protected ForecastChatHandoff $forecastHandoff,
         protected ConversationContextManager $conversationContext,
+        protected ConversationTurnLog $turnLog,
+        protected ConversationContextSelector $contextSelector,
         protected CompoundPlanExecutor $compoundPlanExecutor,
         protected AnswerComposer $answerComposer,
     ) {}
@@ -58,6 +62,11 @@ class AiAssistantController extends Controller
             if ($request->hasSession()) {
                 $this->conversationContext->forgetAll($request, $user);
             }
+
+            // The durable turn log holds entity references and candidate ids the
+            // previous role was shown. Clearing only the session keys would
+            // leave those readable once the role changes, so the rows go too.
+            $this->turnLog->purge($user);
 
             return response()->json([
                 'success' => false,
@@ -121,6 +130,15 @@ class AiAssistantController extends Controller
                 }
             }
 
+            // The session snapshot is short-lived. When it is gone the recorded
+            // turns are not, so the topic is rebuilt from them if the
+            // conversation is still inside the retention window. A user who
+            // returns after a break keeps their history; one whose conversation
+            // has aged out starts clean and is asked.
+            if ($context === null) {
+                $context = $this->rebuiltContext($request, $user);
+            }
+
             // Load any pending clarification context from the session
             $pendingClarification = $state->pendingClarification;
             if ($pendingClarification !== null) {
@@ -179,10 +197,41 @@ class AiAssistantController extends Controller
             }
 
             if ($routedQuestion === null && $pendingClarification === null) {
+                $routedQuestion = $this->rememberedSelection($request, $user, $validated['message']);
+            }
+
+            if ($routedQuestion === null && $pendingClarification === null) {
                 $routedQuestion = $this->applicationFollowUp($validated['message'], $context);
             }
 
-            $routedQuestion ??= $this->intentParser->route($validated['message'], $context ?? [], $state->turns);
+            // Reference resolution is the fallback, not the first choice.
+            //
+            // The deterministic resolvers above are free and already cover the
+            // short forms: "why?", "where is it?", "how many are available?".
+            // Running the provider first would spend two extra calls re-deciding
+            // what a regex decides locally. It runs only when nothing else
+            // resolved the turn, which is exactly where the regexes cannot help:
+            // ordinal and comparative references, and restatements.
+            //
+            // A resolution that cannot be made leaves the raw question in place
+            // and the parser receives it unchanged, exactly as it did before.
+            $question = $validated['message'];
+
+            if ($routedQuestion === null && $pendingClarification === null) {
+                $resolution = $this->resolveReferences($request, $user, $question, $context);
+
+                if ($resolution !== null) {
+                    $gate = $this->ambiguityResult($user, $resolution);
+
+                    $routedQuestion = $gate ?? $this->intentParser->route(
+                        $resolution['resolved_question'],
+                        $context ?? [],
+                        $state->turns,
+                    );
+                }
+            }
+
+            $routedQuestion ??= $this->intentParser->route($question, $context ?? [], $state->turns);
 
             // A compound turn fans out into one authorised sub-request per
             // decomposed part. A single-intent turn takes the unchanged path
@@ -223,6 +272,19 @@ class AiAssistantController extends Controller
                 is_string($routedQuestion['intent'] ?? null) ? $routedQuestion['intent'] : null,
                 is_string($routedQuestion['capability'] ?? null) ? $routedQuestion['capability'] : null,
                 $request,
+            );
+
+            // Appended, never overwritten. This is the write-back edge that
+            // keeps a conversation reachable past the live topic snapshot.
+            $this->turnLog->record(
+                $user,
+                $this->turnLog->sessionId($request, $user),
+                $validated['message'],
+                $reply,
+                $routedQuestion,
+                $result,
+                $this->answerService->lastCandidateIds($result),
+                $this->answerService->lastEntityRefs($result),
             );
 
             return response()->json([
@@ -271,6 +333,11 @@ class AiAssistantController extends Controller
             }
         }
 
+        // The recorded turns stay until retention expires. Only the identity of
+        // the conversation in progress is dropped, so the next message opens a
+        // new one rather than inheriting what the last one resolved.
+        $this->turnLog->forgetSession($request);
+
         return response()->json(['success' => true]);
     }
 
@@ -315,7 +382,157 @@ private function answerCompound(Request $request, User $user, string $message, a
         ]);
     }
 
-private function applicationFollowUp(string $question, ?array $context): ?array
+/**
+     /**
+ * Resolve references in the question against the assembled context.
+ *
+ * The selector is given the conversation, the payload is assembled from it, and
+ * the parser is asked to rewrite the question so it stands on its own. A
+ * resolution that is not grounded in the user's own words is rejected inside the
+ * parser, and a null here means the raw question is used unchanged.
+ *
+ * @param  array<string, mixed>|null  $context
+ * @return array<string, mixed>|null
+ */
+    private function resolveReferences(Request $request, User $user, string $question, ?array $context): ?array
+    {
+        if (! $request->hasSession()) {
+            return null;
+        }
+
+        try {
+            $sessionId = $this->turnLog->sessionId($request, $user);
+            $payload = $this->contextSelector->select(
+                $user,
+                $sessionId,
+                $question,
+                $context,
+                $this->turnLog->lastResolved($user, $sessionId),
+            );
+
+            return $this->intentParser->resolveReferences($question, $payload);
+        } catch (\Throwable $e) {
+            Log::warning('AI reference resolution failed: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * Turn an unresolved resolution into the question to ask.
+     *
+     * Returns null when the resolution is usable, which is the signal to continue
+     * with the rewritten question. The three refusals each ask something
+     * different: which item, which candidate, or what to check.
+     *
+     * @param  array<string, mixed>  $resolution
+     * @return array<string, mixed>|null
+     */
+    private function ambiguityResult(User $user, array $resolution): ?array
+    {
+        $ambiguity = $resolution['ambiguity'] ?? null;
+        if ($ambiguity === null) {
+            return null;
+        }
+
+        $question = match ($ambiguity) {
+            'ambiguous_candidate' => $this->answerService->clarificationReply($user, [
+                'capability' => AiCapabilityPolicy::VIEW_INVENTORY_STOCK,
+                'candidate_ids' => $resolution['candidates'] ?? [],
+            ]),
+            'no_entity' => 'Which item would you like to check?',
+            default => 'What would you like me to check?',
+        };
+
+        return [
+            'intent' => 'clarification',
+            'capability' => null,
+            'item_name' => null,
+            'needs_external_explanation' => false,
+            'query' => null,
+            'vague' => true,
+            'response_type' => 'detail',
+            'needs_clarification' => true,
+            'follow_up' => false,
+            'starts_new_topic' => false,
+            'topic_action' => 'unclear',
+            'request_type' => 'clarification',
+            'entity_candidate' => null,
+            'entity_candidate_status' => 'missing',
+            'ambiguous' => true,
+            'clarification_question' => $question,
+        ];
+    }
+
+    /**
+     * Reconstruct the live topic from the recorded turns, re-authorised.
+     *
+     * The rebuilt payload goes through the same resolveConversationContext()
+     * validation a stored topic goes through, so an item that has since been
+     * deleted, disposed, or moved outside the user's capabilities rebuilds to
+     * nothing rather than to a stale reference.
+     */
+    private function rebuiltContext(Request $request, User $user): ?array
+    {
+        if (! $request->hasSession()) {
+            return null;
+        }
+
+        try {
+            $stored = $this->turnLog->rebuildTopic($user, $this->turnLog->sessionId($request, $user));
+            if ($stored === null) {
+                return null;
+            }
+
+            $context = $this->answerService->resolveConversationContext($user, $stored);
+            if ($context === null) {
+                return null;
+            }
+
+            $this->conversationContext->storeContext($request, $user, $context);
+
+            return $context;
+        } catch (\Throwable $e) {
+            Log::warning('AI conversation rebuild failed: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * Resolve an ordinal reply against the ids a previous answer offered.
+     *
+     * After an answer that listed several items, "the second one" has nothing to
+     * select from: a pending clarification is not pending, and the list was
+     * never kept. The durable turn log is, so it supplies both the candidate ids
+     * and the action they were offered under.
+ *
+     * Returns null unless it resolves cleanly, and never raises the assistant's
+     * own capability bar: the previous turn's capability is re-authorised here
+     * before any record is read, so a user who has lost a capability resolves
+     * nothing.
+     */
+    private function rememberedSelection(Request $request, User $user, string $message): ?array
+    {
+        if (! $request->hasSession()) {
+            return null;
+        }
+
+        $last = $this->turnLog->lastResolved($user, $this->turnLog->sessionId($request, $user));
+        if ($last === null || $last['candidate_ids'] === []) {
+            return null;
+        }
+
+        try {
+            return $this->answerService->resolveRememberedSelection($user, $last, $message);
+        } catch (\Throwable $e) {
+            Log::warning('AI remembered selection failed: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    private function applicationFollowUp(string $question, ?array $context): ?array
     {
         $normalized = mb_strtolower(trim($question));
         $normalized = trim(preg_replace('/[^\pL\pN\s?]/u', ' ', $normalized) ?? $normalized);

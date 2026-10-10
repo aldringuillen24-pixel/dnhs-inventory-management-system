@@ -145,6 +145,11 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::get('/inventory/qr/lookup', [PropertyCustodianController::class, 'qrLookup'])->name('inventory.qr.lookup');
 
     Route::get('/reports', fn () => redirect('/spa/reports'))->name('reports');
+    // Paired with the API forecast routes further down. Same controller
+    // actions, different name prefix (`propertyCustodian.` here, `api.custodian.`
+    // there) and different prefix in the URL, so these are two registrations of
+    // the same endpoints rather than a duplicate: the form posts use these, the
+    // SPA uses the API pair.
     Route::get('/reports/forecast/recommendations', fn () => redirect('/spa/reports/forecast'))->name('reports.forecast.recommendations');
     Route::post('/reports/forecast', [PropertyCustodianController::class, 'runForecast'])->name('reports.forecast');
     Route::post('/reports/forecast/explanation', [PropertyCustodianController::class, 'explainForecast'])->name('reports.forecast.explanation');
@@ -265,11 +270,25 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/returns/{id}/approve', [PropertyCustodianController::class, 'approveReturn'])->name('returns.approve');
         Route::post('/returns/{id}/decline', [PropertyCustodianController::class, 'declineReturn'])->name('returns.decline');
         Route::get('/reports', [PropertyCustodianController::class, 'reports'])->name('reports');
+
+        // Forecast and AI Decision Support. `role:Property Custodian` matches the
+        // service policy exactly: AiCapabilityPolicy::ROLE_CAPABILITIES names only
+        // Property Custodian, so VIEW_DEMAND_FORECAST and VIEW_PROCUREMENT_PRIORITIES
+        // are held by no other role. Widening this to any other role would let the
+        // request past middleware only to be refused inside the service.
         Route::get('/reports/forecast/recommendations', [PropertyCustodianController::class, 'forecastRecommendations'])->name('reports.forecast.recommendations');
         Route::post('/reports/forecast', [PropertyCustodianController::class, 'runForecast'])->name('reports.forecast');
         Route::post('/reports/forecast/explanation', [PropertyCustodianController::class, 'explainForecast'])->name('reports.forecast.explanation');
         Route::post('/reports/forecast/decision-support', [PropertyCustodianController::class, 'forecastDecisionSupport'])->name('reports.forecast.decision-support');
+        Route::post('/reports/forecast/parse-question', [PropertyCustodianController::class, 'parseForecastQuestion'])->name('reports.forecast.parse-question');
+        Route::get('/reports/summary-pdf', [PropertyCustodianController::class, 'reportsSummaryPdf'])->name('reports.summary-pdf');
         Route::post('/reports/forecast/procurement-list-pdf', [PropertyCustodianController::class, 'forecastProcurementListPdf'])->name('reports.forecast.procurement-list-pdf');
+        // AI recommendations for every row in the forecast. Same role gate and
+        // same service policy as decision support: one capability, two views.
+        // Registered only on this API pair, because the tab is SPA-only and has
+        // no non-JSON form post to serve.
+        Route::post('/reports/forecast/ai-recommendations', [PropertyCustodianController::class, 'forecastAiRecommendations'])->name('reports.forecast.ai-recommendations');
+
         Route::patch('/profile', [PropertyCustodianController::class, 'updateProfile'])->name('profile.update');
     });
 

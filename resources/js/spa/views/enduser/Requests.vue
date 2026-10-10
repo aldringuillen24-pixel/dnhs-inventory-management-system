@@ -158,7 +158,7 @@
       </div>
     </div>
 
-    <RequestItemModal :open="requestOpen" :items="availableItems" @close="requestOpen = false" @saved="onRequestSaved" />
+    <RequestItemModal :open="requestOpen" :categories="categories" @close="requestOpen = false" @saved="onRequestSaved" />
   </div>
 </template>
 
@@ -181,7 +181,7 @@ const requestOpen = ref(false);
 
 const myRequests = ref([]);
 const incomingRequests = ref([]);
-const availableItems = ref([]);
+const categories = ref([]);
 const pendingIncoming = ref(0);
 
 const pendingStatuses = ['waiting for approval', 'waiting for transfer approval'];
@@ -215,7 +215,7 @@ async function load(options = {}) {
     applyData: (data) => {
       myRequests.value = data.myRequests ?? [];
       incomingRequests.value = data.incomingRequests ?? [];
-      availableItems.value = data.availableItems ?? [];
+      categories.value = data.categories ?? [];
       pendingIncoming.value = data.pendingIncomingCount ?? 0;
 
       if (firstLoading.value && pendingIncoming.value > 0) {

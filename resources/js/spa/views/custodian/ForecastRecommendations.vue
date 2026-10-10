@@ -48,62 +48,30 @@
     </div>
 
     <template v-else>
-      <!-- Forecast status: a banner above the panel, never a replacement for it.
+      <!-- No forecast-availability card here.
 
-           Both halves of the panel render fine without a forecast. The chat says
-           "No forecast loaded." and still answers what it can, and the table
-           shows an empty body. Replacing the panel with a full-page message hid
-           working UI and made an explained state look like a broken page. -->
-      <div
-        v-if="['error', 'stale', 'failed'].includes(forecastStatus)"
-        class="rounded-md border border-rose-200 bg-rose-50 p-5 dark:border-rose-900/50 dark:bg-rose-950/20"
-      >
-        <h2 class="text-base font-semibold text-rose-800 dark:text-rose-200">{{ statusTitle }}</h2>
-        <p class="mt-1 text-sm text-rose-700 dark:text-rose-300">{{ statusMessage }}</p>
-        <button
-          type="button"
-          :disabled="reloading"
-          class="mt-3 inline-flex items-center gap-2 rounded-md bg-rose-600 px-3 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
-          @click="reloadForecast"
-        >
-          <LucideIcon :icon="RefreshCw" class="h-4 w-4" :class="{ 'animate-spin': reloading }" />
-          {{ reloading ? 'Reloading…' : 'Reload latest result' }}
-        </button>
-      </div>
+           Two panels used to sit in this slot and both replaced the results
+           panel: the severe one ("Unable to load demand forecast" / "The latest
+           forecast result could not be read") and a softer "No demand forecast
+           available" one. Either way an empty or unreadable stored forecast hid
+           the decision support and the table entirely, so an explained state read
+           as a broken page.
 
-      <!-- No forecast at all. A banner for the same reason as the status above. -->
-      <div
-        v-else-if="!hasForecastRows"
-        class="rounded-md border border-amber-200 bg-amber-50 p-5 dark:border-amber-800/40 dark:bg-amber-950/30"
-      >
-        <h2 class="text-base font-semibold text-amber-900 dark:text-amber-200">No demand forecast available</h2>
-        <p class="mt-1 text-sm text-amber-800 dark:text-amber-300">No trained production ML forecast is available. Model training runs separately from chat and reports.</p>
-        <button
-          type="button"
-          :disabled="reloading"
-          class="mt-3 inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-          @click="reloadForecast"
-        >
-          <LucideIcon :icon="RefreshCw" class="h-4 w-4" :class="{ 'animate-spin': reloading }" />
-          {{ reloading ? 'Reloading…' : 'Reload latest result' }}
-        </button>
-      </div>
-
-      <!-- Results panel: forecast-only decision support on the left, the
-           recommendation table on the right. The table keeps its own scroll so
-           narrowing the split never crops the rows.
-
-           Always rendered, including with no forecast, so the page keeps its
-           shape and the user can see which surface is unavailable and why. -->
+           Both are gone. The panel below always renders, and the header's
+           "Reload latest result" button remains the single place that action
+           lives. An empty table and the chat's own "No forecast loaded." note
+           already say what is missing. -->
       <div class="custodian-panel overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <div class="grid grid-cols-1 lg:grid-cols-[25rem_minmax(0,1fr)] xl:grid-cols-[27rem_minmax(0,1fr)]">
           <div
+            id="forecast-decision-panel"
             class="min-h-0 max-h-[86vh] border-b border-gray-200/80 dark:border-gray-800 lg:border-b-0 lg:border-r"
             :class="showChatMobile ? 'block' : 'hidden lg:block'"
           >
-            <ForecastDecisionChat
+            <ForecastDecisionPanel
               class="h-full"
               :forecast-period="forecastPeriod === 'Not available' ? null : forecastPeriod"
+              :forecast-generated-at="forecastGeneratedAt || null"
               :has-forecast="hasForecastRows"
               :items-needing-procurement="itemsNeedingProcurement"
               :low-confidence-count="lowConfidenceCount"
@@ -133,13 +101,13 @@
             type="button"
             class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 lg:hidden"
             :aria-expanded="showChatMobile"
-            aria-controls="forecast-decision-chat"
+            aria-controls="forecast-decision-panel"
             @click="showChatMobile = !showChatMobile"
           >
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true" class="h-3.5 w-3.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
             </svg>
-            AI Decision Support
+            AI Assistant
           </button>
 
           <button
@@ -266,29 +234,45 @@
               <tr>
                 <th class="px-4 py-3">Item</th>
                 <th class="px-3 py-3">Category</th>
-                <th class="px-3 py-3 text-right">Predicted demand</th>
-                <th class="px-3 py-3 text-right">Safety stock</th>
-                <th class="px-3 py-3 text-right">Suggested quantity</th>
-                <th class="px-3 py-3">Priority</th>
+                <th class="px-3 py-3 text-right" title="Expected usage next month from verified stock-out history">Predicted demand</th>
+                <th class="px-3 py-3 text-right" :title="`Buffer added on top of predicted demand (${safetyStockRateLabel})`">Safety stock</th>
+                <th class="px-3 py-3 text-right" title="Quantity staff requested while the item was unavailable">Unmet demand</th>
+                <th class="px-3 py-3 text-right" title="Predicted demand + safety stock, minus available stock and pending demand, plus unmet demand">Suggested quantity</th>
+                <th class="px-3 py-3" title="How urgent the gap is, based on available stock against predicted demand">Priority</th>
               </tr>
             </thead>
             <tbody
-              class="divide-y divide-gray-100 transition-opacity duration-150 dark:divide-white/5"
-              :class="{ 'opacity-60': rowsLoading }"
+              class="divide-y divide-gray-100 dark:divide-white/5"
               aria-busy="rowsLoading ? 'true' : 'false'"
             >
               <!-- Filter/pagination refresh: keep the table and its headers in
-                   place and skeleton only the cells that are being replaced. -->
+                   place and skeleton only the cells that are being replaced.
+
+                   Each placeholder repeats the cell class of the row it stands in
+                   for, so alignment, padding and the priority pill shape match the
+                   loaded rows and nothing shifts when the data arrives. -->
               <template v-if="rowsLoading">
                 <tr v-for="placeholder in skeletonRows" :key="`skeleton-${placeholder}`" class="align-top">
                   <td class="px-4 py-3">
-                    <span class="block h-4 w-40 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
+                    <span class="block h-4 w-44 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
                   </td>
-                  <td v-for="column in 5" :key="`skeleton-cell-${column}`" class="px-3 py-3">
-                    <span
-                      class="block h-4 animate-pulse rounded bg-gray-200/70 dark:bg-white/10"
-                      :class="column === 1 ? 'w-28' : 'w-16 ml-auto'"
-                    />
+                  <td class="px-3 py-3">
+                    <span class="block h-4 w-28 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
+                  </td>
+                  <td class="px-3 py-3 text-right">
+                    <span class="inline-block h-4 w-20 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
+                  </td>
+                  <td class="px-3 py-3 text-right">
+                    <span class="inline-block h-4 w-16 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
+                  </td>
+                  <td class="px-3 py-3 text-right">
+                    <span class="inline-block h-4 w-16 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
+                  </td>
+                  <td class="px-3 py-3 text-right">
+                    <span class="inline-block h-4 w-20 animate-pulse rounded bg-gray-200/70 dark:bg-white/10" />
+                  </td>
+                  <td class="px-3 py-3">
+                    <span class="inline-block h-5 w-16 animate-pulse rounded-full bg-gray-200/70 dark:bg-white/10" />
                   </td>
                 </tr>
               </template>
@@ -300,12 +284,24 @@
                   <td class="px-3 py-3 text-gray-600 dark:text-gray-300">{{ row.category }}</td>
                   <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.forecast_demand ?? 'N/A' }} {{ row.unit }}</td>
                   <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.safety_stock ?? 'N/A' }} {{ row.unit }}</td>
+                  <!-- Only shown when staff actually requested this item while
+                       it was unavailable. A zero here would suggest every item
+                       has unmet demand, which is not the case. -->
+                  <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">
+                    <template v-if="(row.unmet_demand ?? 0) > 0">
+                      <span class="font-semibold text-amber-700 dark:text-amber-300">{{ row.unmet_demand }}</span>
+                      <span class="block text-[10px] text-gray-400">
+                        {{ row.unmet_requesters }} {{ row.unmet_requesters === 1 ? 'person' : 'people' }}
+                      </span>
+                    </template>
+                    <span v-else class="text-gray-300 dark:text-gray-600">—</span>
+                  </td>
                   <td class="px-3 py-3 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{{ row.suggested_procurement ?? 'N/A' }} {{ row.unit }}</td>
                   <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium" :class="priorityClass(row.priority)">{{ row.priority }}</span></td>
                 </tr>
               </template>
               <tr v-if="!rows.length">
-                <td colspan="6" class="px-4 py-12 text-center">
+                <td colspan="7" class="px-4 py-12 text-center">
                   <span
                     class="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-white/5 dark:text-gray-500"
                   >
@@ -342,16 +338,62 @@
       </div>
 
       <p class="text-xs text-gray-500 dark:text-gray-400">Forecasts are recommendations only. They do not automatically change inventory or create procurement orders.</p>
+
+      <!-- Priority legend. Sits below the results panel rather than inside it,
+           so it reads as a footnote to the whole page instead of another strip
+           of the table. Collapsed by default to keep the page compact. -->
+      <div class="custodian-panel overflow-hidden rounded-md border border-emerald-200/80 bg-emerald-50/50 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+        <button
+          type="button"
+          class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-semibold text-emerald-800 transition-colors hover:bg-emerald-100/60 sm:px-5 dark:text-emerald-200 dark:hover:bg-emerald-900/40"
+          :aria-expanded="showLegend"
+          aria-controls="forecast-legend"
+          @click="showLegend = !showLegend"
+        >
+          <svg
+            class="h-3.5 w-3.5 shrink-0 transition-transform duration-200"
+            :class="{ 'rotate-180': showLegend }"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+          </svg>
+          <LucideIcon :icon="Info" class="h-3.5 w-3.5 shrink-0" />
+          Legend
+          <span class="font-normal text-emerald-700/80 dark:text-emerald-300/80">
+            — what each priority tier means
+          </span>
+        </button>
+
+        <div v-show="showLegend" id="forecast-legend" class="border-t border-emerald-200/60 px-4 py-3 sm:px-5 dark:border-emerald-900/50">
+          <dl class="text-xs">
+            <dt class="font-semibold text-emerald-900 dark:text-emerald-100">Priority</dt>
+            <dd class="mt-1.5 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+              <div
+                v-for="tier in priorityLegend"
+                :key="tier.name"
+                class="flex items-start gap-2"
+              >
+                <span class="inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium" :class="tier.class">{{ tier.name }}</span>
+                <span class="leading-snug text-emerald-800/90 dark:text-emerald-300/90">{{ tier.meaning }}</span>
+              </div>
+            </dd>
+          </dl>
+        </div>
+      </div>
     </template>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { PackageSearch, RefreshCw } from 'lucide';
+import { Info, PackageSearch, RefreshCw } from 'lucide';
 import api from '../../lib/axios';
 import InventoryTableSkeleton from '../../components/ui/skeletons/InventoryTableSkeleton.vue';
-import ForecastDecisionChat from '../../components/forecast/ForecastDecisionChat.vue';
+import ForecastDecisionPanel from '../../components/forecast/ForecastDecisionPanel.vue';
 import LucideIcon from '../../components/ui/data-display/LucideIcon.vue';
 import Pagination from '../../components/ui/data-display/Pagination.vue';
 
@@ -375,6 +417,8 @@ const showFilters = ref(false);
 // Decision support is a side-by-side desktop layout; below `lg` it is opt-in so
 // the table keeps the full width on a phone.
 const showChatMobile = ref(false);
+// Column legend, collapsed by default so the table keeps its height.
+const showLegend = ref(false);
 const filters = ref({ search: '', category: '', priority: '', confidence: '', sort: 'suggested' });
 let searchTimer = null;
 
@@ -388,7 +432,6 @@ const hasForecastRows = computed(() => (forecastResult.value?.rows ?? []).length
 
 const forecastRowCount = computed(() => (forecastResult.value?.rows ?? []).length);
 
-const forecastStatus = computed(() => forecastResult.value?.status ?? null);
 const availabilityWarning = computed(() => forecastResult.value?.summary?.availability_warning === true);
 
 const itemsNeedingProcurement = computed(() => forecastResult.value?.summary?.items_needing_procurement ?? 0);
@@ -418,6 +461,11 @@ const forecastItemIdentity = computed(() => (forecastResult.value?.rows ?? []).m
 
 const forecastPeriod = computed(() => forecastResult.value?.forecast_period || 'Not available');
 
+// Raw training stamp, kept separate from the display-formatted `generatedAt`.
+// This is the cycle key the Recommendations tab uses to know when saved
+// recommendations belong to the current model run.
+const forecastGeneratedAt = computed(() => forecastResult.value?.generated_at || null);
+
 const generatedAt = computed(() => {
   const generated = forecastResult.value?.generated_at;
   if (!generated) return 'Not available';
@@ -425,28 +473,65 @@ const generatedAt = computed(() => {
   return Number.isNaN(date.getTime()) ? String(generated) : date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 });
 
-const statusTitle = computed(() => (
-  forecastStatus.value === 'stale' ? 'Stored forecast is stale' : 'Unable to load demand forecast'
-));
-
-const statusMessage = computed(() => {
-  if (forecastStatus.value === 'stale') return 'No stale forecast was used. Refresh model training before relying on a new result.';
-  if (forecastStatus.value === 'failed') return 'The latest model training failed or was interrupted. No previous result was substituted.';
-  return 'The latest forecast result could not be read. A valid refresh is required before displaying results.';
-});
-
 function priorityClass(priority) {
-  switch (priority) {
-    case 'Urgent': return 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300';
-    case 'High': return 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300';
-    case 'Medium': return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300';
-    default: return 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300';
-  }
+  return PRIORITY_TIERS[priority] ?? PRIORITY_TIERS.Normal;
 }
+
+// One source for the pill styles, so the legend shows exactly the colours the
+// table renders. `Normal` doubles as the fallback for rows without a tier.
+const PRIORITY_TIERS = {
+  Urgent: 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300',
+  High: 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300',
+  Medium: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
+  Normal: 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300',
+};
+
+// Wording matches the rules in StoredDemandForecastService::priority(): a tier
+// is only assigned when a procurement gap exists, and it is decided purely by
+// how far available stock plus pending demand falls short of predicted demand.
+const priorityLegend = [
+  {
+    name: 'Urgent',
+    class: PRIORITY_TIERS.Urgent,
+    meaning: 'Nothing available on hand, and pending requests still fall short of predicted demand.',
+  },
+  {
+    name: 'High',
+    class: PRIORITY_TIERS.High,
+    meaning: 'Available stock plus pending demand still does not cover predicted demand.',
+  },
+  {
+    name: 'Medium',
+    class: PRIORITY_TIERS.Medium,
+    meaning: 'Stock and pending demand cover demand, but only once unmet requests are added.',
+  },
+  {
+    name: 'Normal',
+    class: PRIORITY_TIERS.Normal,
+    meaning: 'No procurement gap, or not enough verified history to estimate one.',
+  },
+];
 
 function format(value) {
   return Number(value ?? 0).toLocaleString();
 }
+
+// Derived from the rows the forecast actually returned, rather than a hardcoded
+// percentage, so the legend keeps describing the real buffer if the backend's
+// safety_stock_rate is ever changed. Rounded because the server ceils the value,
+// which can push a row a percent or two above the configured rate.
+const safetyStockRateLabel = computed(() => {
+  const measured = (forecastResult.value?.rows ?? []).reduce((rate, row) => {
+    const demand = Number(row?.forecast_demand);
+    const safety = Number(row?.safety_stock);
+
+    if (demand > 0 && safety > 0) return Math.max(rate, safety / demand);
+
+    return rate;
+  }, 0);
+
+  return `${Math.round((measured || 0.25) * 100)}%`;
+});
 
 async function load() {
   // The very first visit has no table to preserve, so it shows the full page

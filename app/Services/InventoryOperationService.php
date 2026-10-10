@@ -11,6 +11,7 @@ use App\Models\MaintenanceRecord;
 use App\Models\StockMovement;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Support\RequestableItemMatcher;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -188,7 +189,11 @@ class InventoryOperationService
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($assignmentRequest->status !== 'waiting for approval') {
+            // Unmet demand ('waiting for procurement') is approvable once stock exists:
+            // approveItemTypeRequest still validates the selected records, so a
+            // request that is still unfulfillable falls through to 'insufficient'
+            // rather than being approved against nothing.
+            if (! in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT], true)) {
                 return 'processed';
             }
             if ((int) $assignmentRequest->quantity < 1) {
@@ -303,11 +308,14 @@ class InventoryOperationService
         }
 
         foreach ($inventoryItems as $item) {
-            if (
-                $item->item_name !== $assignmentRequest->requested_item_name
-                || (int) $item->category_id !== (int) $assignmentRequest->requested_category_id
-                || $item->unit !== $assignmentRequest->requested_unit
-            ) {
+            // Same authority the custodian's stock-health column was computed
+            // from, so a record the UI offered is always a record this accepts.
+            if (! RequestableItemMatcher::matches(
+                (string) $assignmentRequest->requested_item_name,
+                (int) $assignmentRequest->requested_category_id,
+                $assignmentRequest->requested_unit,
+                $item,
+            )) {
                 return 'invalid_allocation';
             }
 

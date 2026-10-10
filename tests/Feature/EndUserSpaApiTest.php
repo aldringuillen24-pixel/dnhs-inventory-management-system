@@ -68,7 +68,15 @@ test('end user workspace reads return JSON shapes', function () {
 
     $this->actingAs($this->endUser)->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertJsonStructure(['myRequests', 'incomingRequests', 'availableItems', 'pendingIncomingCount', 'myPendingCount']);
+        ->assertJsonStructure([
+            'myRequests',
+            'incomingRequests',
+            // Catalogue is category-grouped and includes out-of-stock item types
+            // so they remain requestable.
+            'categories' => ['*' => ['category_id', 'category_name', 'available_item_count', 'items']],
+            'pendingIncomingCount',
+            'myPendingCount',
+        ]);
 
     $this->actingAs($this->endUser)->getJson(route('api.end-user.assigned-items'))
         ->assertOk()
