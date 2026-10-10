@@ -328,6 +328,25 @@ watch(
     },
 );
 
+function resetAssignForm() {
+    errors.value = {};
+    registered.item_id = '';
+    registered.user_id = '';
+    registered.quantity = 1;
+    registered.transaction_date = '';
+    manual.item_id = '';
+    manual.quantity = 1;
+    manual.manual_recipient_name = '';
+    manual.manual_department = '';
+    manual.building = '';
+    manual.room = '';
+    manual.manual_recipient_type = '';
+    manual.manual_contact = '';
+    manual.manual_notes = '';
+    manual.transaction_date = new Date().toISOString().slice(0, 10);
+    manual.expected_return_date = '';
+}
+
 async function submitRegistered() {
     busy.value = true;
     errors.value = {};
@@ -343,6 +362,7 @@ async function submitRegistered() {
 
     try {
         await api.post('/custodian/transactions/assign', payload);
+        resetAssignForm();
         emit('saved');
     } catch (requestError) {
         errors.value = requestError?.response?.data?.errors ?? {};
@@ -379,6 +399,7 @@ async function submitManual() {
 
     try {
         await api.post('/custodian/transactions/assign', payload);
+        resetAssignForm();
         emit('saved');
     } catch (requestError) {
         errors.value = requestError?.response?.data?.errors ?? {};
