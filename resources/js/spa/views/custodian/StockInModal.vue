@@ -353,7 +353,9 @@ watch(
     () => props.open,
     (open) => {
         if (open) {
-            resetForm();
+            errors.value = {};
+            formError.value = '';
+            busy.value = false;
         }
     },
 );
