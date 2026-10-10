@@ -7,7 +7,7 @@ services:
     name: dnhs-inventory
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     envVars:
       - key: APP_NAME
         value: DNHS Inventory
@@ -62,7 +62,7 @@ services:
     name: dnhs-inventory-forecast-train
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     schedule: "0 4 3 * *"
     dockerCommand: php artisan forecast:train
     envVars:
@@ -115,4 +115,4 @@ services:
 
 databases:
   - name: dnhs-inventory-db
-    plan: starter
+    plan: free
