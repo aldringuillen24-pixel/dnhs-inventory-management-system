@@ -9,6 +9,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
+    region: singapore
     envVars:
       - key: APP_NAME
         value: DNHS Inventory
