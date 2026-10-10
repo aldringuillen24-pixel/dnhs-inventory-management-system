@@ -108,6 +108,7 @@
                 v-model="form.date_acquired"
                 type="date"
                 required
+                :max="todayMax"
                 class="block w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
               />
               <FieldError :errors="errors" field="date_acquired" />
@@ -258,7 +259,7 @@
 </template>
 
 <script setup>
-import { reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import api from '../../lib/axios';
 import { useToastStore } from '../../stores/toast';
 import Modal from '../../components/ui/dialogs/Modal.vue';
@@ -272,6 +273,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'saved']);
 const toast = useToastStore();
+const todayMax = computed(() => new Date().toISOString().slice(0, 10));
 const loading = ref(false);
 const busy = ref(false);
 const errors = ref({});

@@ -125,6 +125,7 @@
               v-model="form.date_acquired"
               type="date"
               required
+              :max="todayMax"
               @change="clearFieldError('date_acquired')"
               class="block w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:px-3 min-[480px]:text-sm"
             />
@@ -322,6 +323,8 @@ const form = reactive({
 const selectedCategory = computed(() =>
     props.categories.find((category) => String(category.category_id) === String(form.category_id)),
 );
+
+const todayMax = computed(() => new Date().toISOString().slice(0, 10));
 
 const requiresSerial = computed(() => selectedCategory.value?.requires_serial_number === true || selectedCategory.value?.requires_serial_number === 1);
 
