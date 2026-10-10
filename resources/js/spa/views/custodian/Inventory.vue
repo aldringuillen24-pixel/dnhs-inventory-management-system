@@ -161,7 +161,7 @@
             <input
               v-model="search"
               type="search"
-              placeholder="Search item, category, ICS no…"
+              placeholder="Search item, category, assignee, ICS no…"
               aria-label="Search inventory"
               class="w-full rounded-md border border-gray-200 bg-gray-50/60 py-1.5 pl-8 pr-8 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100 dark:focus:border-emerald-400 dark:focus:bg-gray-800 min-[480px]:py-2 min-[480px]:pl-9 min-[480px]:text-sm"
             />
@@ -269,6 +269,7 @@
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">{{ row.item_name }}</p>
                 <p v-if="hasIssuedOut(row) && workspace !== 'available'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base"><span v-if="workspace !== 'assigned'">Assigned: </span>{{ format(assignedOutQty(row)) }} {{ row.unit }}</p>
+                <p v-if="workspace === 'assigned' && rowAssignees(row)" class="mt-0.5 truncate text-[11px] font-medium text-gray-500 dark:text-gray-400 min-[480px]:text-xs">{{ rowAssignees(row) }}</p>
                 <p v-else-if="row.status === 'available'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">Available: {{ format(row.free_quantity ?? row.quantity) }} {{ row.unit }}</p>
                 <p v-else class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400 min-[480px]:mt-1 min-[480px]:text-xs">{{ format(row.quantity) }} {{ row.unit }}</p>
                 <p v-if="hasIssuedOut(row) && row.status === 'available' && workspace === 'all'" class="mt-0.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500 min-[480px]:text-xs">
@@ -324,6 +325,7 @@
                 <th class="px-4 py-3.5">Item & ICS</th>
                 <th class="px-4 py-3.5">Category</th>
                 <th class="px-4 py-3.5 text-right">Quantity</th>
+                <th v-if="workspace === 'assigned'" class="px-4 py-3.5">Assignee</th>
                 <th class="px-4 py-3.5 text-right">Unit Cost</th>
                 <th class="px-4 py-3.5 text-right">Total Cost</th>
                 <th class="px-4 py-3.5">Condition / Status</th>
@@ -466,6 +468,11 @@
                       {{ format(row.quantity) }}
                       <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
                     </template>
+                  </td>
+
+                  <!-- Assignee -->
+                  <td v-if="workspace === 'assigned'" class="px-4 py-3.5 text-xs font-medium text-gray-700 dark:text-gray-300">
+                    {{ rowAssignees(row) || '—' }}
                   </td>
 
                   <!-- Unit Cost -->
@@ -613,7 +620,7 @@
 
               <!-- Empty State -->
               <tr v-if="!filteredRows.length">
-                <td :colspan="workspace === 'all' ? 7 : 8" class="px-4 py-16 text-center text-sm text-gray-500 dark:text-gray-400">
+                <td :colspan="workspace === 'all' ? 7 : workspace === 'assigned' ? 9 : 8" class="px-4 py-16 text-center text-sm text-gray-500 dark:text-gray-400">
                   <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-gray-100 text-gray-400 dark:bg-white/5 dark:text-gray-500 mb-3">
                     <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
@@ -1776,7 +1783,7 @@ const filteredRows = computed(() => {
     if (!query) {
       return true;
     }
-    return [row.item_name, row.category?.category_name, row.ics_no, row.description]
+    return [row.item_name, row.category?.category_name, row.ics_no, row.description, rowAssignees(row)]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
   });
@@ -2310,6 +2317,14 @@ function isInspectable(status) {
 // under Available). Every branch below keys off this, never raw status alone.
 function assignedOutQty(row) {
   return Number(row?.assigned_quantity ?? 0);
+}
+
+function rowAssignees(row) {
+  const names = (row?.sourceItems ?? [])
+    .flatMap((source) => String(source.active_assignee_summary ?? '').split(','))
+    .map((part) => part.replace(/\s*\(\d+\)\s*$/, '').trim())
+    .filter(Boolean);
+  return [...new Set(names)].join(', ');
 }
 
 function hasIssuedOut(row) {
