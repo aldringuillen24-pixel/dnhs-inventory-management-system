@@ -187,6 +187,15 @@ class EndUserController extends Controller
                 self::itemTypeKey($item->item_name, $item->category_id, $item->unit) => (int) $item->available_quantity,
             ]);
 
+        // Pending holds per type: requests sitting in `waiting for approval`
+        // promise units the stock rows still show as available (deduction
+        // happens at approval). Loaded once and matched in PHP with the same
+        // normalisation the availability check uses.
+        $pendingRequests = AssignmentRequest::query()
+            ->where('status', 'waiting for approval')
+            ->whereNotNull('requested_item_name')
+            ->get(['requested_item_name', 'requested_category_id', 'requested_unit', 'quantity']);
+
         // Every category, not only the ones that happen to hold stock. A
         // category with no inventory rows at all is exactly the case an end user
         // needs to raise: they want something the school has never catalogued.
@@ -194,7 +203,7 @@ class EndUserController extends Controller
         $categories = Category::query()
             ->orderBy('category_name')
             ->get()
-            ->map(function (Category $category) use ($availableByType): array {
+            ->map(function (Category $category) use ($availableByType, $pendingRequests): array {
                 $listed = Inventory::query()
                     ->where('category_id', $category->category_id)
                     ->select('item_name', 'category_id', 'unit')
@@ -204,15 +213,26 @@ class EndUserController extends Controller
                     ->get()
                     // Grouped by name + category + unit, so same-named items in
                     // different categories or units remain distinct things.
-                    ->map(fn (Inventory $item): array => [
-                        'item_name' => $item->item_name,
-                        'category_id' => (int) $category->category_id,
-                        'unit' => $item->unit,
-                        'available_quantity' => (int) $availableByType->get(
+                    ->map(function (Inventory $item) use ($availableByType, $pendingRequests, $category): array {
+                        $available = (int) $availableByType->get(
                             self::itemTypeKey($item->item_name, $item->category_id, $item->unit),
                             0
-                        ),
-                    ])
+                        );
+                        $pending = (int) $pendingRequests
+                            ->filter(fn ($request): bool => (int) $request->requested_category_id === (int) $item->category_id
+                                && RequestableItemMatcher::nameMatches((string) $item->item_name, (string) $request->requested_item_name)
+                                && RequestableItemMatcher::unitMatches((string) $request->requested_unit, $item->unit))
+                            ->sum('quantity');
+
+                        return [
+                            'item_name' => $item->item_name,
+                            'category_id' => (int) $category->category_id,
+                            'unit' => $item->unit,
+                            'available_quantity' => $available,
+                            'pending_quantity' => $pending,
+                            'free_quantity' => max(0, $available - $pending),
+                        ];
+                    })
                     ->values()
                     ->all();
 
@@ -303,6 +323,12 @@ class EndUserController extends Controller
             (int) $validated['category_id'],
             $validated['unit'],
         );
+        $pendingQuantity = RequestableItemMatcher::pendingQuantity(
+            $validated['item_name'],
+            (int) $validated['category_id'],
+            $validated['unit'],
+        );
+        $freeQuantity = max(0, $availableQuantity - $pendingQuantity);
 
         $custodian = User::whereHas('role', function ($query) {
             $query->where('role_name', 'Property Custodian');
@@ -318,8 +344,10 @@ class EndUserController extends Controller
         // is a quantity the end user can simply correct, so it stays an error.
         if ($availableQuantity === 0) {
             $status = self::STATUS_WAITING_FOR_PROCUREMENT;
-        } elseif ($validated['quantity'] > $availableQuantity) {
-            return redirect()->back()->with(['error' => 'Requested quantity exceeds available stock.']);
+        } elseif ($validated['quantity'] > $freeQuantity) {
+            $holdNote = $pendingQuantity > 0 ? " ({$pendingQuantity} unit(s) already pending approval)" : '';
+
+            return redirect()->back()->with(['error' => "Requested quantity exceeds available stock. Only {$freeQuantity} free{$holdNote}."]);
         } else {
             $status = 'waiting for approval';
         }

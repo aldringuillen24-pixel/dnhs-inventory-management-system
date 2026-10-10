@@ -1232,6 +1232,11 @@ class PropertyCustodianController extends Controller
             ->get();
 
         $groupedInventory = $inventoryItems->map(function (Inventory $item) {
+            $pendingHold = (int) AssignmentRequest::query()
+                ->where('status', 'waiting for approval')
+                ->where('item_id', $item->item_id)
+                ->sum('quantity');
+
             return [
                 'item_id' => $item->item_id,
                 'item_name' => $item->item_name,
@@ -1239,6 +1244,8 @@ class PropertyCustodianController extends Controller
                 'category_id' => $item->category_id,
                 'category_name' => $item->category?->category_name,
                 'quantity' => (int) $item->quantity,
+                'pending_hold' => $pendingHold,
+                'free_quantity' => max(0, (int) $item->quantity - $pendingHold),
                 'unit' => $item->unit,
                 'inventory_item_no' => $item->inventory_item_no,
                 'serial_number' => $item->serial_number,
@@ -1290,6 +1297,14 @@ class PropertyCustodianController extends Controller
 
                 $request->matching_inventory_items = $matchingItems;
                 $request->total_available_stock = (int) $matchingItems->sum('quantity');
+                // Exclude this row itself: the hold that matters is OTHER
+                // requests promising the same units, not the request's own line.
+                $request->pending_hold_stock = max(0, RequestableItemMatcher::pendingQuantity(
+                    (string) $request->requested_item_name,
+                    (int) $request->requested_category_id,
+                    $request->requested_unit,
+                ) - (int) $request->quantity);
+                $request->total_free_stock = max(0, $request->total_available_stock - $request->pending_hold_stock);
 
                 return;
             }
@@ -1299,6 +1314,14 @@ class PropertyCustodianController extends Controller
                 ? collect([$item])
                 : collect();
             $request->total_available_stock = (int) ($item?->status === 'available' ? $item->quantity : 0);
+            $request->pending_hold_stock = $item
+                ? (int) AssignmentRequest::query()
+                    ->where('status', 'waiting for approval')
+                    ->where('item_id', $item->item_id)
+                    ->where('id', '!=', $request->id)
+                    ->sum('quantity')
+                : 0;
+            $request->total_free_stock = max(0, $request->total_available_stock - $request->pending_hold_stock);
         });
 
         // Assignments created by this Property Custodian for End Users
@@ -1594,7 +1617,7 @@ class PropertyCustodianController extends Controller
             return redirect()->back()->withErrors(['item_id' => 'The selected item is not available for assignment.'])->withInput();
         }
         if ($assignmentResult === 'insufficient') {
-            return redirect()->back()->withErrors(['quantity' => 'The requested quantity exceeds the available stock.'])->withInput();
+            return redirect()->back()->withErrors(['quantity' => 'The requested quantity exceeds the free stock (available minus units already pending acceptance).'])->withInput();
         }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Assignment request submitted for approval.');

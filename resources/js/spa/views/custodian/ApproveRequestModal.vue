@@ -32,6 +32,7 @@
           <div class="rounded-md bg-white p-2.5 shadow-xs dark:bg-gray-800/60 border border-gray-100 dark:border-white/5">
             <span class="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Stockroom Has</span>
             <p class="text-lg font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{{ totalStock }}</p>
+            <p v-if="pendingHold > 0" class="text-[11px] font-semibold text-amber-600 dark:text-amber-300">{{ freeStock }} free ({{ pendingHold }} pending)</p>
           </div>
         </div>
 
@@ -157,11 +158,18 @@ const itemName = computed(() => props.request?.requested_item_name ?? props.requ
 const categoryName = computed(() => props.request?.requested_category?.category_name ?? props.request?.item?.category?.category_name ?? 'General');
 const unitName = computed(() => props.request?.requested_unit ?? props.request?.item?.unit ?? '');
 const totalStock = computed(() => props.request?.total_available_stock ?? props.request?.item?.quantity ?? 0);
+const pendingHold = computed(() => Number(props.request?.pending_hold_stock ?? 0));
+const freeStock = computed(() => {
+    if (props.request?.total_free_stock !== undefined && props.request?.total_free_stock !== null) {
+        return Number(props.request.total_free_stock);
+    }
+    return Math.max(0, totalStock.value - pendingHold.value);
+});
 const canApprove = computed(() => {
     if (!props.request) {
         return false;
     }
-    if (totalStock.value < Number(props.request.quantity)) {
+    if (freeStock.value < Number(props.request.quantity)) {
         return false;
     }
     return isItemType.value ? selected.value.length > 0 : true;

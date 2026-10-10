@@ -37,6 +37,16 @@ class InventoryOperationService
             if ($quantity < 1 || $quantity > (int) $inventoryItem->quantity) {
                 return 'insufficient';
             }
+            // Soft hold: earlier assignments awaiting acceptance do not deduct
+            // stock, so a second assign of the same last units must be refused
+            // here instead of silently queuing against nothing.
+            $pendingHold = (int) AssignmentRequest::query()
+                ->where('status', 'waiting for approval')
+                ->where('item_id', $inventoryItem->item_id)
+                ->sum('quantity');
+            if ($quantity > max(0, (int) $inventoryItem->quantity - $pendingHold)) {
+                return 'insufficient';
+            }
 
             AssignmentRequest::create([
                 'item_id' => $inventoryItem->item_id,

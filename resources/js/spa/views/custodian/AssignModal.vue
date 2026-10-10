@@ -33,7 +33,7 @@
           >
             <option value="">Select available stock to issue</option>
             <option v-for="item in items" :key="item.item_id" :value="item.item_id">
-              {{ item.item_name }} · {{ item.category_name ?? 'Uncategorized' }} ({{ item.quantity }} {{ item.unit }} available)
+              {{ item.item_name }} · {{ item.category_name ?? 'Uncategorized' }} ({{ item.free_quantity ?? item.quantity }} {{ item.unit }} free{{ (item.pending_hold ?? 0) > 0 ? `, ${item.pending_hold} pending` : '' }})
             </option>
           </select>
           <FieldError :errors="errors" field="item_id" />
@@ -67,9 +67,13 @@
             type="number"
             required
             min="1"
+            :max="registeredFree || undefined"
             class="block w-full rounded-md border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
           />
           <FieldError :errors="errors" field="quantity" />
+          <p v-if="registeredItem && (registeredItem.pending_hold ?? 0) > 0" class="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            {{ registeredItem.free_quantity ?? 0 }} free of {{ registeredItem.quantity }} ({{ registeredItem.pending_hold }} awaiting acceptance).
+          </p>
         </div>
 
         <div class="sm:col-span-2">
@@ -120,7 +124,7 @@
           >
             <option value="">Select available stock to issue</option>
             <option v-for="item in items" :key="item.item_id" :value="item.item_id">
-              {{ item.item_name }} · {{ item.category_name ?? 'Uncategorized' }} ({{ item.quantity }} {{ item.unit }} available)
+              {{ item.item_name }} · {{ item.category_name ?? 'Uncategorized' }} ({{ item.free_quantity ?? item.quantity }} {{ item.unit }} free{{ (item.pending_hold ?? 0) > 0 ? `, ${item.pending_hold} pending` : '' }})
             </option>
           </select>
           <FieldError :errors="errors" field="item_id" />
@@ -317,6 +321,8 @@ const manual = reactive({
 });
 
 const manualItem = computed(() => props.items.find((item) => String(item.item_id) === String(manual.item_id)));
+const registeredItem = computed(() => props.items.find((item) => String(item.item_id) === String(registered.item_id)));
+const registeredFree = computed(() => Math.max(0, Number(registeredItem.value?.free_quantity ?? registeredItem.value?.quantity ?? 0)));
 
 watch(
     () => props.open,

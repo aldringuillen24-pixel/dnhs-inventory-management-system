@@ -133,4 +133,48 @@ final class RequestableItemMatcher
             ->filter(fn (Inventory $inventory): bool => $inventory->status === 'available' && (int) $inventory->quantity > 0)
             ->sum('quantity');
     }
+
+    /**
+     * Quantity already spoken for by requests sitting in `waiting for approval`.
+     *
+     * Soft hold only: stock rows are NOT deducted until approval (see
+     * InventoryOperationService::approveAssignment), so without this the UI
+     * shows 30 available while 20 are already promised and a second 20 can be
+     * queued. Displayed as "Available X, Pending Y"; validation uses
+     * available minus pending. Terminal states (approved/declined/cancelled)
+     * leave this pool automatically because the status changes.
+     */
+    public static function pendingQuantity(string $name, int $categoryId, ?string $unit): int
+    {
+        return (int) \App\Models\AssignmentRequest::query()
+            ->where('status', 'waiting for approval')
+            ->whereNotNull('requested_item_name')
+            ->where('requested_category_id', $categoryId)
+            ->get()
+            ->filter(fn ($request): bool => self::nameMatches($name, (string) $request->requested_item_name)
+                && self::unitMatches($unit, $request->requested_unit))
+            ->sum('quantity');
+    }
+
+    /**
+     * Free-to-promise quantity: available minus pending holds, never negative.
+     */
+    public static function freeQuantity(string $name, int $categoryId, ?string $unit): int
+    {
+        return max(0, self::availableQuantity($name, $categoryId, $unit) - self::pendingQuantity($name, $categoryId, $unit));
+    }
+
+    /**
+     * Pending hold against one concrete inventory record: custodian-issued
+     * assignments awaiting end-user acceptance (`waiting for approval` with
+     * this item_id). Stock is untouched until approval, so the assign modal
+     * must show and enforce quantity minus this hold.
+     */
+    public static function pendingHoldForItem(int $itemId): int
+    {
+        return (int) \App\Models\AssignmentRequest::query()
+            ->where('status', 'waiting for approval')
+            ->where('item_id', $itemId)
+            ->sum('quantity');
+    }
 }

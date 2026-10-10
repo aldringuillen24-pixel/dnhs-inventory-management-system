@@ -98,7 +98,7 @@
             >
               <option value="">Select an item</option>
               <option v-for="item in selectedCategory?.items ?? []" :key="itemKey(item)" :value="itemKey(item)">
-                {{ item.item_name }} · {{ item.unit }} · {{ item.available_quantity > 0 ? `${item.available_quantity} ${item.unit} available` : '0 available' }}
+                {{ item.item_name }} · {{ item.unit }} · {{ itemLabel(item) }}
               </option>
             </select>
           </template>
@@ -111,11 +111,15 @@
               v-model.number="quantity"
               type="number"
               min="1"
+              :max="selectedFree || undefined"
               required
               placeholder="Enter quantity"
               class="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
             />
             <FieldError :errors="errors" field="quantity" />
+            <p v-if="chosenItem() && Number(chosenItem().pending_quantity ?? 0) > 0" class="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+              {{ selectedFree }} free of {{ chosenItem().available_quantity }} ({{ chosenItem().pending_quantity }} awaiting approval).
+            </p>
           </div>
 
           <div class="mt-3">
@@ -223,6 +227,25 @@ const submitLabel = computed(() => (isCategoryEmpty.value ? 'Submit Request for 
 function itemKey(item) {
     return `${item.item_name}|${item.category_id}|${item.unit}`;
 }
+
+function itemLabel(item) {
+    if ((item.available_quantity ?? 0) <= 0) {
+        return '0 available';
+    }
+    const pending = Number(item.pending_quantity ?? 0);
+    const free = Number(item.free_quantity ?? item.available_quantity ?? 0);
+    return pending > 0
+        ? `${free} ${item.unit} free (${pending} pending)`
+        : `${item.available_quantity} ${item.unit} available`;
+}
+
+const selectedFree = computed(() => {
+    const item = chosenItem();
+    if (!item) {
+        return 0;
+    }
+    return Number(item.free_quantity ?? item.available_quantity ?? 0);
+});
 
 function chosenItem() {
     return (selectedCategory.value?.items ?? []).find((item) => itemKey(item) === selectedItemKey.value) ?? null;

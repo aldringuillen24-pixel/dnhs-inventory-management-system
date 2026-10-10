@@ -43,6 +43,80 @@ beforeEach(function () {
     ]);
 });
 
+test('a second request cannot promise units already pending approval', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 30,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    // First 20 enters the approval queue; stock rows stay untouched.
+    $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
+        'item_name' => 'Bond Paper',
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'quantity' => 20,
+    ])->assertSessionHas('success', 'Request submitted to property custodian.');
+
+    // Only 10 are still free, so a second 20 is refused with the hold shown.
+    $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
+        'item_name' => 'Bond Paper',
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'quantity' => 20,
+    ])->assertSessionHas('error', 'Requested quantity exceeds available stock. Only 10 free (20 unit(s) already pending approval).');
+
+    // A 10 fits the free remainder and queues normally.
+    $this->actingAs($this->endUser)->post(route('endUser.requests.store'), [
+        'item_name' => 'Bond Paper',
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'quantity' => 10,
+    ])->assertSessionHas('success', 'Request submitted to property custodian.');
+});
+
+test('a custodian cannot assign units already pending another acceptance', function () {
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 30,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $secondUser = User::create([
+        'role_id' => $this->endUserRole->role_id,
+        'first_name' => 'Second',
+        'last_name' => 'User',
+        'username' => 'end-user-2',
+        'email' => 'enduser2@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+
+    $service = app(InventoryOperationService::class);
+    expect($service->submitRegisteredAssignment($inventory->item_id, $this->propertyCustodian->id, $this->endUser->id, 20, null))->toBe('created');
+
+    // 20 of 30 are promised; a second 20 against the same record is refused.
+    expect($service->submitRegisteredAssignment($inventory->item_id, $this->propertyCustodian->id, $secondUser->id, 20, null))->toBe('insufficient');
+
+    // Stock itself is untouched until approval.
+    expect((int) $inventory->fresh()->quantity)->toBe(30);
+});
+
 test('end user request stores with property custodian target', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
@@ -261,7 +335,7 @@ test('a partial shortfall is still refused rather than recorded as unmet demand'
         'category_id' => $category->category_id,
         'unit' => 'ream',
         'quantity' => 10,
-    ])->assertSessionHas('error', 'Requested quantity exceeds available stock.');
+    ])->assertSessionHas('error', 'Requested quantity exceeds available stock. Only 4 free.');
 
     $this->assertDatabaseMissing('requests', [
         'requested_item_name' => 'Bond Paper',
@@ -321,7 +395,7 @@ test('end user cannot request more than available stock of the selected type', f
             'quantity' => 4,
         ])
         ->assertRedirect()
-        ->assertSessionHas('error', 'Requested quantity exceeds available stock.');
+        ->assertSessionHas('error', 'Requested quantity exceeds available stock. Only 3 free.');
 
     $this->assertDatabaseMissing('requests', [
         'user_id' => $this->endUser->id,
@@ -1633,7 +1707,7 @@ test('end user request cannot use same-name stock from another category or unit'
             'quantity' => 2,
         ])
         ->assertRedirect()
-        ->assertSessionHas('error', 'Requested quantity exceeds available stock.');
+        ->assertSessionHas('error', 'Requested quantity exceeds available stock. Only 1 free.');
 
     $this->assertDatabaseMissing('requests', [
         'requested_item_name' => $selectedItem->item_name,

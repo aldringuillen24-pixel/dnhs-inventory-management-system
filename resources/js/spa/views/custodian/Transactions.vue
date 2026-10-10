@@ -149,7 +149,7 @@
                           :class="hasStock(request) ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 border border-rose-200/60 dark:bg-rose-500/10 dark:text-rose-300'"
                         >
                           <span class="h-1.5 w-1.5 rounded-md" :class="hasStock(request) ? 'bg-emerald-500' : 'bg-rose-500'" />
-                          {{ stockOf(request) }} in stock
+                          {{ pendingOf(request) > 0 ? `${freeOf(request)} free (${pendingOf(request)} pending)` : `${stockOf(request)} in stock` }}
                         </span>
                       </td>
 
@@ -1004,8 +1004,19 @@ function stockOf(request) {
   return Number(request.total_available_stock ?? request.item?.quantity ?? 0);
 }
 
+function pendingOf(request) {
+  return Number(request.pending_hold_stock ?? 0);
+}
+
+function freeOf(request) {
+  if (request.total_free_stock !== undefined && request.total_free_stock !== null) {
+    return Number(request.total_free_stock);
+  }
+  return Math.max(0, stockOf(request) - pendingOf(request));
+}
+
 function hasStock(request) {
-  return stockOf(request) >= Number(request.quantity);
+  return freeOf(request) >= Number(request.quantity);
 }
 
 // Unmet demand: submitted when the item had zero stock. Mirrors
