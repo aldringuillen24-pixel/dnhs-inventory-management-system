@@ -18,6 +18,17 @@ use Illuminate\Support\Str;
 
 class InventoryOperationService
 {
+    /**
+     * Default deadline for registered assignments so due/overdue tracking
+     * has data. Manual issues keep their optional custodian-set date.
+     */
+    public const DEFAULT_ASSIGNMENT_RETURN_DAYS = 365;
+
+    private static function defaultExpectedReturnDate(Carbon|string $transactionDate): string
+    {
+        return Carbon::parse($transactionDate)->addDays(self::DEFAULT_ASSIGNMENT_RETURN_DAYS)->toDateString();
+    }
+
     public function submitRegisteredAssignment(
         int $itemId,
         int $actorId,
@@ -260,6 +271,7 @@ class InventoryOperationService
                 'room' => $targetRoom,
                 'transaction_date' => now(),
                 'status' => 'assigned',
+                'expected_return_date' => self::defaultExpectedReturnDate(now()),
             ]);
 
             $assignmentRequest->update([
@@ -399,6 +411,7 @@ class InventoryOperationService
                 'room' => $targetRoom,
                 'transaction_date' => $now,
                 'status' => 'assigned',
+                'expected_return_date' => self::defaultExpectedReturnDate($now),
             ]);
             $firstTransactionId ??= $transaction->id;
 
@@ -487,6 +500,7 @@ class InventoryOperationService
                 'room' => $targetRoom,
                 'transaction_date' => $assignment->requested_at ?? now(),
                 'status' => 'assigned',
+                'expected_return_date' => self::defaultExpectedReturnDate($assignment->requested_at ?? now()),
             ]);
 
             $assignment->update([

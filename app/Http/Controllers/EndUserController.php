@@ -68,8 +68,8 @@ class EndUserController extends Controller
         $dueSoon = Transaction::query()
             ->where('user_id', $user->id)
             ->where('status', 'assigned')
-            ->whereNotNull('return_date')
-            ->whereBetween('return_date', [$today->toDateString(), $today->copy()->addDays(30)->toDateString()])
+            ->whereNotNull('expected_return_date')
+            ->whereBetween('expected_return_date', [$today->toDateString(), $today->copy()->addDays(30)->toDateString()])
             ->sum('quantity');
 
         $assignedItems = (int) $assignedRequests->sum('quantity');
