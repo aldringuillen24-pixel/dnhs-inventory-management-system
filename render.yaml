@@ -74,13 +74,11 @@ services:
         fromService:
           type: web
           name: dnhs-inventory
-          property: envVars
           envVarKey: APP_KEY
       - key: APP_URL
         fromService:
           type: web
           name: dnhs-inventory
-          property: envVars
           envVarKey: APP_URL
       - key: DB_CONNECTION
         value: pgsql
