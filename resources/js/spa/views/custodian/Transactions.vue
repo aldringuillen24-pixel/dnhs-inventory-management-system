@@ -421,18 +421,41 @@
 
           <!-- 4. HISTORY TAB -->
           <template v-else-if="activeTab === 'history'">
-            <div class="mb-4 flex items-center justify-between gap-3">
-              <div class="relative w-full max-w-sm">
-                <svg class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-                </svg>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="relative w-full max-w-sm">
+                  <svg class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    v-model="historySearch"
+                    type="search"
+                    placeholder="Search by item, person, department…"
+                    aria-label="Search transaction history"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                  />
+                </div>
                 <input
-                  v-model="historySearch"
-                  type="search"
-                  placeholder="Search by item, person, department…"
-                  aria-label="Search transaction history"
-                  class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                  v-model="historyDateFrom"
+                  type="date"
+                  aria-label="Filter history from date"
+                  class="rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
                 />
+                <span class="text-xs text-gray-400">to</span>
+                <input
+                  v-model="historyDateTo"
+                  type="date"
+                  aria-label="Filter history to date"
+                  class="rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                />
+                <button
+                  v-if="historySearch || historyDateFrom || historyDateTo"
+                  type="button"
+                  class="rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+                  @click="historySearch = ''; historyDateFrom = ''; historyDateTo = ''"
+                >
+                  Clear
+                </button>
               </div>
 
               <span class="text-xs text-gray-500 dark:text-gray-400">
@@ -450,7 +473,6 @@
                     <th class="px-4 py-3.5">To</th>
                     <th class="px-4 py-3.5">Transaction Date</th>
                     <th class="px-4 py-3.5">Activity Status</th>
-                    <th class="px-4 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100 bg-white dark:divide-white/5 dark:bg-gray-900">
@@ -476,16 +498,6 @@
                     </td>
                     <td class="px-4 py-3.5">
                       <StatusBadge :status="transaction.status" />
-                    </td>
-                    <td class="px-4 py-3.5 text-right">
-                      <button
-                        v-if="transaction.manual_recipient_name && transaction.expected_return_date && transaction.status === 'assigned'"
-                        type="button"
-                        class="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300"
-                        @click="openPrompt('manual-return', transaction.id)"
-                      >
-                        Record Return
-                      </button>
                     </td>
                   </tr>
                   </template>
@@ -532,31 +544,14 @@
                     <td class="px-4 py-3.5">
                       <StatusBadge :status="group.first.status" />
                     </td>
-                    <td class="px-4 py-3.5 text-right">
-                      <span
-                        v-if="group.entries.some((entry) => entry.manual_recipient_name && entry.expected_return_date && entry.status === 'assigned')"
-                        class="text-[11px] font-semibold text-amber-700 dark:text-amber-300"
-                        title="Expand to record individual returns"
-                      >
-                        {{ group.entries.filter((entry) => entry.manual_recipient_name && entry.expected_return_date && entry.status === 'assigned').length }} to return
-                      </span>
-                    </td>
                   </tr>
                   <tr v-if="isHistoryGroupExpanded(group.key)">
-                    <td colspan="7" class="bg-gray-50/40 px-4 py-2 dark:bg-white/[0.02]">
+                    <td colspan="6" class="bg-gray-50/40 px-4 py-2 dark:bg-white/[0.02]">
                       <ul class="space-y-1">
                         <li v-for="entry in group.entries" :key="entry.id" class="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-6 text-[11px] text-gray-500 dark:text-gray-400">
                           <span class="font-mono font-semibold text-gray-700 dark:text-gray-300">{{ entry.item?.inventory_item_no ?? `#${entry.id}` }}</span>
                           <span class="font-bold text-gray-900 dark:text-white">×{{ entry.quantity }}</span>
                           <span v-if="entry.expected_return_date">due {{ formatDate(entry.expected_return_date) }}</span>
-                          <button
-                            v-if="entry.manual_recipient_name && entry.expected_return_date && entry.status === 'assigned'"
-                            type="button"
-                            class="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300"
-                            @click="openPrompt('manual-return', entry.id)"
-                          >
-                            Record Return
-                          </button>
                         </li>
                       </ul>
                     </td>
@@ -565,7 +560,7 @@
                   </template>
 
                   <tr v-if="!filteredHistory.length">
-                    <td colspan="7" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
+                    <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
                       No transactions found matching your criteria.
                     </td>
                   </tr>
@@ -792,6 +787,8 @@ const loading = ref(true);
 const error = ref('');
 const working = ref(false);
 const historySearch = ref('');
+const historyDateFrom = ref('');
+const historyDateTo = ref('');
 
 const assignOpen = ref(false);
 const reviewRequest = ref(null);
@@ -879,9 +876,8 @@ function toggleLedgerGroup(key) {
 
 // Display-only grouping for the History tab, mirroring the audit ledger.
 // Adjacent transactions identical in item, quantity, parties, date, status and
-// expected return date collapse into one expandable row. The per-record
-// "Record Return" action stays reachable: it renders on each expanded entry
-// that qualifies, exactly as it would ungrouped.
+// expected return date collapse into one expandable row. Manual returns are
+// recorded from the Inventory Assigned workspace, so this tab stays read-only.
 const expandedHistoryGroups = ref(new Set());
 
 function historyGroupKey(transaction) {
@@ -930,11 +926,23 @@ function toggleHistoryGroup(key) {
 
 const filteredHistory = computed(() => {
   const query = historySearch.value.toLowerCase().trim();
-  if (!query) {
+  const from = historyDateFrom.value ? String(historyDateFrom.value).slice(0, 10) : '';
+  const to = historyDateTo.value ? String(historyDateTo.value).slice(0, 10) : '';
+  if (!query && !from && !to) {
     return history.value;
   }
-  return history.value.filter((transaction) =>
-    [
+  return history.value.filter((transaction) => {
+    const day = String(transaction.transaction_date ?? '').slice(0, 10);
+    if (from && (!day || day < from)) {
+      return false;
+    }
+    if (to && (!day || day > to)) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    return [
       transaction.quantity,
       transaction.item?.item_name,
       transaction.item?.inventory_item_no,
@@ -944,8 +952,8 @@ const filteredHistory = computed(() => {
       transaction.transaction_date,
     ]
       .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(query)),
-  );
+      .some((value) => String(value).toLowerCase().includes(query));
+  });
 });
 
 const promptConfig = computed(() => {
