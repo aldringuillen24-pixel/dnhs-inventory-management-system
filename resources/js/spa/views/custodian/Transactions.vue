@@ -239,7 +239,7 @@
                   <tbody class="divide-y divide-gray-100 dark:divide-white/5">
                     <tr v-for="assignment in assignments" :key="assignment.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                       <td class="px-4 py-3.5 font-semibold text-gray-900 dark:text-white">
-                        {{ personName(assignment.targetUser) }}
+                        {{ personName(assignment.target_user ?? assignment.targetUser) }}
                       </td>
                       <td class="px-4 py-3.5">
                         <div class="font-medium text-gray-800 dark:text-gray-200">{{ assignment.item?.item_name ?? 'Unknown item' }}</div>
@@ -291,7 +291,7 @@
                         <svg class="h-4 w-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                           <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
                         </svg>
-                        <span class="font-semibold text-indigo-700 dark:text-indigo-300">{{ personName(transfer.targetUser) }}</span>
+                        <span class="font-semibold text-indigo-700 dark:text-indigo-300">{{ personName(transfer.target_user ?? transfer.targetUser) }}</span>
                       </div>
                     </td>
 
@@ -318,7 +318,7 @@
                           type="button"
                           class="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
                           :disabled="working"
-                          @click="confirmAction = { kind: 'approve-transfer', id: transfer.id, label: `Approve transfer of ${transfer.item?.item_name ?? 'item'} to ${personName(transfer.targetUser)}?` }"
+                          @click="confirmAction = { kind: 'approve-transfer', id: transfer.id, label: `Approve transfer of ${transfer.item?.item_name ?? 'item'} to ${personName(transfer.target_user ?? transfer.targetUser)}?` }"
                         >
                           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
@@ -465,7 +465,7 @@
                       <span v-if="transaction.item?.inventory_item_no" class="text-xs text-gray-400 font-mono">{{ transaction.item.inventory_item_no }}</span>
                     </td>
                     <td class="px-4 py-3.5 text-gray-600 dark:text-gray-300">
-                      {{ transaction.fromUser ? personName(transaction.fromUser) : 'Stockroom / Warehouse' }}
+                      {{ relUser(transaction, 'from_user', 'fromUser') ? personName(relUser(transaction, 'from_user', 'fromUser')) : 'Stockroom / Warehouse' }}
                     </td>
                     <td class="px-4 py-3.5">
                       <div class="font-semibold text-gray-900 dark:text-white">{{ transaction.manual_recipient_name ?? personName(transaction.user) }}</div>
@@ -520,7 +520,7 @@
                       </button>
                     </td>
                     <td class="px-4 py-3.5 text-gray-600 dark:text-gray-300">
-                      {{ group.first.fromUser ? personName(group.first.fromUser) : 'Stockroom / Warehouse' }}
+                      {{ relUser(group.first, 'from_user', 'fromUser') ? personName(relUser(group.first, 'from_user', 'fromUser')) : 'Stockroom / Warehouse' }}
                     </td>
                     <td class="px-4 py-3.5">
                       <div class="font-semibold text-gray-900 dark:text-white">{{ group.first.manual_recipient_name ?? personName(group.first.user) }}</div>
@@ -888,7 +888,7 @@ function historyGroupKey(transaction) {
   return [
     transaction.item?.item_name ?? 'Unknown item',
     Number(transaction.quantity ?? 0),
-    transaction.fromUser ? personName(transaction.fromUser) : 'Stockroom / Warehouse',
+    transaction.from_user ?? transaction.fromUser ? personName(transaction.from_user ?? transaction.fromUser) : 'Stockroom / Warehouse',
     transaction.manual_recipient_name ?? personName(transaction.user),
     transaction.manual_department ?? '',
     String(transaction.transaction_date ?? '').slice(0, 16),
@@ -938,7 +938,7 @@ const filteredHistory = computed(() => {
       transaction.quantity,
       transaction.item?.item_name,
       transaction.item?.inventory_item_no,
-      transaction.fromUser ? personName(transaction.fromUser) : 'Warehouse',
+      transaction.from_user ?? transaction.fromUser ? personName(transaction.from_user ?? transaction.fromUser) : 'Warehouse',
       transaction.manual_recipient_name ?? personName(transaction.user),
       transaction.manual_department,
       transaction.transaction_date,
@@ -973,6 +973,12 @@ function personName(user) {
   }
   const full = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
   return full || user.username || 'Unknown';
+}
+
+// Eloquent snake_cases relation names in JSON (`targetUser` arrives as
+// `target_user`), so read the snake key first with a camel fallback.
+function relUser(obj, snakeKey, camelKey) {
+  return obj?.[snakeKey] ?? obj?.[camelKey] ?? null;
 }
 
 function formatDate(value) {

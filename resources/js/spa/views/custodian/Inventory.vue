@@ -852,7 +852,7 @@
 
               <div class="flex flex-wrap items-center gap-1.5">
                 <span class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
-                  {{ source.active_assignee_summary || source.assignedTo?.full_name || source.assignedTo?.username || 'Stockroom' }}
+                  {{ source.active_assignee_summary || source.assigned_to?.full_name || source.assignedTo?.full_name || source.assigned_to?.username || source.assignedTo?.username || 'Stockroom' }}
                 </span>
                 <span
                   v-if="(source.receive_return_assignments ?? []).length"
