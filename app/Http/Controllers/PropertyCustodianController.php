@@ -863,11 +863,19 @@ class PropertyCustodianController extends Controller
                 if ($status === 'assigned') {
                     // Custody: either a plain assigned record, or a flagged one whose
                     // units are still issued out on an active assignment transaction.
-                    $query->whereIn('inventory.status', Inventory::CUSTODY_STATUSES)
-                        ->where(function ($scope): void {
-                            $scope->where('inventory.status', 'assigned')
-                                ->orWhereNotNull('active_assignments.item_id');
-                        });
+                    // Partially issued stock also appears here: an `available`
+                    // record carrying active assignments shows its issued portion
+                    // in this tab while its remainder stays under Available.
+                    $query->where(function ($scope): void {
+                        $scope->whereIn('inventory.status', Inventory::CUSTODY_STATUSES)
+                            ->orWhere(function ($partial): void {
+                                $partial->where('inventory.status', 'available')
+                                    ->whereNotNull('active_assignments.item_id');
+                            });
+                    })->where(function ($scope): void {
+                        $scope->where('inventory.status', 'assigned')
+                            ->orWhereNotNull('active_assignments.item_id');
+                    });
                 } else {
                     $query->where('status', $workspaceStatuses[$status][0] ?? $status);
                 }
@@ -885,6 +893,17 @@ class PropertyCustodianController extends Controller
         // The Assigned workspace lists the custody statuses, so its badge has to
         // match that list rather than the single `assigned` status bucket.
         $inventoryStatusCounts['assigned'] = (int) $inventoryStatusCounts['assigned'] + $custodyFlaggedInspectionQuantity;
+        // Partially issued stock reads in the Assigned list too, so its issued
+        // portion counts toward the badge. The remainder still counts under
+        // Available, so the two badges never double count a unit.
+        $partiallyIssuedAssignedQuantity = (int) (Inventory::query()
+            ->joinSub($activeAssignmentsForTotals, 'active_assignments', function ($join): void {
+                $join->on('inventory.item_id', '=', 'active_assignments.item_id');
+            })
+            ->where('inventory.status', 'available')
+            ->selectRaw('COALESCE(SUM(active_assignments.active_assigned_quantity), 0) as total_quantity')
+            ->value('total_quantity') ?? 0);
+        $inventoryStatusCounts['assigned'] = (int) $inventoryStatusCounts['assigned'] + $partiallyIssuedAssignedQuantity;
         // Performance: hydrate source rows only for the groups actually rendered
         // on this page (the 7 paginators above), instead of the entire inventory
         // table with 5 eager relations each. Group membership is an OR of

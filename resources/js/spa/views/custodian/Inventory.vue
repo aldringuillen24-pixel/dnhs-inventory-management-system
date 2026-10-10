@@ -268,9 +268,16 @@
               />
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">{{ row.item_name }}</p>
-                <p v-if="row.status === 'available'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">Available: {{ format(row.free_quantity ?? row.quantity) }} {{ row.unit }}</p>
+                <p v-if="hasIssuedOut(row)" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">Assigned: {{ format(assignedOutQty(row)) }} {{ row.unit }}</p>
+                <p v-else-if="row.status === 'available'" class="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white min-[480px]:text-base">Available: {{ format(row.free_quantity ?? row.quantity) }} {{ row.unit }}</p>
                 <p v-else class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400 min-[480px]:mt-1 min-[480px]:text-xs">{{ format(row.quantity) }} {{ row.unit }}</p>
-                <p v-if="row.status === 'available'" class="mt-0.5 text-[11px] font-semibold min-[480px]:text-xs" :class="(row.pending_hold ?? 0) > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'">
+                <p v-if="hasIssuedOut(row)" class="mt-0.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500 min-[480px]:text-xs">
+                  Left in stockroom: {{ format(row.quantity) }}
+                </p>
+                <p v-if="hasIssuedOut(row) && (row.pending_hold ?? 0) > 0" class="mt-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-300 min-[480px]:text-xs">
+                  Pending: {{ format(row.pending_hold ?? 0) }}
+                </p>
+                <p v-else-if="row.status === 'available'" class="mt-0.5 text-[11px] font-semibold min-[480px]:text-xs" :class="(row.pending_hold ?? 0) > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'">
                   Pending: {{ format(row.pending_hold ?? 0) }}
                 </p>
                 <p v-if="groupSubtitle(row)" class="mt-0.5 truncate font-mono text-[11px] text-gray-500 dark:text-gray-400">
@@ -278,6 +285,7 @@
                 </p>
               </div>
               <StatusBadge :status="row.status" compact />
+              <span v-if="hasIssuedOut(row)" class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Assigned issuing</span>
               <button
                 type="button"
                 class="shrink-0 rounded-md border border-emerald-200 px-2 py-1.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10 min-[480px]:px-3 min-[480px]:py-2 min-[480px]:text-xs"
@@ -436,7 +444,17 @@
 
                   <!-- Quantity -->
                   <td class="px-4 py-3.5 text-right font-bold text-gray-900 dark:text-white">
-                    <template v-if="row.status === 'available'">
+                    <template v-if="hasIssuedOut(row)">
+                      Assigned: {{ format(assignedOutQty(row)) }}
+                      <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
+                      <span class="block text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+                        Left in stockroom: {{ format(row.quantity) }}
+                      </span>
+                      <span v-if="(row.pending_hold ?? 0) > 0" class="block text-[11px] font-semibold text-amber-600 dark:text-amber-300">
+                        Pending: {{ format(row.pending_hold ?? 0) }}
+                      </span>
+                    </template>
+                    <template v-else-if="row.status === 'available'">
                       Available: {{ format(row.free_quantity ?? row.quantity) }}
                       <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
                       <span class="block text-[11px] font-semibold" :class="(row.pending_hold ?? 0) > 0 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-400 dark:text-gray-500'">
@@ -461,7 +479,7 @@
 
                   <!-- Status -->
                   <td class="px-4 py-3.5">
-                    <StatusBadge :status="row.status" />
+                    <StatusBadge :status="displayStatus(row)" />
                   </td>
 
                   <!-- Actions: display-only under All Inventory -->
@@ -486,7 +504,7 @@
                         </svg>
                       </button>
                       <button
-                        v-if="row.status === 'assigned'"
+                        v-if="displayStatus(row) === 'assigned'"
                         type="button"
                         class="inline-flex items-center gap-1 rounded-md border border-indigo-200 px-2.5 py-1 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-50 dark:border-indigo-500/30 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
                         title="Record the return of an assigned item"
@@ -498,7 +516,7 @@
                         Return
                       </button>
                       <button
-                        v-if="row.status === 'available' && hasMaintenanceEligibleItems(row)"
+                        v-if="row.status === 'available' && !isPartialAssigned(row) && hasMaintenanceEligibleItems(row)"
                         type="button"
                         class="rounded-md p-1.5 text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-500/10"
                         title="Send selected items to maintenance"
@@ -561,7 +579,7 @@
 
                       <!-- Edit Button -->
                       <button
-                        v-if="row.status === 'available'"
+                        v-if="row.status === 'available' && !isPartialAssigned(row)"
                         type="button"
                         class="rounded-md p-1.5 text-gray-500 hover:bg-emerald-50 hover:text-emerald-700 dark:text-gray-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300"
                         title="Edit inventory group"
@@ -574,7 +592,7 @@
 
                       <!-- Delete Button -->
                       <button
-                        v-if="row.status === 'available'"
+                        v-if="row.status === 'available' && !isPartialAssigned(row)"
                         type="button"
                         class="rounded-md p-1.5 text-gray-500 hover:bg-rose-50 hover:text-rose-700 dark:text-gray-400 dark:hover:bg-rose-500/10 dark:hover:text-rose-300"
                         title="Delete inventory group"
@@ -639,7 +657,7 @@
                 {{ recordGroup.ics_no ? `ICS: ${recordGroup.ics_no}` : 'No ICS' }}
               </p>
             </div>
-            <StatusBadge :status="recordGroup.status" />
+            <StatusBadge :status="displayStatus(recordGroup)" />
           </div>
           <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-gray-200 pt-2.5 text-xs dark:border-gray-700 sm:grid-cols-3">
             <div>
@@ -667,7 +685,7 @@
           </dl>
           <div class="mt-3 flex shrink-0 flex-wrap gap-1.5 border-t border-gray-200 pt-2.5 dark:border-gray-700 xl:hidden">
             <button
-              v-if="recordGroup.status === 'assigned'"
+              v-if="displayStatus(recordGroup) === 'assigned'"
               type="button"
               class="rounded-md border border-indigo-200 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/30 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
               @click="openReturnModal(recordGroup)"
@@ -675,7 +693,7 @@
               Return
             </button>
             <button
-              v-if="recordGroup.status === 'available' && hasMaintenanceEligibleItems(recordGroup)"
+              v-if="recordGroup.status === 'available' && !isPartialAssigned(recordGroup) && hasMaintenanceEligibleItems(recordGroup)"
               type="button"
               class="rounded-md border border-amber-200 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 dark:border-amber-500/30 dark:text-amber-300 dark:hover:bg-amber-500/10"
               @click="openMaintenanceModal(recordGroup)"
@@ -715,7 +733,7 @@
               Dispose
             </button>
             <button
-              v-if="recordGroup.status === 'available'"
+              v-if="recordGroup.status === 'available' && !isPartialAssigned(recordGroup)"
               type="button"
               class="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-white/5"
               @click="askEdit(recordGroup)"
@@ -723,7 +741,7 @@
               Edit
             </button>
             <button
-              v-if="recordGroup.status === 'available'"
+              v-if="recordGroup.status === 'available' && !isPartialAssigned(recordGroup)"
               type="button"
               class="rounded-md border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-500/10"
               @click="askDelete(recordGroup)"
@@ -2192,6 +2210,26 @@ function hasMaintenanceEligibleItems(row) {
 
 function isInspectable(status) {
   return INSPECTABLE_STATUSES.includes(status);
+}
+
+// Change 1: partially issued stock reads in the Assigned tab. A row is shown
+// as assigned when it is fully assigned, or when the Assigned workspace lists
+// an `available` record that still has units issued out (its remainder stays
+// under Available). Every branch below keys off this, never raw status alone.
+function assignedOutQty(row) {
+  return Number(row?.assigned_quantity ?? 0);
+}
+
+function hasIssuedOut(row) {
+  return row?.status === 'available' && assignedOutQty(row) > 0;
+}
+
+function isPartialAssigned(row) {
+  return workspace.value === 'assigned' && hasIssuedOut(row);
+}
+
+function displayStatus(row) {
+  return isPartialAssigned(row) ? 'assigned' : row?.status;
 }
 
 function hasInspectableItems(row) {

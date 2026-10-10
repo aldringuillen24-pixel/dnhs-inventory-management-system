@@ -100,8 +100,12 @@ test('partially issued consumables stay available with the remainder', function 
         ->getJson(route('api.custodian.inventory'))
         ->assertOk();
 
-    $assignedNames = collect($response->json('inventoryPages.assigned.data'))->pluck('item_name')->all();
-    expect($assignedNames)->not->toContain('Bond Paper');
+    // Change 1: the issued portion reads in the Assigned tab while the
+    // remainder stays under Available.
+    $assigned = collect($response->json('inventoryPages.assigned.data'));
+    $assignedRow = $assigned->firstWhere('item_name', 'Bond Paper');
+    expect($assignedRow)->not->toBeNull()
+        ->and((int) $assignedRow['assigned_quantity'])->toBe(30);
 
     $available = collect($response->json('inventoryPages.available.data'));
     expect($available->firstWhere('item_name', 'Bond Paper')['quantity'])->toBe(20);
