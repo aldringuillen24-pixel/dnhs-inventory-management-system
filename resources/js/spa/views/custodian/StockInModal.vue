@@ -353,12 +353,28 @@ watch(
     () => props.open,
     (open) => {
         if (open) {
-            errors.value = {};
-            formError.value = '';
-            busy.value = false;
+            resetForm();
         }
     },
 );
+
+function resetForm() {
+    errors.value = {};
+    formError.value = '';
+    busy.value = false;
+    serials.value = [];
+    form.item_name = '';
+    form.category_id = '';
+    form.unit = '';
+    form.quantity = 1;
+    form.unit_cost = 0;
+    form.date_acquired = new Date().toISOString().slice(0, 10);
+    form.lifespan_years = null;
+    form.ics_no = '';
+    form.building = '';
+    form.room = '';
+    form.description = '';
+}
 
 async function submit() {
     if (busy.value) return;
@@ -390,6 +406,7 @@ async function submit() {
 
     try {
         await api.post('/custodian/inventory/stock-in', payload);
+        resetForm();
         emit('saved');
     } catch (requestError) {
         const response = requestError?.response;
