@@ -1,5 +1,6 @@
 # Render blueprint for the DNHS Inventory Management System.
-# Creates a Docker web service (./Dockerfile on branch main) plus managed Postgres.
+# Reuses existing free Postgres dnhs-inventory-management-system-db
+# (Render allows only 1 free DB). Fill DB_* in dashboard from that DB's Info tab.
 # Secrets are entered in the Render dashboard, never committed to git.
 
 services:
@@ -23,25 +24,15 @@ services:
       - key: DB_CONNECTION
         value: pgsql
       - key: DB_HOST
-        fromDatabase:
-          name: dnhs-inventory-db
-          property: host
+        sync: false # e.g. dpg-db1h2c8u01pc73edkbbg-a (Internal hostname from existing DB Info)
       - key: DB_PORT
-        fromDatabase:
-          name: dnhs-inventory-db
-          property: port
+        sync: false # e.g. 5432
       - key: DB_DATABASE
-        fromDatabase:
-          name: dnhs-inventory-db
-          property: database
+        sync: false # e.g. dnhs_inventory_management_system
       - key: DB_USERNAME
-        fromDatabase:
-          name: dnhs-inventory-db
-          property: user
+        sync: false # e.g. dianay_admin
       - key: DB_PASSWORD
-        fromDatabase:
-          name: dnhs-inventory-db
-          property: password
+        sync: false
       - key: SESSION_DRIVER
         value: database
       - key: CACHE_STORE
@@ -58,7 +49,3 @@ services:
         value: python3
       - key: FORECAST_DEMO_MODE
         value: "false"
-
-databases:
-  - name: dnhs-inventory-db
-    plan: free
