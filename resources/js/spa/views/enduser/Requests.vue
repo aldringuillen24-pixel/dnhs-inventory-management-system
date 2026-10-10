@@ -132,7 +132,7 @@
                 <div v-if="['waiting for approval', 'waiting for transfer approval'].includes(request.status)" class="flex items-center justify-center gap-1.5">
                   <button
                     type="button"
-                    class="h-4 w-4 inline-flex items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                    class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                     :disabled="workingId === request.id"
                     @click="respond(request.id, 'accept')"
                   >
@@ -140,7 +140,7 @@
                   </button>
                   <button
                     type="button"
-                    class="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                    class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                     :disabled="workingId === request.id"
                     @click="respond(request.id, 'decline')"
                   >
