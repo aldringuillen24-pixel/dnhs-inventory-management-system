@@ -408,8 +408,11 @@ class EndUserController extends Controller
             ->with(['item:item_id,item_name,inventory_item_no', 'transaction'])
             ->where('target_user_id', $user->id)
             ->where('quantity', '>', 0)
+            // Only assignments the end user already accepted. Custodian
+            // assignments still awaiting acceptance live in the Requests
+            // incoming tab; showing them here implies custody that never moved.
             // Hide transferred items — user no longer possesses them
-            ->whereNotIn('status', ['declined', 'transferred'])
+            ->whereIn('status', ['approved', 'accepted'])
             ->get()
             ->map(function ($request) use ($user) {
                 $returnRequestStatus = AssignmentRequest::where('item_id', $request->item_id)

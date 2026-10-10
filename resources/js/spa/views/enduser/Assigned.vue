@@ -59,13 +59,13 @@
                     <button
                       type="button"
                       class="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white"
-                      :aria-expanded="expanded.has(singleKey(index))"
-                      :aria-label="expanded.has(singleKey(index)) ? `Hide details for ${row.item_name}` : `Show details for ${row.item_name}`"
-                      :title="expanded.has(singleKey(index)) ? 'Hide details' : 'Details'"
-                      @click="toggleExpand(singleKey(index))"
+                      :aria-expanded="expanded.has(singleKey(group.key))"
+                      :aria-label="expanded.has(singleKey(group.key)) ? `Hide details for ${row.item_name}` : `Show details for ${row.item_name}`"
+                      :title="expanded.has(singleKey(group.key)) ? 'Hide details' : 'Details'"
+                      @click="toggleExpand(singleKey(group.key))"
                     >
                       <LucideIcon
-                        :icon="expanded.has(singleKey(index)) ? ChevronUp : ChevronDown"
+                        :icon="expanded.has(singleKey(group.key)) ? ChevronUp : ChevronDown"
                         class="h-4 w-4 transition-transform duration-200"
                       />
                     </button>
@@ -104,7 +104,7 @@
                   </div>
                 </td>
               </tr>
-              <tr v-if="expanded.has(singleKey(index))">
+              <tr v-if="expanded.has(singleKey(group.key))">
                 <td colspan="6" class="bg-gray-50 px-4 py-3.5 dark:bg-white/[0.02]">
                   <dl class="grid gap-3 text-xs text-gray-600 sm:grid-cols-3 dark:text-gray-400">
                     <div>
@@ -381,8 +381,8 @@ function toggleExpand(key) {
   expanded.value = next;
 }
 
-function singleKey(index) {
-  return `s:${index}`;
+function singleKey(key) {
+  return `s:${key}`;
 }
 
 function groupEntryKey(group, entryIndex) {
