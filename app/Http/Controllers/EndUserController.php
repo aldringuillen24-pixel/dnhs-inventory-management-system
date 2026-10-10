@@ -651,12 +651,17 @@ class EndUserController extends Controller
 
     public function requestReturn(Request $request, $itemId)
     {
+        $validated = $request->validate([
+            'quantity' => ['nullable', 'integer', 'min:1'],
+        ]);
+
         $inventory = Inventory::findOrFail($itemId);
         $user = Auth::user();
 
         $approvedAssignment = AssignmentRequest::where('item_id', $inventory->item_id)
             ->where('target_user_id', $user->id)
-            ->where('status', 'approved')
+            // 'accepted' is a legacy-status fallback; acceptAssignment writes 'approved'.
+            ->whereIn('status', ['approved', 'accepted'])
             ->where('quantity', '>', 0)
             ->orderByDesc('responded_at')
             ->first();
@@ -706,7 +711,14 @@ class EndUserController extends Controller
             return redirect()->route('endUser.my-requests')->with('success', 'Return request submitted to property custodian.');
         }
 
-        $returnQuantity = $approvedAssignment?->quantity ?? $assignmentTransaction?->quantity ?? $inventory->quantity;
+        // Partial returns: the requester may return fewer units than assigned.
+        // The custodian's approval path already decrements and keeps the
+        // remainder assigned, so only the entry-point cap is new here.
+        $outstandingQuantity = $approvedAssignment?->quantity ?? $assignmentTransaction?->quantity ?? $inventory->quantity;
+        $returnQuantity = $validated['quantity'] ?? $outstandingQuantity;
+        if ($returnQuantity < 1 || $returnQuantity > $outstandingQuantity) {
+            return redirect()->back()->with('error', 'Return quantity must be between 1 and the assigned quantity.');
+        }
 
         if ($approvedAssignment && $approvedAssignment->quantity < 1) {
             return redirect()->back()->with('error', 'The approved assignment quantity is invalid.');

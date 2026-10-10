@@ -2780,3 +2780,96 @@ test('custodian can decline a procurement request', function () {
 
     expect($request->fresh()->status)->toBe('declined');
 });
+
+function makeAssignedStock($test, int $stock = 5): array
+{
+    $category = Category::create([
+        'category_name' => 'Partial Return Gear',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $test->propertyCustodian->id,
+        'item_name' => 'Partial Return Chair',
+        'quantity' => $stock,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $request = AssignmentRequest::create([
+        'requested_item_name' => 'Partial Return Chair',
+        'requested_category_id' => $category->category_id,
+        'requested_unit' => 'piece',
+        'user_id' => $test->endUser->id,
+        'target_user_id' => $test->propertyCustodian->id,
+        'quantity' => $stock,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $test->actingAs($test->propertyCustodian)
+        ->post(route('propertyCustodian.requests.approve', $request->id), [
+            'inventory_ids' => [$inventory->item_id],
+        ])
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    $transaction = Transaction::where('item_id', $inventory->item_id)
+        ->where('status', 'assigned')
+        ->firstOrFail();
+
+    return [$inventory, $transaction];
+}
+
+test('end user can request a partial return and the remainder stays assigned', function () {
+    [$inventory, $transaction] = makeAssignedStock($this);
+    expect((int) $transaction->quantity)->toBe(5);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.request-return', $inventory->item_id), ['quantity' => 3])
+        ->assertRedirect(route('endUser.my-requests'));
+
+    $returnRequest = AssignmentRequest::where('item_id', $inventory->item_id)
+        ->where('status', 'waiting for custodian approval')
+        ->firstOrFail();
+    expect((int) $returnRequest->quantity)->toBe(3);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.returns.approve', $returnRequest->id))
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect((int) $transaction->fresh()->quantity)->toBe(2)
+        ->and($transaction->fresh()->status)->toBe('assigned')
+        ->and((int) $inventory->fresh()->quantity)->toBe(3)
+        ->and($inventory->fresh()->status)->toBe('available')
+        ->and($returnRequest->fresh()->status)->toBe('approved');
+
+    // The remaining 2 close the assignment.
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.request-return', $inventory->item_id), ['quantity' => 2])
+        ->assertRedirect(route('endUser.my-requests'));
+
+    $second = AssignmentRequest::where('item_id', $inventory->item_id)
+        ->where('status', 'waiting for custodian approval')
+        ->firstOrFail();
+    expect((int) $second->quantity)->toBe(2);
+
+    $this->actingAs($this->propertyCustodian)
+        ->post(route('propertyCustodian.returns.approve', $second->id))
+        ->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect((int) $transaction->fresh()->quantity)->toBe(0)
+        ->and($transaction->fresh()->status)->toBe('returned')
+        ->and((int) $inventory->fresh()->quantity)->toBe(5)
+        ->and($inventory->fresh()->status)->toBe('available');
+});
+
+test('return quantity above the assigned quantity is rejected', function () {
+    [$inventory] = makeAssignedStock($this);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.request-return', $inventory->item_id), ['quantity' => 6])
+        ->assertSessionHas('error', 'Return quantity must be between 1 and the assigned quantity.');
+
+    expect(AssignmentRequest::where('item_id', $inventory->item_id)
+        ->where('status', 'waiting for custodian approval')->count())->toBe(0);
+});

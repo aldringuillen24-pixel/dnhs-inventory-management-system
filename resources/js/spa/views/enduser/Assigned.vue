@@ -86,7 +86,7 @@
                       class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
                       :aria-label="`Request return of ${row.item_name}`"
                       title="Request Return"
-                      @click="returnConfirm = row"
+                      @click="openReturnConfirm(row)"
                     >
                       <LucideIcon :icon="Undo2" class="h-4 w-4" />
                     </button>
@@ -179,7 +179,7 @@
                       class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
                       :aria-label="`Request return of ${group.first.item_name}`"
                       title="Request Return"
-                      @click="returnConfirm = firstReturnable(group)"
+                      @click="openReturnConfirm(firstReturnable(group))"
                     >
                       <LucideIcon :icon="Undo2" class="h-4 w-4" />
                     </button>
@@ -231,7 +231,7 @@
                           class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
                           :aria-label="`Request return of ${entry.item_name}`"
                           title="Request Return"
-                          @click="returnConfirm = entry"
+                          @click="openReturnConfirm(entry)"
                         >
                           <LucideIcon :icon="Undo2" class="h-4 w-4" />
                         </button>
@@ -287,9 +287,22 @@
       <div v-if="returnConfirm" class="space-y-4">
         <p class="rounded-md bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:bg-white/5 dark:text-gray-300">
           Request return of <span class="font-semibold text-gray-900 dark:text-white">{{ returnConfirm.item_name }}</span>
-          ({{ returnConfirm.quantity }} {{ Number(returnConfirm.quantity) === 1 ? 'unit' : 'units' }})?
+          ({{ returnConfirm.quantity }} {{ Number(returnConfirm.quantity) === 1 ? 'unit' : 'units' }} assigned)?
           This sends a request to the property custodian.
         </p>
+        <div class="space-y-1.5">
+          <label for="return-quantity" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+            Quantity to return (max {{ returnQuantityCap() }})
+          </label>
+          <input
+            id="return-quantity"
+            v-model.number="returnQuantity"
+            type="number"
+            :min="1"
+            :max="returnQuantityCap()"
+            class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </div>
         <div class="flex justify-end gap-2">
           <button
             type="button"
@@ -334,6 +347,7 @@ const expanded = ref(new Set());
 const rows = ref([]);
 const endUsers = ref([]);
 const returnConfirm = ref(null);
+const returnQuantity = ref(1);
 
 const TRANSFERABLE = ['approved', 'accepted'];
 
@@ -463,6 +477,15 @@ function confirmReturn() {
   }
 }
 
+function openReturnConfirm(row) {
+  returnConfirm.value = row;
+  returnQuantity.value = Math.max(1, Number(row?.quantity) || 1);
+}
+
+function returnQuantityCap() {
+  return Math.max(1, Number(returnConfirm.value?.quantity) || 1);
+}
+
 async function load(options = {}) {
   await loadCachedPage({
     page: 'end-user-assigned',
@@ -496,8 +519,11 @@ async function requestReturn(row) {
   }
   workingId.value = rowKey(row);
 
+  const cap = Math.max(1, Number(row.quantity) || 1);
+  const quantity = Math.min(cap, Math.max(1, Number(returnQuantity.value) || 1));
+
   try {
-    await api.post(`/end-user/inventory/${itemId}/request-return`);
+    await api.post(`/end-user/inventory/${itemId}/request-return`, { quantity });
     forgetPageCache();
     await load();
   } catch (requestError) {
