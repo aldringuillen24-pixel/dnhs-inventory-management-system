@@ -110,20 +110,6 @@ class InventorySeeder extends Seeder
                 ['Whistle', 220, 'Pealess referee whistle'],
                 ['Gymnastics Mat', 5400, 'Foldable padded exercise mat'],
             ],
-            'Industrial / Workshop Equipment' => [
-                ['Cordless Drill', 6800, '18V cordless drill with battery'],
-                ['Angle Grinder', 4200, 'Handheld electric angle grinder'],
-                ['Circular Saw', 7500, 'Portable electric circular saw'],
-                ['Pressure Washer', 12800, 'Electric pressure washer for facilities'],
-                ['Lawn Mower', 18500, 'Push-type grass lawn mower'],
-                ['Welding Machine', 16200, 'Portable inverter welding machine'],
-                ['Air Compressor', 14500, 'Portable shop air compressor'],
-                ['Bench Vise', 2800, 'Heavy-duty workshop bench vise'],
-                ['Electric Hedge Trimmer', 6200, 'Corded electric hedge trimmer'],
-                ['Water Pump', 8900, 'Electric utility water pump'],
-                ['Portable Generator', 26500, 'Portable gasoline-powered generator'],
-                ['Digital Multimeter', 1950, 'Digital electrical testing multimeter'],
-            ],
             'Consumables' => [
                 ['Bond Paper', 320, 'Ream of A4 bond paper'],
                 ['Printer Ink', 850, 'Black printer ink cartridge'],
@@ -149,12 +135,6 @@ class InventorySeeder extends Seeder
                 ['Bulletin Board', 1800, 'Cork classroom bulletin board'],
                 ['Lectern', 5600, 'Wooden classroom lectern'],
             ],
-            'School Supplies' => [
-                ['Stapler', 450, 'Desktop paper stapler'],
-                ['Scissors', 180, 'Classroom scissors'],
-                ['Marker', 95, 'Whiteboard marker'],
-                ['Notebook', 85, 'Student composition notebook'],
-            ],
             'Cleaning & Sanitation' => [
                 ['Broom', 320, 'Soft-bristle cleaning broom'],
                 ['Mop', 480, 'Cotton string mop with handle'],
@@ -165,54 +145,15 @@ class InventorySeeder extends Seeder
                 ['First Aid Kit', 1250, 'Wall-mountable school first aid kit'],
                 ['Emergency Light', 1350, 'Rechargeable emergency lighting unit'],
             ],
-            'Medical / Health Equipment' => [
-                ['BP Monitor', 3800, 'Digital blood pressure monitor'],
-                ['Thermometer', 580, 'Non-contact infrared thermometer'],
-                ['First Aid Cabinet', 2100, 'Lockable first aid storage cabinet'],
-            ],
-            'Home Economics Equipment' => [
-                ['Sewing Machine', 12500, 'Electric sewing machine'],
-                ['Cooking Pot', 1800, 'Large stainless cooking pot'],
-                ['Kitchen Knife Set', 2400, 'Set of kitchen knives with block'],
-            ],
-            'Agricultural Equipment' => [
-                ['Garden Hoe', 650, 'Steel garden hoe with handle'],
-                ['Shovel', 780, 'Round-point digging shovel'],
-                ['Rake', 520, 'Garden leaf rake'],
-            ],
-            'Music Equipment' => [
-                ['Guitar', 6800, 'Acoustic classroom guitar'],
-                ['Amplifier', 9500, 'Portable instrument amplifier'],
-                ['Music Stand', 1200, 'Adjustable sheet music stand'],
-            ],
             'Science Equipment' => [
                 ['Science Model', 3200, 'Anatomical science teaching model'],
                 ['Experiment Kit', 4500, 'Classroom science experiment kit'],
                 ['Beaker Set', 1800, 'Set of laboratory glass beakers'],
             ],
-            'School Vehicles' => [
-                ['Service Van', 1250000, 'School service van'],
-                ['Motorcycle', 95000, 'School utility motorcycle'],
-            ],
-            'Communication Equipment' => [
-                ['Two-Way Radio', 6800, 'Handheld two-way radio'],
-                ['Megaphone', 2800, 'Portable rechargeable voice amplifier'],
-                ['Intercom', 4200, 'Wall-mounted intercom unit'],
-            ],
             'Security Equipment' => [
                 ['CCTV Camera', 5800, 'Outdoor CCTV camera'],
                 ['DVR', 12500, 'Digital video recorder for CCTV'],
                 ['Alarm Siren', 3200, 'Security alarm siren'],
-            ],
-            'IT/Network Infrastructure' => [
-                ['Router', 9800, 'Dual-band network router'],
-                ['Network Switch', 8500, 'Managed 24-port network switch'],
-                ['Access Point', 7200, 'Dual-band wireless access point'],
-            ],
-            'Facilities / Fixtures' => [
-                ['LED Light Fixture', 1800, 'Ceiling LED light fixture'],
-                ['Door', 8500, 'Steel classroom door'],
-                ['Window', 6200, 'Aluminum classroom window'],
             ],
         ];
         $itemsWithSerialNumbers = [
@@ -221,12 +162,9 @@ class InventorySeeder extends Seeder
             'External Hard Drive', 'Barcode Scanner', 'Photocopier', 'Document Shredder',
             'Cash Counting Machine', 'Fax Machine', 'Electric Typewriter', 'Label Printer',
             'Compound Microscope', 'Digital Balance', 'Centrifuge', 'pH Meter', 'Laboratory Oven',
-            'Spectrophotometer', 'Autoclave', 'Incubator', 'Cordless Drill', 'Angle Grinder',
-            'Circular Saw', 'Pressure Washer', 'Lawn Mower', 'Welding Machine', 'Air Compressor',
-            'Electric Hedge Trimmer', 'Water Pump', 'Portable Generator', 'Digital Multimeter',
-            'Projector', 'LED TV', 'Air Conditioner', 'Fire Extinguisher', 'BP Monitor',
-            'Sewing Machine', 'Guitar', 'Amplifier', 'Router', 'Network Switch', 'Access Point',
-            'CCTV Camera', 'DVR', 'Two-Way Radio', 'Service Van', 'Motorcycle',
+            'Spectrophotometer', 'Autoclave', 'Incubator',
+            'Projector', 'LED TV', 'Air Conditioner', 'Fire Extinguisher',
+            'CCTV Camera', 'DVR',
         ];
 
         $categoryItemCounts = [];

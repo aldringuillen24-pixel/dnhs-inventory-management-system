@@ -1582,7 +1582,7 @@ const ITEM_ICONS = [
   { terms: ['chair', 'desk', 'table'], icon: Armchair },
 ];
 const CATEGORY_ICONS = [
-  { terms: ['school suppl', 'consumable', 'office suppl'], icon: FileStack },
+  { terms: ['consumable', 'office suppl'], icon: FileStack },
   { terms: ['furniture'], icon: Armchair },
   { terms: ['ict', 'information technology'], icon: Monitor },
   { terms: ['office equipment'], icon: Printer },
