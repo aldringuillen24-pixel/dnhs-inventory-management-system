@@ -78,10 +78,12 @@
                 <td class="px-4 py-3.5 text-right">
                   <button
                     type="button"
-                    class="compact-btn compact-btn--sm border border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
-                    @click="openScanner"
+                    class="compact-btn compact-btn--sm border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                    :disabled="markingId !== null"
+                    title="Complete without scanning — for items without a QR label"
+                    @click="markRowInspected(row)"
                   >
-                    Inspect
+                    {{ markingId === row.inspection_id ? 'Saving…' : 'Mark Inspected' }}
                   </button>
                 </td>
               </tr>
@@ -116,6 +118,7 @@ const queue = ref([]);
 const queueTotal = ref(0);
 const queueLoading = ref(true);
 const scannerOpen = ref(false);
+const markingId = ref(null);
 
 function format(value) {
   return Number(value ?? 0).toLocaleString();
@@ -188,6 +191,33 @@ async function onInspected(data) {
   useToastStore().success('Inspection recorded', data?.message ?? 'The item was marked as inspected.');
   forgetPageCache();
   await load({ background: true });
+}
+
+// Direct completion for rows that cannot be scanned (e.g. items without a
+// QR label): the queue already carries the inspection_id, so no lookup is
+// needed. Findings stay optional and default to the flag reason.
+async function markRowInspected(row) {
+  if (markingId.value !== null || !row?.inspection_id) return;
+
+  markingId.value = row.inspection_id;
+  try {
+    const { data } = await api.post(
+      `/inspector/inspection/${row.inspection_id}/mark-inspected`,
+      { finding_notes: null },
+      // Success and error toasts are raised here so the interceptor stays quiet.
+      { skipToast: true },
+    );
+    useToastStore().success('Inspection recorded', data?.message ?? 'The item was marked as inspected.');
+    forgetPageCache();
+    await load({ background: true });
+  } catch (requestError) {
+    useToastStore().error(
+      'Could not mark inspected',
+      requestError?.response?.data?.message ?? 'Could not mark the item as inspected.',
+    );
+  } finally {
+    markingId.value = null;
+  }
 }
 
 onMounted(() => load());
