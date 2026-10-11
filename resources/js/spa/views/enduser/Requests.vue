@@ -91,7 +91,7 @@
               <td class="px-4 py-3.5 text-md text-gray-500 dark:text-gray-400">{{ request.status === 'cancelled' ? request.cancellation_reason || '—' : request.notes || '—' }}</td>
               <td class="px-4 py-3.5 text-center">
                 <button
-                  v-if="['waiting for approval', 'waiting for procurement'].includes(request.status)"
+                  v-if="['waiting for approval', 'waiting for procurement', 'waiting for transfer approval'].includes(request.status)"
                   type="button"
                   class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-rose-950/30"
                   :disabled="cancellingId === request.id"
@@ -176,7 +176,9 @@
     <ConfirmDialog
       :open="cancelTarget !== null"
       title="Cancel this request?"
-      :message="`Withdraw your request for ${cancelTarget?.requested_item_name ?? cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The custodian will no longer see it in the approval queue.`"
+      :message="cancelTarget?.status === 'waiting for transfer approval'
+        ? `Withdraw your transfer of ${cancelTarget?.requested_item_name ?? cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The recipient will no longer see it and your assignment hold is restored.`
+        : `Withdraw your request for ${cancelTarget?.requested_item_name ?? cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The custodian will no longer see it in the approval queue.`"
       :busy="cancelling"
       confirm-label="Yes, Cancel Request"
       @cancel="cancelTarget = null"
@@ -289,7 +291,11 @@ async function cancelRequest() {
 
   cancelling.value = true;
   try {
-    await api.delete(`/end-user/requests/${cancelTarget.value.id}`);
+    if (cancelTarget.value.status === 'waiting for transfer approval') {
+      await api.post(`/end-user/transfer/${cancelTarget.value.id}/cancel`);
+    } else {
+      await api.delete(`/end-user/requests/${cancelTarget.value.id}`);
+    }
     cancelTarget.value = null;
     forgetPageCache();
     await load();

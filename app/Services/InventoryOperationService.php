@@ -703,6 +703,35 @@ class InventoryOperationService
                 return false;
             }
 
+            // Re-validate the sender still holds the units before handing the
+            // decision to the custodian. Full-quantity holds keep their
+            // quantity on the 'transfer pending' row, so it must still cover
+            // the transfer; partial transfers carved the units out at request
+            // time, so only the remainder row's existence is re-checked.
+            $senderId = (int) $transferRequest->user_id;
+            $originalAssignment = AssignmentRequest::query()
+                ->where('item_id', $transferRequest->item_id)
+                ->where(function ($query) use ($senderId) {
+                    $query->where('target_user_id', $senderId)
+                        ->orWhere(function ($query) use ($senderId) {
+                            $query->where('user_id', $senderId)
+                                ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
+                        });
+                })
+                ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
+                ->lockForUpdate()
+                ->first();
+
+            if (! $originalAssignment) {
+                return false;
+            }
+            if (
+                $originalAssignment->status === 'transfer pending'
+                && (int) $originalAssignment->quantity < (int) $transferRequest->quantity
+            ) {
+                return false;
+            }
+
             $transferRequest->update([
                 'status' => 'waiting for custodian approval',
                 'responded_at' => now(),
@@ -745,6 +774,49 @@ class InventoryOperationService
             $transferRequest->update([
                 'status' => 'declined',
                 'notes' => $notes ?? $transferRequest->notes,
+                'responded_at' => now(),
+            ]);
+
+            return true;
+        });
+    }
+
+    public function cancelTransferRequest(int $transferRequestId, ?string $reason): bool
+    {
+        return DB::transaction(function () use ($transferRequestId, $reason): bool {
+            $transferRequest = AssignmentRequest::whereKey($transferRequestId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            // Only a transfer still waiting on the recipient can be withdrawn
+            // by the sender; once accepted, the decision belongs to the custodian.
+            if ($transferRequest->status !== 'waiting for transfer approval') {
+                return false;
+            }
+
+            $senderId = (int) $transferRequest->user_id;
+            $originalAssignment = AssignmentRequest::query()
+                ->where('item_id', $transferRequest->item_id)
+                ->where(function ($query) use ($senderId) {
+                    $query->where('target_user_id', $senderId)
+                        ->orWhere(function ($query) use ($senderId) {
+                            $query->where('user_id', $senderId)
+                                ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
+                        });
+                })
+                ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
+                ->lockForUpdate()
+                ->first();
+
+            if ($originalAssignment?->status === 'transfer pending') {
+                $originalAssignment->update(['status' => 'approved']);
+            } elseif ($originalAssignment) {
+                $originalAssignment->increment('quantity', $transferRequest->quantity);
+            }
+
+            $transferRequest->update([
+                'status' => 'cancelled',
+                'cancellation_reason' => $reason,
                 'responded_at' => now(),
             ]);
 
