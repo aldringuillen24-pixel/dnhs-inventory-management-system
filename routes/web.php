@@ -144,6 +144,8 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/inspection/{inspectionId}/decline-repair', [PropertyCustodianController::class, 'declineRepairRecommendation'])->name('inspection.decline-repair');
 
+    Route::post('/maintenance/{id}/decline', [PropertyCustodianController::class, 'declineMaintenanceReport'])->name('maintenance.decline');
+
     Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
 
     Route::get('/inventory/qr/lookup', [PropertyCustodianController::class, 'qrLookup'])->name('inventory.qr.lookup');
@@ -179,8 +181,10 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
 
     Route::get('/assigned-items', fn () => redirect('/spa/end-user/assigned'))->name('my-assigned-items');
     Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('assigned-items.transfer');
+    Route::post('/transfer/{id}/cancel', [EndUserController::class, 'cancelTransfer'])->name('transfer.cancel');
     Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');
     Route::post('/inventory/{itemId}/cancel-return', [EndUserController::class, 'cancelReturnRequest'])->name('inventory.cancel-return');
+    Route::post('/inventory/{itemId}/report', [EndUserController::class, 'reportIssue'])->name('inventory.report');
 
     Route::get('/profile', fn () => redirect('/spa/profile'))->name('profile');
 
@@ -265,6 +269,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/inventory/{itemId}/mark-ready-to-dispose', [PropertyCustodianController::class, 'markReadyToDispose'])->name('inventory.mark-ready-to-dispose');
         Route::post('/inspection/{inspectionId}/approve-repair', [PropertyCustodianController::class, 'approveRepairRecommendation'])->name('inspection.approve-repair');
         Route::post('/inspection/{inspectionId}/decline-repair', [PropertyCustodianController::class, 'declineRepairRecommendation'])->name('inspection.decline-repair');
+        Route::post('/maintenance/{id}/decline', [PropertyCustodianController::class, 'declineMaintenanceReport'])->name('maintenance.decline');
         Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
         Route::get('/transactions', [PropertyCustodianController::class, 'transactions'])->name('transactions');
         Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assign');
@@ -310,6 +315,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('transfer');
         Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');
         Route::post('/inventory/{itemId}/cancel-return', [EndUserController::class, 'cancelReturnRequest'])->name('inventory.cancel-return');
+        Route::post('/inventory/{itemId}/report', [EndUserController::class, 'reportIssue'])->name('inventory.report');
         Route::patch('/profile', [EndUserController::class, 'updateProfile'])->name('profile.update');
     });
 

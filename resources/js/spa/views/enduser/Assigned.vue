@@ -91,6 +91,17 @@
                       <LucideIcon :icon="Undo2" class="h-4 w-4" />
                     </button>
                     <button
+                      v-if="canReportIssue(row)"
+                      type="button"
+                      :disabled="workingId === rowKey(row)"
+                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-amber-200 text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10"
+                      :aria-label="`Report an issue with ${row.item_name}`"
+                      title="Report Issue"
+                      @click="openReportIssue(row)"
+                    >
+                      <LucideIcon :icon="TriangleAlert" class="h-4 w-4" />
+                    </button>
+                    <button
                       v-if="isPendingReturn(row)"
                       type="button"
                       :disabled="workingId === rowKey(row)"
@@ -183,6 +194,17 @@
                     >
                       <LucideIcon :icon="Undo2" class="h-4 w-4" />
                     </button>
+                    <button
+                      v-if="firstReturnable(group)"
+                      type="button"
+                      :disabled="workingId === rowKey(firstReturnable(group))"
+                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-amber-200 text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10"
+                      :aria-label="`Report an issue with ${group.first.item_name}`"
+                      title="Report Issue"
+                      @click="openReportIssue(firstReturnable(group))"
+                    >
+                      <LucideIcon :icon="TriangleAlert" class="h-4 w-4" />
+                    </button>
                     <span v-if="!firstTransferable(group) && !firstReturnable(group)" class="text-[11px] text-gray-400 dark:text-gray-500">
                       {{ groupActionHint(group) }}
                     </span>
@@ -234,6 +256,17 @@
                           @click="openReturnConfirm(entry)"
                         >
                           <LucideIcon :icon="Undo2" class="h-4 w-4" />
+                        </button>
+                        <button
+                          v-if="canReportIssue(entry)"
+                          type="button"
+                          :disabled="workingId === rowKey(entry)"
+                          class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-amber-200 text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10"
+                          :aria-label="`Report an issue with ${entry.item_name}`"
+                          title="Report Issue"
+                          @click="openReportIssue(entry)"
+                        >
+                          <LucideIcon :icon="TriangleAlert" class="h-4 w-4" />
                         </button>
                         <button
                           v-if="isPendingReturn(entry)"
@@ -322,12 +355,79 @@
         </div>
       </div>
     </Modal>
+    <!-- Report issue: damage/loss on an assigned item. Report-only — the item
+         stays assigned and no stock moves. -->
+    <Modal :open="reportTarget !== null" title="Report Issue" max-width="max-w-md" @close="reportTarget = null">
+      <div v-if="reportTarget" class="space-y-4">
+        <p class="rounded-md bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:bg-white/5 dark:text-gray-300">
+          Report an issue with <span class="font-semibold text-gray-900 dark:text-white">{{ reportTarget.item_name }}</span>
+          ({{ reportTarget.quantity }} {{ Number(reportTarget.quantity) === 1 ? 'unit' : 'units' }} assigned)?
+          The item stays assigned; the custodian triages the report.
+        </p>
+        <div class="space-y-1.5">
+          <label for="report-type" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+            Issue type
+          </label>
+          <select
+            id="report-type"
+            v-model="reportType"
+            class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
+            <option value="damaged">Damaged</option>
+            <option value="lost">Lost</option>
+          </select>
+        </div>
+        <div class="space-y-1.5">
+          <label for="report-quantity" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+            Quantity affected (max {{ reportQuantityCap() }})
+          </label>
+          <input
+            id="report-quantity"
+            v-model.number="reportQuantity"
+            type="number"
+            :min="1"
+            :max="reportQuantityCap()"
+            class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </div>
+        <div class="space-y-1.5">
+          <label for="report-notes" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+            Notes <span class="font-normal text-gray-500">(optional)</span>
+          </label>
+          <textarea
+            id="report-notes"
+            v-model="reportNotes"
+            rows="2"
+            maxlength="1000"
+            placeholder="What happened, visible damage, last known location…"
+            class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </div>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+            @click="reportTarget = null"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
+            :disabled="reportTarget && workingId === rowKey(reportTarget)"
+            @click="confirmReportIssue"
+          >
+            Submit Report
+          </button>
+        </div>
+      </div>
+    </Modal>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { ArrowLeftRight, ChevronDown, ChevronUp, Undo2, X } from 'lucide';
+import { ArrowLeftRight, ChevronDown, ChevronUp, TriangleAlert, Undo2, X } from 'lucide';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { useToastStore } from '../../stores/toast';
@@ -348,6 +448,10 @@ const rows = ref([]);
 const endUsers = ref([]);
 const returnConfirm = ref(null);
 const returnQuantity = ref(1);
+const reportTarget = ref(null);
+const reportType = ref('damaged');
+const reportQuantity = ref(1);
+const reportNotes = ref('');
 
 const TRANSFERABLE = ['approved', 'accepted'];
 
@@ -375,6 +479,50 @@ function canRequestReturn(row) {
   return ['approved', 'accepted', 'waiting for return approval'].includes(statusOf(row))
     && !isPendingReturn(row)
     && requestItemId(row) !== null;
+}
+
+function canReportIssue(row) {
+  return canRequestReturn(row);
+}
+
+function openReportIssue(row) {
+  reportTarget.value = row;
+  reportType.value = 'damaged';
+  reportQuantity.value = Math.max(1, Number(row?.quantity) || 1);
+  reportNotes.value = '';
+}
+
+function reportQuantityCap() {
+  return Math.max(1, Number(reportTarget.value?.quantity) || 1);
+}
+
+async function confirmReportIssue() {
+  const row = reportTarget.value;
+  const itemId = row ? requestItemId(row) : null;
+  if (!row || !itemId || workingId.value === rowKey(row)) {
+    return;
+  }
+  workingId.value = rowKey(row);
+
+  const cap = Math.max(1, Number(row.quantity) || 1);
+  const quantity = Math.min(cap, Math.max(1, Number(reportQuantity.value) || 1));
+
+  try {
+    await api.post(`/end-user/inventory/${itemId}/report`, {
+      type: reportType.value,
+      quantity,
+      notes: reportNotes.value.trim() || null,
+    });
+    reportTarget.value = null;
+    forgetPageCache();
+    await load();
+  } catch (requestError) {
+    if (requestError?.response?.status === 422) {
+      toast.error('Error', requestError?.response?.data?.message ?? 'Could not report the issue.');
+    }
+  } finally {
+    workingId.value = null;
+  }
 }
 
 function formatDate(value) {

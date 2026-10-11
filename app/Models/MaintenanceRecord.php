@@ -11,6 +11,7 @@ class MaintenanceRecord extends Model
 
     protected $fillable = [
         'inventory_id',
+        'quantity',
         'reported_by',
         'assigned_to',
         'status',
@@ -25,6 +26,7 @@ class MaintenanceRecord extends Model
     protected function casts(): array
     {
         return [
+            'quantity' => 'integer',
             'maintenance_cost' => 'decimal:2',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',

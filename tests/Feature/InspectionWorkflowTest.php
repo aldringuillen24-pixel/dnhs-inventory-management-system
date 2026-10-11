@@ -921,8 +921,7 @@ test('orphan zero-stock rows with no holder still cannot be marked repaired', fu
     expect($item->fresh()->status)->toBe('under_repair');
 });
 
-test('custodian inventory exposes pending repair recommendations on source rows', function () {
-    $item = makeRepairableItem($this, 'Recommended Row Item');
+test('custodian inventory exposes pending repair recommendations on source rows', function () {    $item = makeRepairableItem($this, 'Recommended Row Item');
     $record = recommendRepair($this, $item, 'Bearing worn');
 
     $rows = collect(
@@ -939,4 +938,127 @@ test('custodian inventory exposes pending repair recommendations on source rows'
         ->and($sources[0]['repairRecommendation']['inspection_id'])->toBe($record->id)
         ->and($sources[0]['repairRecommendation']['reason'])->toBe('Bearing worn')
         ->and($sources[0]['repairRecommendation']['inspected_by'])->toBe('School Inspector');
+});
+
+test('end user can report a damaged assigned item without moving stock', function () {    $item = makeIssuedItem($this, 'Reported Chair', 3);
+    $movementsBefore = StockMovement::where('inventory_id', $item->item_id)->count();
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), [
+            'type' => 'damaged',
+            'quantity' => 2,
+            'notes' => 'Leg cracked',
+        ])
+        ->assertRedirect(route('endUser.my-assigned-items'))
+        ->assertSessionHas('success', 'Issue reported for custodian triage.');
+
+    $this->assertDatabaseHas('maintenance_records', [
+        'inventory_id' => $item->item_id,
+        'reported_by' => $this->endUser->id,
+        'status' => 'reported',
+        'diagnosis' => 'damaged',
+        'quantity' => 2,
+    ]);
+
+    // Custody preserved: still assigned, quantities untouched, no movement.
+    expect($item->fresh()->status)->toBe('assigned')
+        ->and((int) $item->fresh()->quantity)->toBe(0)
+        ->and(StockMovement::where('inventory_id', $item->item_id)->count())->toBe($movementsBefore);
+});
+
+test('issue report quantity above the assigned quantity is rejected', function () {
+    $item = makeIssuedItem($this, 'Over Reported Chair', 2);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), [
+            'type' => 'lost',
+            'quantity' => 5,
+        ])
+        ->assertSessionHas('error', 'Report quantity must be between 1 and the assigned quantity.');
+
+    expect(\App\Models\MaintenanceRecord::where('inventory_id', $item->item_id)->count())->toBe(0);
+});
+
+test('duplicate open issue reports are rejected', function () {
+    $item = makeIssuedItem($this, 'Twice Reported Chair', 1);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), ['type' => 'damaged'])
+        ->assertRedirect(route('endUser.my-assigned-items'));
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), ['type' => 'lost'])
+        ->assertSessionHas('error', 'You already have an open report for this item.');
+
+    expect(\App\Models\MaintenanceRecord::where('inventory_id', $item->item_id)->count())->toBe(1);
+});
+
+test('non-holders cannot report issues on items', function () {
+    $item = makeIssuedItem($this, 'Stranger Reported Chair', 1);
+
+    $stranger = User::create([
+        'role_id' => Role::where('role_name', 'End User')->firstOrFail()->role_id,
+        'first_name' => 'Stranger',
+        'last_name' => 'User',
+        'username' => 'insp-stranger',
+        'email' => 'insp-stranger@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+
+    $this->actingAs($stranger)
+        ->post(route('endUser.inventory.report', $item->item_id), ['type' => 'damaged'])
+        ->assertSessionHas('error', 'You can only report issues on items assigned to you.');
+
+    expect(\App\Models\MaintenanceRecord::where('inventory_id', $item->item_id)->count())->toBe(0);
+});
+
+test('custodian can decline an issue report', function () {
+    $item = makeIssuedItem($this, 'Declined Report Chair', 1);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), ['type' => 'lost'])
+        ->assertRedirect(route('endUser.my-assigned-items'));
+
+    $record = \App\Models\MaintenanceRecord::where('inventory_id', $item->item_id)->firstOrFail();
+
+    $this->actingAs($this->custodian)
+        ->post(route('propertyCustodian.maintenance.decline', $record->id))
+        ->assertRedirect(route('propertyCustodian.inventory'))
+        ->assertSessionHas('success', 'Issue report declined.');
+
+    expect($record->fresh()->status)->toBe('cancelled');
+
+    $this->actingAs($this->custodian)
+        ->post(route('propertyCustodian.maintenance.decline', $record->id))
+        ->assertSessionHas('error', 'This report has already been processed.');
+});
+
+test('dashboard condition data shows reported damage while assigned', function () {
+    $item = makeIssuedItem($this, 'Condition Report Chair', 1);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), ['type' => 'damaged'])
+        ->assertRedirect(route('endUser.my-assigned-items'));
+
+    $conditions = collect(
+        $this->actingAs($this->endUser)
+            ->getJson(route('api.end-user.dashboard'))
+            ->assertOk()
+            ->json('conditionData')
+    );
+
+    expect($conditions->firstWhere('label', 'Damaged')['value'] ?? 0)->toBe(1);
+});
+
+test('reported assigned items can still be sent to inspection', function () {
+    $item = makeIssuedItem($this, 'Triage Inspection Chair', 1);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), ['type' => 'damaged'])
+        ->assertRedirect(route('endUser.my-assigned-items'));
+
+    $operations = app(\App\Services\InventoryOperationService::class);
+    expect($operations->sendToInspection($item->item_id, $this->custodian->id, 'Verify damage'))->toBeNull()
+        ->and($item->fresh()->status)->toBe('under_inspection');
 });

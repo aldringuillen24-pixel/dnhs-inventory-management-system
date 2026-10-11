@@ -10,6 +10,7 @@ use App\Models\Transaction;
 use App\Models\Inventory;
 
 use App\Models\InspectionRecord;
+use App\Models\MaintenanceRecord;
 use App\Models\StockMovement;
 use App\Services\ForecastAiRecommendationService;
 use App\Services\ForecastDecisionSupportService;
@@ -933,7 +934,7 @@ class PropertyCustodianController extends Controller
             ]))
             ->values();
         $sourceItemsByGroup = Inventory::query()
-            ->with(['category:category_id,category_name,is_maintenance_eligible,requires_serial_number', 'assignedTo', 'latestMaintenance', 'latestStockMovement', 'latestDisposalMovement'])
+            ->with(['category:category_id,category_name,is_maintenance_eligible,requires_serial_number', 'assignedTo', 'latestMaintenance', 'latestMaintenance.reportedBy:id,first_name,last_name,username', 'latestStockMovement', 'latestDisposalMovement'])
             ->orderBy('item_name')
             ->orderBy('item_id')
             ->where(function ($query) use ($displayedGroups): void {
@@ -1084,7 +1085,7 @@ class PropertyCustodianController extends Controller
 
                 if ($matchedSourceItems->isEmpty() && $inventoryItem->source_item_id) {
                     $fallbackSource = Inventory::query()
-                        ->with(['assignedTo', 'latestMaintenance', 'latestStockMovement', 'latestDisposalMovement'])
+                        ->with(['assignedTo', 'latestMaintenance', 'latestMaintenance.reportedBy:id,first_name,last_name,username', 'latestStockMovement', 'latestDisposalMovement'])
                         ->find($inventoryItem->source_item_id);
                     $matchedSourceItems = $fallbackSource ? collect([$fallbackSource]) : collect();
                 }
@@ -2291,6 +2292,27 @@ class PropertyCustodianController extends Controller
         }
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Repair recommendation declined. The item was returned to its previous status.');
+    }
+
+    /**
+     * Triage closer for an end-user damage/loss report. Only reports (records
+     * carrying a diagnosis from the report flow) can be declined this way;
+     * custodian repair-pipeline records close through the repair actions.
+     */
+    public function declineMaintenanceReport(Request $request, $id)
+    {
+        $record = MaintenanceRecord::whereKey($id)->firstOrFail();
+
+        if (! in_array($record->status, ['reported', 'in_progress'], true) || $record->diagnosis === null) {
+            return redirect()->back()->with('error', 'This report has already been processed.');
+        }
+
+        $record->update([
+            'status' => 'cancelled',
+            'completed_at' => now(),
+        ]);
+
+        return redirect()->route('propertyCustodian.inventory')->with('success', 'Issue report declined.');
     }
 
     public function disposeInventory(Request $request, $itemId)

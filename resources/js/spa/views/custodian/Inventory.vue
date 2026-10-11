@@ -896,6 +896,25 @@
                   {{ source.receive_return_assignments.length }} pending return{{ source.receive_return_assignments.length > 1 ? 's' : '' }}
                 </span>
                 <div
+                  v-if="openIssueReport(source)"
+                  class="flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-rose-200 bg-rose-50/70 px-2 py-1.5 dark:border-rose-500/30 dark:bg-rose-500/5"
+                >
+                  <span class="text-[11px] font-bold capitalize text-rose-800 dark:text-rose-200">Reported {{ openIssueReport(source).diagnosis }}</span>
+                  <span class="text-[11px] text-rose-700 dark:text-rose-300">
+                    by {{ openIssueReport(source).reporter }}<span v-if="openIssueReport(source).notes"> · {{ openIssueReport(source).notes }}</span>
+                  </span>
+                  <span class="ml-auto inline-flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      class="rounded-md border border-gray-200 px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-white/5"
+                      :disabled="reportDecisionId !== null"
+                      @click="declineIssueReport(source)"
+                    >
+                      {{ reportDecisionId === openIssueReport(source).id ? 'Declining…' : 'Decline' }}
+                    </button>
+                  </span>
+                </div>
+                <div
                   v-if="source.repairRecommendation"
                   class="flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-200 bg-amber-50/70 px-2 py-1.5 dark:border-amber-500/30 dark:bg-amber-500/5"
                 >
@@ -1697,6 +1716,7 @@ const selection = ref([]);
 const recordGroup = ref(null);
 const selectedPrintItemIds = ref([]);
 const repairDecisionId = ref(null);
+const reportDecisionId = ref(null);
 const maintenanceGroup = ref(null);
 const maintenanceItemIds = ref([]);
 const maintenanceIssue = ref('');
@@ -2317,6 +2337,54 @@ async function decideRepairRecommendation(source, decision) {
 function openRecordModal(row) {
   recordGroup.value = row;
   selectedPrintItemIds.value = [];
+}
+
+// Open end-user damage/loss report on a source row, if any. Only reports
+// (records carrying a diagnosis from the report flow) count — custodian
+// repair-pipeline records are handled by the repair actions.
+function openIssueReport(source) {
+  const record = source?.latestMaintenance ?? null;
+  if (!record || !['reported', 'in_progress'].includes(record.status) || !record.diagnosis) {
+    return null;
+  }
+  const reporter = record.reportedBy ?? record.reported_by ?? null;
+  const name = reporter
+    ? ([reporter.first_name, reporter.last_name].filter(Boolean).join(' ') || reporter.username || 'Unknown')
+    : 'Unknown';
+  return {
+    id: record.id ?? record.maintenance_id,
+    diagnosis: record.diagnosis,
+    reporter: name,
+    notes: record.issue_description ?? '',
+  };
+}
+
+async function declineIssueReport(source) {
+  const report = openIssueReport(source);
+  if (!report?.id || reportDecisionId.value !== null) return;
+
+  reportDecisionId.value = report.id;
+  try {
+    const { data } = await api.post(
+      `/custodian/maintenance/${report.id}/decline`,
+      {},
+      { skipToast: true },
+    );
+    useToastStore().success(
+      'Report declined',
+      data?.message ?? 'The issue report was closed.',
+    );
+    recordGroup.value = null;
+    forgetPageCache();
+    await load();
+  } catch (requestError) {
+    useToastStore().error(
+      'Could not decline',
+      requestError?.response?.data?.message ?? 'Could not close this report. Refresh the inventory and try again.',
+    );
+  } finally {
+    reportDecisionId.value = null;
+  }
 }
 
 function isMaintenanceEligible(source, row = maintenanceGroup.value) {

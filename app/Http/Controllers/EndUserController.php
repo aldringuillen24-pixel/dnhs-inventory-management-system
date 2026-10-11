@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\AssignmentRequest;
 use App\Models\Category;
+use App\Models\MaintenanceRecord;
 use App\Models\Transaction;
 use App\Models\Inventory;
 use App\Models\User;
@@ -82,10 +83,22 @@ class EndUserController extends Controller
             ->groupBy(fn ($request) => $request->item?->status ?? 'unknown')
             ->map(fn ($items, $status) => ['label' => ucfirst(str_replace('_', ' ', (string) $status)), 'quantity' => (int) $items->sum('quantity')])
             ->values();
+        // Open damage/loss reports the user filed on items they still hold.
+        // These drive the Damaged/Lost condition rows, which item statuses
+        // alone can never populate (reports never change inventory status).
+        $openIssueReports = MaintenanceRecord::query()
+            ->where('reported_by', $user->id)
+            ->whereIn('status', ['reported', 'in_progress'])
+            ->whereIn('inventory_id', Transaction::query()
+                ->where('user_id', $user->id)
+                ->where('status', 'assigned')
+                ->where('quantity', '>', 0)
+                ->select('item_id'))
+            ->get(['diagnosis']);
         $conditionData = collect([
-            ['label' => 'Damaged', 'value' => (int) $assignedRequests->filter(fn ($request) => $request->item?->status === 'damaged')->sum('quantity')],
+            ['label' => 'Damaged', 'value' => (int) $assignedRequests->filter(fn ($request) => $request->item?->status === 'damaged')->sum('quantity') + $openIssueReports->where('diagnosis', 'damaged')->count()],
             ['label' => 'Under Repair', 'value' => (int) $assignedRequests->filter(fn ($request) => in_array($request->item?->status, ['under_repair', 'under_maintenance'], true))->sum('quantity')],
-            ['label' => 'Lost', 'value' => (int) $assignedRequests->filter(fn ($request) => $request->item?->status === 'lost')->sum('quantity')],
+            ['label' => 'Lost', 'value' => (int) $assignedRequests->filter(fn ($request) => $request->item?->status === 'lost')->sum('quantity') + $openIssueReports->where('diagnosis', 'lost')->count()],
             ['label' => 'Disposal Review', 'value' => (int) $assignedRequests->filter(fn ($request) => in_array($request->item?->status, ['ready_to_dispose', 'disposal_review'], true))->sum('quantity')],
         ])->filter(fn ($condition) => $condition['value'] > 0)->values();
 
@@ -763,6 +776,100 @@ class EndUserController extends Controller
         ]);
 
         return redirect()->route('endUser.my-assigned-items')->with('success', 'Return request cancelled successfully.');
+    }
+
+    public function cancelTransfer(Request $request, $id, InventoryOperationService $inventoryOperations)
+    {
+        $validated = $request->validate([
+            'cancellation_reason' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $transferRequest = AssignmentRequest::findOrFail($id);
+
+        // Only the sender may withdraw their own transfer.
+        if ((int) $transferRequest->user_id !== (int) Auth::id()) {
+            abort(403);
+        }
+
+        if (! $inventoryOperations->cancelTransferRequest($transferRequest->id, $validated['cancellation_reason'] ?? null)) {
+            return redirect()->back()->with('error', 'Only transfers waiting for recipient approval can be cancelled.');
+        }
+
+        return redirect()->route('endUser.my-assigned-items')->with('success', 'Transfer request cancelled.');
+    }
+
+    /**
+     * Report a damage/loss issue on an assigned item. Report-only: the item
+     * stays assigned (custody is preserved) and no stock movement is recorded
+     * because nothing moved. The report lands in `maintenance_records` with
+     * the reporter and type (`diagnosis`), which the custodian triages from
+     * the inventory Records view.
+     */
+    public function reportIssue(Request $request, $itemId)
+    {
+        $validated = $request->validate([
+            'type' => ['required', 'string', 'in:damaged,lost'],
+            'quantity' => ['nullable', 'integer', 'min:1'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $inventory = Inventory::findOrFail($itemId);
+        $user = Auth::user();
+
+        $approvedAssignment = AssignmentRequest::where('item_id', $inventory->item_id)
+            ->where('target_user_id', $user->id)
+            ->where('status', 'approved')
+            ->where('quantity', '>', 0)
+            ->orderByDesc('responded_at')
+            ->first();
+
+        $hasApprovedAssignment = (bool) $approvedAssignment;
+        $isAssignedToUser = (int) ($inventory->assigned_to_user_id ?? 0) === (int) $user->id;
+
+        if (!$isAssignedToUser && !$hasApprovedAssignment) {
+            return redirect()->back()->with('error', 'You can only report issues on items assigned to you.');
+        }
+
+        if ($inventory->status !== 'assigned' && !$hasApprovedAssignment) {
+            return redirect()->back()->with('error', 'Only assigned items can be reported.');
+        }
+
+        $assignmentTransaction = $approvedAssignment?->transaction_id
+            ? Transaction::whereKey($approvedAssignment->transaction_id)->where('status', 'assigned')->first()
+            : Transaction::query()
+                ->where('item_id', $inventory->item_id)
+                ->where('user_id', $user->id)
+                ->where('status', 'assigned')
+                ->where('quantity', '>', 0)
+                ->latest('transaction_date')
+                ->first();
+
+        $outstandingQuantity = $approvedAssignment?->quantity ?? $assignmentTransaction?->quantity ?? $inventory->quantity;
+        $reportQuantity = $validated['quantity'] ?? $outstandingQuantity;
+        if ($reportQuantity < 1 || $reportQuantity > $outstandingQuantity) {
+            return redirect()->back()->with('error', 'Report quantity must be between 1 and the assigned quantity.');
+        }
+
+        $alreadyReported = MaintenanceRecord::where('inventory_id', $inventory->item_id)
+            ->where('reported_by', $user->id)
+            ->whereIn('status', ['reported', 'in_progress'])
+            ->exists();
+
+        if ($alreadyReported) {
+            return redirect()->back()->with('error', 'You already have an open report for this item.');
+        }
+
+        MaintenanceRecord::create([
+            'inventory_id' => $inventory->item_id,
+            'quantity' => $reportQuantity,
+            'reported_by' => $user->id,
+            'status' => 'reported',
+            'issue_description' => $validated['notes'] ?? null,
+            'diagnosis' => $validated['type'],
+            'started_at' => now(),
+        ]);
+
+        return redirect()->route('endUser.my-assigned-items')->with('success', 'Issue reported for custodian triage.');
     }
 
     public function cancelRequest(Request $request, $id)
