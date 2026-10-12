@@ -1,126 +1,11 @@
 <template>
   <main class="min-h-screen bg-[#f6f7f2] text-slate-900">
-    <div class="mx-auto flex min-h-screen w-full max-w-6xl items-stretch justify-center px-4 py-6 sm:px-8 lg:py-10">
-      <div class="signin-enter flex w-full overflow-hidden rounded-2xl bg-white shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
-        <!-- Brand panel: bento mosaic, no photography -->
-        <aside class="relative hidden w-[440px] shrink-0 flex-col justify-between overflow-hidden bg-[#173f3b] p-8 text-white lg:flex xl:w-[500px]">
-          <div class="grid grid-cols-2 gap-3">
-            <div
-              tabindex="0"
-              class="tile-rise col-span-2 flex items-center gap-4 rounded-2xl bg-white/10 p-5 transition-all duration-300 focus-visible:outline-2 focus-visible:outline-white/60"
-              :class="tileStateClass(0)"
-              style="animation-delay: 0.05s"
-              @mouseenter="hoveredTile = 0"
-              @mouseleave="hoveredTile = null"
-              @focusin="hoveredTile = 0"
-              @focusout="hoveredTile = null"
-            >
-              <img :src="logoUrl" alt="DNHS Logo" class="h-16 w-auto shrink-0 object-contain" :class="hoveredTile === 0 ? 'icon-pop' : ''" />
-              <div class="min-w-0">
-                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Dian-ay NHS</p>
-                <p class="mt-1 text-lg font-semibold leading-snug">Inventory Management System</p>
-                <p class="overflow-hidden text-xs leading-5 text-emerald-50/75 transition-all duration-300" :class="tileDescriptionClass(0)">
-                  Role-based stockroom control for Dian-ay National High School.
-                </p>
-              </div>
-            </div>
-
-            <div
-              tabindex="0"
-              class="tile-rise rounded-2xl bg-emerald-500 p-5 text-white transition-all duration-300 focus-visible:outline-2 focus-visible:outline-white/60"
-              :class="tileStateClass(1)"
-              style="animation-delay: 0.12s"
-              @mouseenter="hoveredTile = 1"
-              @mouseleave="hoveredTile = null"
-              @focusin="hoveredTile = 1"
-              @focusout="hoveredTile = null"
-            >
-              <LucideIcon :icon="ShieldCheck" class="h-5 w-5" :class="hoveredTile === 1 ? 'icon-pop' : ''" />
-              <p class="mt-6 text-sm font-semibold leading-snug">Role-based access</p>
-              <p class="overflow-hidden text-xs leading-5 text-emerald-50/90 transition-all duration-300" :class="tileDescriptionClass(1)">
-                Admins, custodians, heads, inspectors and end users — each with a dedicated workspace.
-              </p>
-            </div>
-
-            <div
-              tabindex="0"
-              class="tile-rise rounded-2xl bg-amber-500 p-5 text-white transition-all duration-300 focus-visible:outline-2 focus-visible:outline-white/60"
-              :class="tileStateClass(2)"
-              style="animation-delay: 0.19s"
-              @mouseenter="hoveredTile = 2"
-              @mouseleave="hoveredTile = null"
-              @focusin="hoveredTile = 2"
-              @focusout="hoveredTile = null"
-            >
-              <LucideIcon :icon="ChartColumn" class="h-5 w-5" :class="hoveredTile === 2 ? 'icon-pop' : ''" />
-              <p class="mt-6 text-sm font-semibold leading-snug">ML forecasting</p>
-              <p class="overflow-hidden text-xs leading-5 text-amber-50/90 transition-all duration-300" :class="tileDescriptionClass(2)">
-                Stock-out predictions with verification-first procurement guidance.
-              </p>
-            </div>
-
-            <div
-              tabindex="0"
-              class="tile-rise col-span-2 rounded-2xl bg-white/10 p-5 transition-all duration-300 focus-visible:outline-2 focus-visible:outline-white/60"
-              :class="tileStateClass(3)"
-              style="animation-delay: 0.26s"
-              @mouseenter="hoveredTile = 3"
-              @mouseleave="hoveredTile = null"
-              @focusin="hoveredTile = 3"
-              @focusout="hoveredTile = null"
-            >
-              <LucideIcon :icon="ClipboardList" class="h-5 w-5 text-emerald-200" :class="hoveredTile === 3 ? 'icon-pop' : ''" />
-              <p class="mt-4 text-sm font-semibold leading-snug">Requests & approvals</p>
-              <p class="overflow-hidden text-xs leading-5 text-emerald-50/75 transition-all duration-300" :class="tileDescriptionClass(3)">
-                Item requests, transfers and returns flow through custodian approval.
-              </p>
-            </div>
-
-            <div
-              tabindex="0"
-              class="tile-rise rounded-2xl bg-white p-5 text-[#173f3b] transition-all duration-300 focus-visible:outline-2 focus-visible:outline-[#173f3b]/40"
-              :class="tileStateClass(4)"
-              style="animation-delay: 0.33s"
-              @mouseenter="hoveredTile = 4"
-              @mouseleave="hoveredTile = null"
-              @focusin="hoveredTile = 4"
-              @focusout="hoveredTile = null"
-            >
-              <LucideIcon :icon="History" class="h-5 w-5" :class="hoveredTile === 4 ? 'icon-pop' : ''" />
-              <p class="mt-4 text-sm font-semibold leading-snug">Audit ledger</p>
-              <p class="overflow-hidden text-xs leading-5 text-slate-500 transition-all duration-300" :class="tileDescriptionClass(4)">
-                Every stock movement, assignment and approval recorded.
-              </p>
-            </div>
-
-            <div
-              tabindex="0"
-              class="tile-rise rounded-2xl bg-white/10 p-5 transition-all duration-300 focus-visible:outline-2 focus-visible:outline-white/60"
-              :class="tileStateClass(5)"
-              style="animation-delay: 0.4s"
-              @mouseenter="hoveredTile = 5"
-              @mouseleave="hoveredTile = null"
-              @focusin="hoveredTile = 5"
-              @focusout="hoveredTile = null"
-            >
-              <LucideIcon :icon="PackageCheck" class="h-5 w-5 text-emerald-200" :class="hoveredTile === 5 ? 'icon-pop' : ''" />
-              <p class="mt-4 text-sm font-semibold leading-snug">Stockroom control</p>
-              <p class="overflow-hidden text-xs leading-5 text-emerald-50/75 transition-all duration-300" :class="tileDescriptionClass(5)">
-                Stock-in, stock-out, serial tracking and lifespan monitoring.
-              </p>
-            </div>
-          </div>
-
-          <p class="relative mt-6 text-[11px] leading-5 text-emerald-50/60">
-            Republic of the Philippines · Department of Education<br />
-            Dian-ay National High School
-          </p>
-        </aside>
-
+    <div class="mx-auto flex min-h-screen w-full max-w-lg items-center justify-center px-4 py-6 sm:px-8 lg:py-10">
+      <div class="signin-enter w-full rounded-2xl bg-white shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
         <!-- Sign-in form -->
         <section class="flex min-w-0 flex-1 items-center justify-center px-6 py-10 sm:px-12">
           <div class="w-full max-w-sm">
-            <div class="mb-8 flex items-center gap-4 lg:hidden">
+            <div class="mb-8 flex items-center gap-4">
               <img :src="logoUrl" alt="DNHS Logo" class="h-16 w-auto object-contain" />
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.2em] text-[#173f3b]">Dian-ay NHS</p>
@@ -215,7 +100,7 @@
               <button
                 type="submit"
                 :disabled="busy"
-                class="h-12 w-full rounded-full bg-[#173f3b] px-5 text-sm font-semibold uppercase tracking-wider text-white shadow-[0_10px_30px_rgba(23,63,59,0.35)] transition-all hover:-translate-y-0.5 hover:bg-[#0f302d] hover:shadow-[0_14px_36px_rgba(23,63,59,0.4)] focus:ring-4 focus:ring-[#173f3b]/20 active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+                class="h-12 w-full rounded-full bg-[#173f3b] px-5 text-xs font-semibold uppercase tracking-wider text-white shadow-[0_10px_30px_rgba(23,63,59,0.35)] transition-all hover:-translate-y-0.5 hover:bg-[#0f302d] hover:shadow-[0_14px_36px_rgba(23,63,59,0.4)] focus:ring-4 focus:ring-[#173f3b]/20 active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
               >
                 {{ busy ? 'Signing in…' : 'Sign in' }}
               </button>
@@ -235,7 +120,7 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ChartColumn, ClipboardList, Eye, EyeOff, History, LockKeyhole, PackageCheck, ShieldCheck, TriangleAlert, UserRound } from 'lucide';
+import { Eye, EyeOff, LockKeyhole, ShieldCheck, TriangleAlert, UserRound } from 'lucide';
 import api from '../../lib/axios';
 import { useAuthStore } from '../../stores/auth';
 import { useToastStore } from '../../stores/toast';
@@ -253,9 +138,6 @@ const password = ref('');
 const remember = ref(false);
 const showPassword = ref(false);
 const capsLockOn = ref(false);
-// Hovered mosaic tile index (null when none). Drives the expand interaction:
-// the hovered tile lifts and opens its description, siblings shift aside.
-const hoveredTile = ref(null);
 const busy = ref(false);
 const errors = ref({});
 const formError = ref('');
@@ -267,21 +149,6 @@ function checkCapsLock(event) {
   if (typeof state === 'boolean') {
     capsLockOn.value = state;
   }
-}
-
-function tileStateClass(index) {
-  if (hoveredTile.value === null) {
-    return '';
-  }
-  return hoveredTile.value === index
-    ? '-translate-y-1 shadow-xl'
-    : '-translate-x-1.5 opacity-70';
-}
-
-function tileDescriptionClass(index) {
-  return hoveredTile.value === index
-    ? 'mt-1 max-h-20 opacity-90'
-    : 'max-h-0 opacity-0';
 }
 
 onMounted(() => {
@@ -340,8 +207,8 @@ async function submit() {
 </script>
 
 <style>
-/* Entrance motion: card rises once, mosaic tiles follow in stagger. Purely
- * decorative — disabled entirely under prefers-reduced-motion. */
+/* Entrance motion: card rises once. Purely decorative — disabled entirely
+ * under prefers-reduced-motion. */
 @keyframes signin-rise {
   from {
     opacity: 0;
@@ -355,36 +222,9 @@ async function submit() {
 .signin-enter {
   animation: signin-rise 0.45s ease-out both;
 }
-/* Fill is backwards (not both): the finished keyframe must release so hover
- * transforms keep working. A forwards fill would pin translateY(0) forever
- * and silently swallow every hover lift. */
-.tile-rise {
-  animation: signin-rise 0.5s ease-out backwards;
-}
-@keyframes icon-pop {
-  0% { transform: scale(1) rotate(0deg); }
-  40% { transform: scale(1.3) rotate(-10deg); }
-  70% { transform: scale(1.12) rotate(5deg); }
-  100% { transform: scale(1.15) rotate(0deg); }
-}
-/* Icons and logo ease between states; the pop plays once per hover-in while
- * the held scale persists until hover-out. */
-.tile-rise svg,
-.tile-rise img {
-  transition: transform 0.3s ease;
-}
-.tile-rise .icon-pop {
-  animation: icon-pop 0.45s ease-out;
-  transform: scale(1.15);
-}
 @media (prefers-reduced-motion: reduce) {
-  .signin-enter,
-  .tile-rise {
+  .signin-enter {
     animation: none;
-  }
-  .tile-rise .icon-pop {
-    animation: none;
-    transform: none;
   }
 }
 </style>
