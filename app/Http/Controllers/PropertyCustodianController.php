@@ -22,6 +22,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Carbon;
 
@@ -1841,6 +1842,149 @@ class PropertyCustodianController extends Controller
         });
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Item stocked in successfully.');
+    }
+
+    public function stockInImport(Request $request)
+    {
+        $validated = $request->validate([
+            'rows' => ['required', 'array', 'min:1', 'max:100'],
+        ]);
+
+        $userId = $request->user()?->getAuthIdentifier();
+        $seenSerials = [];
+        $imported = 0;
+        $failed = 0;
+        $rowErrors = [];
+
+        foreach ($validated['rows'] as $index => $row) {
+            $row = is_array($row) ? $row : [];
+            // CSV blanks arrive as empty strings; normalize nullable fields.
+            foreach (['lifespan_years', 'ics_no'] as $nullable) {
+                if (($row[$nullable] ?? null) === '') {
+                    $row[$nullable] = null;
+                }
+            }
+            if (($row['serial_numbers'] ?? null) === '') {
+                $row['serial_numbers'] = [];
+            }
+
+            $validator = Validator::make($row, [
+                'item_name' => ['required', 'string', 'max:255'],
+                'category_id' => ['required', 'exists:categories,category_id'],
+                'unit' => ['required', 'string', 'max:255'],
+                'unit_cost' => ['required', 'numeric', 'min:0'],
+                'date_acquired' => ['required', 'date', 'before_or_equal:today'],
+                'lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
+                'quantity' => ['required', 'integer', 'min:1', 'max:100'],
+                'ics_no' => ['nullable', 'string', 'max:255'],
+                'serial_numbers' => ['nullable', 'array'],
+                'serial_numbers.*' => ['nullable', 'string', 'max:255'],
+            ]);
+
+            if ($validator->fails()) {
+                $failed++;
+                $rowErrors[$index] = $validator->errors()->messages();
+                continue;
+            }
+
+            $data = $validator->validated();
+            $category = Category::find($data['category_id']);
+            $lifespanYears = ($data['lifespan_years'] ?? null) ?? $category->default_lifespan_years;
+            $lifespanYears = $lifespanYears === null ? null : (int) $lifespanYears;
+            $expectedEndDate = $lifespanYears === null
+                ? null
+                : Carbon::parse($data['date_acquired'])->addYears($lifespanYears)->toDateString();
+
+            $serialNumbers = [];
+            if ($category->requires_serial_number) {
+                $serialNumbers = array_values(array_filter(
+                    array_map(fn ($serial) => trim((string) $serial), (array) ($data['serial_numbers'] ?? [])),
+                    fn ($serial) => $serial !== '',
+                ));
+
+                $serialValidator = Validator::make(['serial_numbers' => $serialNumbers], [
+                    'serial_numbers' => ['required', 'array', 'size:' . (int) $data['quantity']],
+                    'serial_numbers.*' => ['required', 'string', 'max:255', 'distinct', 'unique:inventory,serial_number'],
+                ]);
+
+                $serialMessages = $serialValidator->fails() ? $serialValidator->errors()->messages() : [];
+                $batchDuplicates = array_values(array_intersect($serialNumbers, $seenSerials));
+                if ($batchDuplicates !== []) {
+                    $serialMessages['serial_numbers'][] = 'Duplicate serial number(s) within this import: ' . implode(', ', array_unique($batchDuplicates)) . '.';
+                }
+
+                if ($serialMessages !== []) {
+                    $failed++;
+                    $rowErrors[$index] = $serialMessages;
+                    continue;
+                }
+
+                foreach ($serialNumbers as $serialNumber) {
+                    $seenSerials[] = $serialNumber;
+                }
+            }
+
+            $itemAttributes = [
+                'category_id' => $data['category_id'],
+                'unit' => $data['unit'],
+                'user_id' => $userId,
+                'item_name' => $data['item_name'],
+                'description' => null,
+                'building' => null,
+                'room' => null,
+                'ics_no' => $data['ics_no'] ?? null,
+                'unit_cost' => $data['unit_cost'],
+                'date_acquired' => $data['date_acquired'],
+                'lifespan_years' => $lifespanYears,
+                'expected_end_date' => $expectedEndDate,
+            ];
+
+            DB::transaction(function () use ($itemAttributes, $serialNumbers, $category, $data): void {
+                if ($category->requires_serial_number) {
+                    foreach ($serialNumbers as $serialNumber) {
+                        $this->inventoryOperations->stockIn([
+                            ...$itemAttributes,
+                            'quantity' => 1,
+                            'serial_number' => $serialNumber,
+                        ]);
+                    }
+
+                    return;
+                }
+
+                if ($category->requires_qr_code) {
+                    for ($index = 0; $index < (int) $data['quantity']; $index++) {
+                        $this->inventoryOperations->stockIn([
+                            ...$itemAttributes,
+                            'quantity' => 1,
+                            'serial_number' => null,
+                        ]);
+                    }
+
+                    return;
+                }
+
+                $this->inventoryOperations->stockIn([
+                    ...$itemAttributes,
+                    'quantity' => $data['quantity'],
+                    'serial_number' => null,
+                ]);
+            });
+
+            $imported++;
+        }
+
+        $total = $imported + $failed;
+
+        return response()->json([
+            'status' => $failed === 0 ? 'success' : 'error',
+            'message' => $failed === 0
+                ? "Imported {$imported} of {$total} row(s)."
+                : "Imported {$imported} of {$total} row(s); {$failed} failed.",
+            'imported' => $imported,
+            'failed' => $failed,
+            'errors' => $rowErrors,
+        ]);
     }
 
     public function editInventory(Request $request, Inventory $inventory)

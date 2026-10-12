@@ -258,6 +258,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::get('/inventory', [PropertyCustodianController::class, 'inventory'])->name('inventory');
         Route::get('/inventory/export', [PropertyCustodianController::class, 'exportInventory'])->name('inventory.export');
         Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
+        Route::post('/inventory/stock-in/import', [PropertyCustodianController::class, 'stockInImport'])->name('inventory.stock-in.import');
         Route::get('/inventory/qr/lookup', [PropertyCustodianController::class, 'qrLookup'])->name('inventory.qr.lookup');
         Route::post('/inventory/receive-return', [PropertyCustodianController::class, 'receiveReturn'])->name('inventory.receive-return');
         Route::get('/inventory/{inventory}', [PropertyCustodianController::class, 'editInventory'])->name('inventory.edit');

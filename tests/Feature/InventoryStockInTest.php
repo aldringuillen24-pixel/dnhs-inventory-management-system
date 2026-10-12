@@ -775,3 +775,60 @@ test('maintenance and disposal retain and audit the current building and room', 
             && $movement->to_room === 'Media Room'
         ))->toBeTrue();
 });
+
+test('stock-in import creates valid rows and reports per-row errors', function () {
+    $plain = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $serialized = Category::create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => true,
+    ]);
+
+    $response = $this->actingAs($this->propertyCustodian)->postJson(route('api.custodian.inventory.stock-in.import'), [
+        'rows' => [
+            [
+                'item_name' => 'Bond Paper',
+                'category_id' => $plain->category_id,
+                'unit' => 'ream',
+                'quantity' => 5,
+                'unit_cost' => 250,
+                'date_acquired' => '2026-10-01',
+                'lifespan_years' => null,
+                'ics_no' => null,
+                'serial_numbers' => [],
+            ],
+            [
+                'item_name' => 'Laptop',
+                'category_id' => $serialized->category_id,
+                'unit' => 'unit',
+                'quantity' => 1,
+                'unit_cost' => 45000,
+                'date_acquired' => '2026-10-01',
+                'lifespan_years' => 5,
+                'ics_no' => 'ICS-2026-001',
+                'serial_numbers' => ['SN-001'],
+            ],
+            [
+                'item_name' => '',
+                'category_id' => 999999,
+                'unit' => 'pc',
+                'quantity' => 0,
+                'unit_cost' => -1,
+                'date_acquired' => 'not-a-date',
+                'lifespan_years' => null,
+                'ics_no' => null,
+                'serial_numbers' => [],
+            ],
+        ],
+    ]);
+
+    $response->assertOk()
+        ->assertJsonPath('imported', 2)
+        ->assertJsonPath('failed', 1);
+
+    expect($response->json('errors'))->toHaveKey('2')
+        ->and(Inventory::where('item_name', 'Bond Paper')->value('quantity'))->toBe(5)
+        ->and(Inventory::where('serial_number', 'SN-001')->exists())->toBeTrue();
+});
