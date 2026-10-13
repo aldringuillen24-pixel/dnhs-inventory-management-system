@@ -1735,6 +1735,262 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Request approved successfully. Item has been assigned.');
     }
 
+    public function releaseSlipData(int $id, Request $request)
+    {
+        $assignmentRequest = AssignmentRequest::query()->findOrFail($id);
+        $validated = $request->validate([
+            'inventory_ids' => ['nullable', 'array'],
+            'inventory_ids.*' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
+        ]);
+        $data = $this->propertyReleaseSlipData(
+            $assignmentRequest,
+            $request->user(),
+            $validated['inventory_ids'] ?? [],
+        );
+
+        return response()->json($data);
+    }
+
+    public function releaseSlipPdf(int $id, Request $request)
+    {
+        $validated = $request->validate([
+            'inventory_ids' => ['nullable', 'array'],
+            'inventory_ids.*' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
+            'slip_fields' => ['nullable', 'array'],
+            'slip_fields.recipient_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.department_unit' => ['nullable', 'string', 'max:150'],
+            'slip_fields.designation' => ['nullable', 'string', 'max:150'],
+            'slip_fields.purpose' => ['nullable', 'string', Rule::in([
+                'Official Use (Off-site)',
+                'Transfer / Relocation',
+                'Repair / Maintenance',
+                'Disposal',
+            ])],
+            'slip_fields.conditions' => ['nullable', 'array'],
+            'slip_fields.conditions.*' => ['nullable', 'string', 'max:100'],
+            'slip_fields.expected_return_date' => ['nullable', 'date'],
+            'slip_fields.actual_return_date' => ['nullable', 'date'],
+            'slip_fields.released_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.released_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.released_by_date' => ['nullable', 'date'],
+            'slip_fields.received_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.received_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.received_by_date' => ['nullable', 'date'],
+            'slip_fields.approved_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.approved_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.approved_by_date' => ['nullable', 'date'],
+        ]);
+
+        $assignmentRequest = AssignmentRequest::query()->findOrFail($id);
+        $data = $this->propertyReleaseSlipData(
+            $assignmentRequest,
+            $request->user(),
+            $validated['inventory_ids'] ?? [],
+        );
+        $slipFields = $validated['slip_fields'] ?? [];
+        $slipFields['released_by_name'] = $data['custodianName'];
+        $slipFields['received_by_name'] = $data['recipientName'];
+        $data['slipFields'] = $slipFields;
+        $data['expectedReturnDate'] = $slipFields['expected_return_date'] ?? $data['expectedReturnDate'];
+        $data['actualReturnDate'] = $slipFields['actual_return_date'] ?? $data['actualReturnDate'];
+        $data['lines'] = collect($data['lines'])
+            ->map(function (array $line) use ($slipFields): array {
+                $line['condition'] = $slipFields['conditions'][$line['item_id']] ?? null;
+
+                return $line;
+            })
+            ->all();
+
+        return Pdf::loadView('pdfs.property-release-slip', $data)
+            ->download($data['docNo'].'.pdf');
+    }
+
+    private function propertyReleaseSlipData(AssignmentRequest $assignmentRequest, User $custodian, array $inventoryIds = []): array
+    {
+        if ($assignmentRequest->status !== 'approved') {
+            abort_unless(
+                in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT], true),
+                409,
+                'A release slip is available only for a pending or approved request.',
+            );
+
+            $lines = $this->draftPropertyReleaseSlipLines($assignmentRequest, $inventoryIds);
+            $assignmentRequest->loadMissing(['user.role', 'targetUser.role']);
+            $recipient = $assignmentRequest->requested_item_name
+                ? $assignmentRequest->user
+                : (strtolower((string) $assignmentRequest->targetUser?->role?->role_name) === 'end user'
+                    ? $assignmentRequest->targetUser
+                    : $assignmentRequest->user);
+
+            return [
+                'docNo' => sprintf('PRS-%s-%06d', now()->format('Y'), $assignmentRequest->id),
+                'documentDate' => now()->toDateString(),
+                'recipientName' => $recipient
+                    ? trim($recipient->first_name.' '.$recipient->last_name) ?: $recipient->username
+                    : 'Unknown Recipient',
+                'custodianName' => trim($custodian->first_name.' '.$custodian->last_name) ?: $custodian->username,
+                'lines' => $lines,
+                'total' => collect($lines)->sum('amount'),
+                'expectedReturnDate' => null,
+                'actualReturnDate' => null,
+                'slipFields' => [],
+            ];
+        }
+
+        $assignmentRequest->loadMissing([
+            'transaction.item',
+            'transaction.user',
+            'fulfillmentRequests.transaction.item',
+            'fulfillmentRequests.transaction.user',
+        ]);
+
+        $transactions = collect([$assignmentRequest->transaction])
+            ->merge($assignmentRequest->fulfillmentRequests->map(fn (AssignmentRequest $fulfillment): ?Transaction => $fulfillment->transaction))
+            ->filter()
+            ->unique('id')
+            ->values();
+
+        abort_if($transactions->isEmpty(), 409, 'No approved allocation is available for this request.');
+
+        $lines = $transactions
+            ->map(function (Transaction $transaction): ?array {
+                $item = $transaction->item;
+                if (! $item) {
+                    return null;
+                }
+
+                $quantity = (int) ($transaction->issued_quantity ?? $transaction->quantity);
+                $unitCost = (float) ($item->unit_cost ?? 0);
+
+                return [
+                    'item_id' => $item->item_id,
+                    'item_no' => $item->inventory_item_no ?? (string) $item->item_id,
+                    'description' => trim($item->item_name.($item->serial_number ? ' (SN: '.$item->serial_number.')' : '')),
+                    'qty' => $quantity,
+                    'unit_cost' => $unitCost,
+                    'amount' => $unitCost * $quantity,
+                ];
+            })
+            ->filter()
+            ->values();
+        abort_if($lines->isEmpty(), 409, 'No inventory lines are available for this request.');
+
+        $recipient = $transactions->first()->user;
+        $documentDate = $transactions->first()->transaction_date;
+        $expectedReturnDate = $transactions
+            ->pluck('expected_return_date')
+            ->filter()
+            ->sort()
+            ->first();
+        $actualReturnDate = $transactions
+            ->pluck('return_date')
+            ->filter()
+            ->sortDesc()
+            ->first();
+
+        return [
+            'docNo' => sprintf('PRS-%s-%06d', now()->format('Y'), $assignmentRequest->id),
+            'documentDate' => $documentDate?->format('Y-m-d') ?? now()->toDateString(),
+            'recipientName' => $recipient
+                ? trim($recipient->first_name.' '.$recipient->last_name) ?: $recipient->username
+                : 'Unknown Recipient',
+            'custodianName' => trim($custodian->first_name.' '.$custodian->last_name) ?: $custodian->username,
+            'lines' => $lines->all(),
+            'total' => $lines->sum('amount'),
+            'expectedReturnDate' => $expectedReturnDate?->format('Y-m-d'),
+            'actualReturnDate' => $actualReturnDate?->format('Y-m-d'),
+            'slipFields' => [],
+        ];
+    }
+
+    private function draftPropertyReleaseSlipLines(AssignmentRequest $assignmentRequest, array $inventoryIds): array
+    {
+        if (! $assignmentRequest->requested_item_name) {
+            $item = Inventory::query()->with('category')->findOrFail($assignmentRequest->item_id);
+            abort_unless(
+                $item->status === 'available' && (int) $item->quantity >= (int) $assignmentRequest->quantity,
+                409,
+                'The requested inventory is no longer available.',
+            );
+            if ($item->category?->requires_serial_number) {
+                abort_unless(
+                    (int) $assignmentRequest->quantity === 1
+                        && (int) $item->quantity === 1
+                        && $item->serial_number,
+                    409,
+                    'The requested inventory does not meet serial-number requirements.',
+                );
+            }
+            $items = collect([$item]);
+        } else {
+            abort_if($inventoryIds === [], 422, 'Select matching inventory before preparing a release slip.');
+            $itemsById = Inventory::query()
+                ->with('category')
+                ->whereIn('item_id', $inventoryIds)
+                ->get()
+                ->keyBy('item_id');
+            abort_unless($itemsById->count() === count($inventoryIds), 422, 'Selected inventory could not be found.');
+
+            $category = Category::find($assignmentRequest->requested_category_id);
+            abort_unless($category, 422, 'The requested category could not be found.');
+
+            $items = collect($inventoryIds)
+                ->map(fn ($itemId) => $itemsById->get((int) $itemId))
+                ->values();
+
+            foreach ($items as $item) {
+                abort_unless(
+                    RequestableItemMatcher::matches(
+                        (string) $assignmentRequest->requested_item_name,
+                        (int) $assignmentRequest->requested_category_id,
+                        $assignmentRequest->requested_unit,
+                        $item,
+                    ) && $item->status === 'available' && (int) $item->quantity >= 1,
+                    422,
+                    'Selected inventory is unavailable or does not match the request.',
+                );
+                if ($category->requires_serial_number) {
+                    abort_unless((int) $item->quantity === 1 && $item->serial_number, 422, 'Selected inventory does not meet serial-number requirements.');
+                }
+            }
+
+            abort_unless(
+                $items->sum(fn (Inventory $item): int => (int) $item->quantity) >= (int) $assignmentRequest->quantity,
+                422,
+                'Selected inventory does not cover the requested quantity.',
+            );
+            if ($category->requires_serial_number) {
+                abort_unless(count($inventoryIds) === (int) $assignmentRequest->quantity, 422, 'Select one serialised unit for each requested unit.');
+            }
+        }
+
+        $remaining = (int) $assignmentRequest->quantity;
+        $lines = [];
+        foreach ($items as $item) {
+            if ($remaining === 0) {
+                break;
+            }
+
+            $quantity = $item->category?->requires_serial_number
+                ? 1
+                : min($remaining, (int) $item->quantity);
+            $unitCost = (float) ($item->unit_cost ?? 0);
+            $lines[] = [
+                'item_id' => $item->item_id,
+                'item_no' => $item->inventory_item_no ?? (string) $item->item_id,
+                'description' => trim($item->item_name.($item->serial_number ? ' (SN: '.$item->serial_number.')' : '')),
+                'qty' => $quantity,
+                'unit_cost' => $unitCost,
+                'amount' => $unitCost * $quantity,
+            ];
+            $remaining -= $quantity;
+        }
+
+        abort_unless($remaining === 0, 422, 'Selected inventory does not cover the requested quantity.');
+
+        return $lines;
+    }
+
     public function cancelItemRequest(Request $request, int $id)
     {
         $validated = $request->validate([

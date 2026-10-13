@@ -100,6 +100,92 @@ test('approve specific item request through the api assigns stock', function () 
     ]);
 });
 
+test('custodian can download a release slip for an approved request', function () {
+    $item = makeAvailableItem($this, 'Stapler', 5);
+    $item->update([
+        'unit_cost' => 125.50,
+        'inventory_item_no' => 'INV-SLIP-001',
+        'serial_number' => 'SLIP-SERIAL-001',
+    ]);
+    $request = AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 2,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->custodian)
+        ->getJson(route('api.custodian.requests.slip', $request->id))
+        ->assertOk()
+        ->assertJsonPath('lines.0.item_no', 'INV-SLIP-001');
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.requests.approve', $request->id))
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $slip = $this->actingAs($this->custodian)
+        ->getJson(route('api.custodian.requests.slip', $request->id))
+        ->assertOk()
+        ->assertJsonPath('recipientName', 'End User')
+        ->assertJsonPath('lines.0.item_no', 'INV-SLIP-001')
+        ->assertJsonPath('lines.0.description', 'Stapler (SN: SLIP-SERIAL-001)')
+        ->assertJsonPath('lines.0.qty', 2)
+        ->assertJsonPath('lines.0.amount', 251);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.requests.slip-pdf', $request->id), [
+            'slip_fields' => [
+                'purpose' => 'Official Use (Off-site)',
+                'conditions' => [$item->item_id => 'Good condition'],
+            ],
+        ])
+        ->assertOk()
+        ->assertDownload($slip->json('docNo').'.pdf');
+});
+
+test('custodian can prepare a draft release slip without approving the request', function () {
+    $item = makeAvailableItem($this, 'Chairs', 3);
+    $item->update([
+        'unit_cost' => 250,
+        'inventory_item_no' => 'INV-DRAFT-001',
+    ]);
+    $request = AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->custodian->id,
+        'requested_item_name' => 'Chair',
+        'requested_category_id' => $this->category->category_id,
+        'requested_unit' => 'piece',
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->custodian)
+        ->getJson(route('api.custodian.requests.slip', [
+            $request->id,
+            'inventory_ids' => [$item->item_id],
+        ]))
+        ->assertOk()
+        ->assertJsonPath('recipientName', 'End User')
+        ->assertJsonPath('lines.0.item_no', 'INV-DRAFT-001')
+        ->assertJsonPath('lines.0.qty', 1)
+        ->assertJsonPath('lines.0.amount', 250);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.requests.slip-pdf', $request->id), [
+            'inventory_ids' => [$item->item_id],
+            'slip_fields' => ['purpose' => 'Official Use (Off-site)'],
+        ])
+        ->assertOk()
+        ->assertDownload(sprintf('PRS-%s-%06d.pdf', now()->format('Y'), $request->id));
+
+    expect($request->fresh()->status)->toBe('waiting for approval')
+        ->and($item->fresh()->quantity)->toBe(3);
+});
+
 test('registered assign through the api creates an approval request', function () {
     $item = makeAvailableItem($this, 'Notebook', 10);
 

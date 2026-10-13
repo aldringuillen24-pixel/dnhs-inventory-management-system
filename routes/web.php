@@ -282,6 +282,8 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assign');
         Route::post('/transactions/{transactionId}/manual-return', [PropertyCustodianController::class, 'returnManualIssue'])->name('transactions.manual-return');
         Route::post('/requests/{id}/approve', [PropertyCustodianController::class, 'approveRequest'])->name('requests.approve');
+        Route::get('/requests/{id}/slip', [PropertyCustodianController::class, 'releaseSlipData'])->name('requests.slip');
+        Route::post('/requests/{id}/slip-pdf', [PropertyCustodianController::class, 'releaseSlipPdf'])->name('requests.slip-pdf');
         Route::post('/requests/{id}/cancel', [PropertyCustodianController::class, 'cancelItemRequest'])->name('requests.cancel');
         Route::post('/requests/{id}/decline', [PropertyCustodianController::class, 'declineRequest'])->name('requests.decline');
         Route::post('/transfers/{id}/approve', [PropertyCustodianController::class, 'approveTransfer'])->name('transfers.approve');
