@@ -26,6 +26,8 @@ class AssignmentRequest extends Model
     // to avoid collision with the HTTP `Request` class.
     protected $table = 'requests';
 
+    protected $appends = ['matching_inventory_items'];
+
     protected $fillable = [
         'item_id',
         'requested_item_name',
@@ -43,6 +45,7 @@ class AssignmentRequest extends Model
         'cancellation_reason',
         'requested_at',
         'responded_at',
+        'expected_return_date',
     ];
 
     protected $casts = [
@@ -88,5 +91,10 @@ class AssignmentRequest extends Model
     public function assignmentReturns()
     {
         return $this->hasMany(AssignmentReturn::class, 'assignment_request_id');
+    }
+
+    public function getMatchingInventoryItemsAttribute()
+    {
+        return $this->attributes['matching_inventory_items'] ?? collect();
     }
 }

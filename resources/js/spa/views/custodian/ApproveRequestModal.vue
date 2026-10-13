@@ -119,8 +119,6 @@
           </p>
         </div>
 
-        <p v-if="slipError" class="text-sm text-red-600" role="alert">{{ slipError }}</p>
-
         <!-- Action Buttons -->
         <div class="mt-5 flex justify-end gap-2.5 pt-3 border-t border-gray-100 dark:border-white/5">
           <button
@@ -133,10 +131,10 @@
           <button
             type="button"
             class="min-w-28 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
-            :disabled="busy || slipBusy || approvalComplete || !canApprove"
-            @click="openSlipDraft"
+            :disabled="busy || approvalComplete || !canApprove"
+            @click="showSlip = true"
           >
-            {{ slipBusy ? 'Preparing…' : 'PDF Slip' }}
+            PDF Slip
           </button>
           <button
             type="button"
@@ -159,52 +157,32 @@
 
   </Modal>
 
-  <Modal
-    :open="open && showSlip"
-    title="Property Release Slip"
-    subtitle="Review the release details and prepare the PDF."
-    max-width="max-w-6xl"
-    @close="backFromSlip"
-  >
-    <div v-if="request" class="space-y-4">
-      <SlipDocument
-        v-if="slipData"
-        v-model:fields="slipFields"
-        :doc-no="slipData.docNo"
-        :document-date="slipData.documentDate"
-        :lines="slipData.lines"
-        :purposes="purposes"
-      />
-      <p v-if="slipError" class="text-sm text-red-600" role="alert">{{ slipError }}</p>
-      <div class="flex justify-end gap-2 border-t border-gray-100 pt-3 dark:border-white/5">
-        <button
-          type="button"
-          class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
-          :disabled="slipBusy"
-          @click="backFromSlip"
-        >
-          {{ approvalComplete ? 'Finish without PDF' : 'Back to Request' }}
-        </button>
-        <button
-          v-if="slipData"
-          type="button"
-          class="rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-md hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="slipBusy"
-          @click="downloadSlip"
-        >
-          {{ slipBusy ? 'Preparing PDF…' : 'Download PDF' }}
-        </button>
-      </div>
-    </div>
-  </Modal>
+  <SlipDocument
+      :open="showSlip"
+      title="Review Item Request"
+      subtitle="Allocate stock to fulfill this request."
+      :doc-no="slipDocNo"
+      :document-date="today"
+      :lines="previewInventory"
+      :purposes="releasePurposes"
+      :request-id="request?.id"
+      :recipient-name="requesterName"
+      :custodian-name="auth.displayName"
+      :draft-mode="false"
+      primary-label="Allocate & Approve"
+      @back="closePreview"
+      @primary="approve"
+      @close="showSlip = false"
+    />
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue';
 import api from '../../lib/axios';
+import { useAuthStore } from '../../stores/auth';
 import Modal from '../../components/ui/dialogs/Modal.vue';
 import FieldError from '../../components/ui/feedback/FieldError.vue';
-import SlipDocument from './SlipDocument.vue';
+import SlipDocument from '../../views/shared/SlipDocument.vue';
 
 const props = defineProps({
     open: { type: Boolean, default: false },
@@ -212,19 +190,16 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['close', 'approved']);
+const auth = useAuthStore();
 
 const selected = ref([]);
 // Last slip-fed allocation per request id. In-memory only: it survives modal
 // reopen within the session, never leaks across requests, and dies on reload.
 const lastAllocation = ref(new Map());
 const busy = ref(false);
-const slipBusy = ref(false);
 const errors = ref({});
 const approvalComplete = ref(false);
 const showSlip = ref(false);
-const slipData = ref(null);
-const slipFields = ref({});
-const slipError = ref('');
 const purposes = [
     'Official Use (Off-site)',
     'Transfer / Relocation',
@@ -301,6 +276,34 @@ const canApprove = computed(() => {
     return isItemType.value ? selected.value.length > 0 : true;
 });
 
+const releasePurposes = [
+    'Official Use (Off-site)',
+    'Transfer / Relocation',
+    'Repair / Maintenance',
+    'Disposal',
+];
+
+const slipDocNo = computed(() => props.request ? `PRS-${new Date().getFullYear()}-${String(props.request.id).padStart(6, '0')}` : '');
+
+const today = computed(() => new Date().toISOString().slice(0, 10));
+
+const previewInventory = computed(() => {
+    if (!props.request || !isItemType.value) {
+        return [];
+    }
+    return selected.value.map(itemId => {
+        const stock = matches.value.find(s => s.item_id === itemId);
+        return {
+            item_id: stock?.item_id,
+            item_no: stock?.inventory_item_no ?? String(itemId),
+            description: stock?.item_name ?? 'Unknown item',
+            qty: stock?.quantity ?? 1,
+            unit_cost: stock?.unit_cost ?? null,
+            amount: (stock?.unit_cost ?? 0) * (stock?.quantity ?? 1),
+        };
+    });
+});
+
 watch(
     () => props.open,
     (open) => {
@@ -308,12 +311,8 @@ watch(
             selected.value = [...rememberedIds.value];
             errors.value = {};
             busy.value = false;
-            slipBusy.value = false;
             approvalComplete.value = false;
             showSlip.value = false;
-            slipData.value = null;
-            slipFields.value = {};
-            slipError.value = '';
         }
     },
 );
@@ -327,61 +326,10 @@ async function approve() {
         clearRemembered();
         approvalComplete.value = true;
         showSlip.value = true;
-        const response = await api.get(`/custodian/requests/${props.request.id}/slip`);
-        slipData.value = response.data;
-        slipFields.value = {
-            recipient_name: response.data.recipientName,
-            department_unit: '',
-            designation: '',
-            purpose: '',
-            conditions: Object.fromEntries(response.data.lines.map((line) => [line.item_id, ''])),
-            expected_return_date: response.data.expectedReturnDate ?? '',
-            actual_return_date: response.data.actualReturnDate ?? '',
-            released_by_signature: '',
-            released_by_name: response.data.custodianName,
-            released_by_date: '',
-            received_by_signature: '',
-            received_by_name: response.data.recipientName,
-            received_by_date: '',
-            approved_by_signature: '',
-            approved_by_name: '',
-            approved_by_date: '',
-        };
     } catch (requestError) {
-        if (approvalComplete.value) {
-            slipError.value = 'The request was approved, but release slip details could not be loaded. Finish and refresh to continue.';
-        } else {
-            errors.value = requestError?.response?.data?.errors ?? {};
-        }
+        errors.value = requestError?.response?.data?.errors ?? {};
     } finally {
         busy.value = false;
-    }
-}
-
-async function downloadSlip() {
-    slipBusy.value = true;
-    slipError.value = '';
-
-    try {
-        const response = await api.post(
-            `/custodian/requests/${props.request.id}/slip-pdf`,
-            {
-                slip_fields: slipFields.value,
-                inventory_ids: isItemType.value ? selected.value : [],
-            },
-            { responseType: 'blob' },
-        );
-        const url = URL.createObjectURL(response.data);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${slipData.value.docNo}.pdf`;
-        link.click();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-        finish();
-    } catch {
-        slipError.value = 'The release slip PDF could not be generated. Please try again.';
-    } finally {
-        slipBusy.value = false;
     }
 }
 
@@ -394,44 +342,6 @@ function closeModal() {
     emit('close');
 }
 
-async function openSlipDraft() {
-    slipBusy.value = true;
-    errors.value = {};
-    slipError.value = '';
-
-    try {
-        const response = await api.get(`/custodian/requests/${props.request.id}/slip`, {
-            params: isItemType.value ? { inventory_ids: selected.value } : {},
-        });
-        slipData.value = response.data;
-        rememberSelection();
-        slipFields.value = {
-            recipient_name: response.data.recipientName,
-            department_unit: '',
-            designation: '',
-            purpose: '',
-            conditions: Object.fromEntries(response.data.lines.map((line) => [line.item_id, ''])),
-            expected_return_date: response.data.expectedReturnDate ?? '',
-            actual_return_date: response.data.actualReturnDate ?? '',
-            released_by_signature: '',
-            released_by_name: response.data.custodianName,
-            released_by_date: '',
-            received_by_signature: '',
-            received_by_name: response.data.recipientName,
-            received_by_date: '',
-            approved_by_signature: '',
-            approved_by_name: '',
-            approved_by_date: '',
-        };
-        showSlip.value = true;
-    } catch (requestError) {
-        errors.value = requestError?.response?.data?.errors ?? {};
-        slipError.value = requestError?.response?.data?.message ?? 'The draft release slip could not be prepared.';
-    } finally {
-        slipBusy.value = false;
-    }
-}
-
 function finish() {
     if (approvalComplete.value) {
         emit('approved');
@@ -440,12 +350,11 @@ function finish() {
     }
 }
 
-function backFromSlip() {
+function closePreview() {
     if (approvalComplete.value) {
         finish();
         return;
     }
-
     showSlip.value = false;
 }
 </script>

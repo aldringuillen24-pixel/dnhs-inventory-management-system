@@ -35,8 +35,9 @@ class InventoryOperationService
         int $recipientId,
         int $quantity,
         ?string $transactionDate,
+        ?string $expectedReturnDate = null,
     ): string {
-        return DB::transaction(function () use ($itemId, $actorId, $recipientId, $quantity, $transactionDate): string {
+        return DB::transaction(function () use ($itemId, $actorId, $recipientId, $quantity, $transactionDate, $expectedReturnDate): string {
             $recipient = User::query()->whereKey($recipientId)->lockForUpdate()->firstOrFail();
             $inventoryItem = Inventory::whereKey($itemId)
                 ->lockForUpdate()
@@ -50,9 +51,10 @@ class InventoryOperationService
             }
             // Soft hold: earlier assignments awaiting acceptance do not deduct
             // stock, so a second assign of the same last units must be refused
-            // here instead of silently queuing against nothing.
+            // here instead of silently queuing against nothing. Draft holds
+            // promise units the same way and join the same pool.
             $pendingHold = (int) AssignmentRequest::query()
-                ->where('status', 'waiting for approval')
+                ->whereIn('status', ['waiting for approval', 'draft'])
                 ->where('item_id', $inventoryItem->item_id)
                 ->sum('quantity');
             if ($quantity > max(0, (int) $inventoryItem->quantity - $pendingHold)) {
@@ -68,9 +70,215 @@ class InventoryOperationService
                 'quantity' => $quantity,
                 'status' => 'waiting for approval',
                 'requested_at' => $transactionDate ? Carbon::parse($transactionDate) : now(),
+                'expected_return_date' => $expectedReturnDate,
             ]);
 
             return 'created';
+        });
+    }
+
+    /**
+     * Hold stock for a signed slip without moving custody.
+     *
+     * Creates a `draft` parent (item-type summary, item_id null) plus one
+     * `draft` child per inventory row. Nothing is deducted, no transaction or
+     * movement is written — printable immediately, allocatable later. The
+     * free-stock guards (available − waiting_for_approval − draft) treat a
+     * second draft over the same units as insufficient, so double-drafting
+     * the same stock fails here instead of double-promising it.
+     *
+     * @return AssignmentRequest|string the draft parent, or an error key.
+     */
+    public function createDraft(
+        int $itemId,
+        int $actorId,
+        int $recipientId,
+        int $quantity,
+        ?string $transactionDate,
+        ?string $expectedReturnDate = null,
+    ): AssignmentRequest|string {
+        return DB::transaction(function () use ($itemId, $actorId, $recipientId, $quantity, $transactionDate, $expectedReturnDate): AssignmentRequest|string {
+            $recipient = User::query()->whereKey($recipientId)->firstOrFail();
+            $inventoryItem = Inventory::with('category')->whereKey($itemId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($inventoryItem->status !== 'available' || (int) $inventoryItem->quantity < 1) {
+                return 'unavailable';
+            }
+            if ($quantity < 1) {
+                return 'insufficient';
+            }
+
+            $held = (int) AssignmentRequest::query()
+                ->whereIn('status', ['waiting for approval', 'draft'])
+                ->where('item_id', $inventoryItem->item_id)
+                ->sum('quantity');
+            if ($quantity > max(0, (int) $inventoryItem->quantity - $held)) {
+                return 'insufficient';
+            }
+            if ($inventoryItem->category?->requires_serial_number
+                && ((int) $quantity !== 1 || (int) $inventoryItem->quantity !== 1 || ! $inventoryItem->serial_number)
+            ) {
+                return 'invalid_allocation';
+            }
+
+            $parent = AssignmentRequest::create([
+                'user_id' => $actorId,
+                'target_user_id' => $recipientId,
+                'requested_item_name' => $inventoryItem->item_name,
+                'requested_category_id' => $inventoryItem->category_id,
+                'requested_unit' => $inventoryItem->unit,
+                'building' => $recipient->building ?? $inventoryItem->building,
+                'room' => $recipient->room ?? $inventoryItem->room,
+                'quantity' => $quantity,
+                'status' => 'draft',
+                'requested_at' => $transactionDate ? Carbon::parse($transactionDate) : now(),
+                'expected_return_date' => $expectedReturnDate,
+            ]);
+            AssignmentRequest::create([
+                'user_id' => $actorId,
+                'target_user_id' => $recipientId,
+                'item_id' => $inventoryItem->item_id,
+                'building' => $parent->building,
+                'room' => $parent->room,
+                'parent_request_id' => $parent->id,
+                'quantity' => $quantity,
+                'status' => 'draft',
+                'requested_at' => $parent->requested_at,
+                'expected_return_date' => $expectedReturnDate,
+            ]);
+
+            return $parent->fresh();
+        });
+    }
+
+    /**
+     * Allocate a draft: the single custody-writing step of the draft flow.
+     *
+     * Locks the parent, revalidates every child row against free stock
+     * EXCLUDING this draft's own hold, then performs the same writes as the
+     * direct approval path per row (deduct, assigned transaction, movement)
+     * and flips parent and children to approved. Anything else holding the
+     * units first makes this stale; an already-approved parent reports
+     * processed so retries are safe.
+     */
+    public function allocateDraft(int $parentId, int $actorId): string
+    {
+        return DB::transaction(function () use ($parentId, $actorId): string {
+            $parent = AssignmentRequest::whereKey($parentId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($parent->status === 'approved') {
+                return 'processed';
+            }
+            if ($parent->status !== 'draft') {
+                return 'stale';
+            }
+            if ((int) $parent->quantity < 1) {
+                return 'insufficient';
+            }
+
+            $children = AssignmentRequest::query()
+                ->where('parent_request_id', $parent->id)
+                ->where('status', 'draft')
+                ->lockForUpdate()
+                ->orderBy('id')
+                ->get();
+            if ($children->isEmpty()) {
+                return 'stale';
+            }
+
+            $parent->load('targetUser.role');
+            $assigneeId = strtolower((string) $parent->targetUser?->role?->role_name) === 'end user'
+                ? $parent->target_user_id
+                : $parent->user_id;
+            $assignee = User::query()->whereKey($assigneeId)->firstOrFail();
+
+            $now = now();
+            $firstTransactionId = null;
+            foreach ($children as $child) {
+                $item = Inventory::with('category')->whereKey($child->item_id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if ($item->status !== 'available' || (int) $item->quantity < 1) {
+                    return 'insufficient';
+                }
+                $totalHeld = (int) AssignmentRequest::query()
+                    ->whereIn('status', ['waiting for approval', 'draft'])
+                    ->where('item_id', $item->item_id)
+                    ->sum('quantity');
+                $ownHeld = (int) $children->where('item_id', $item->item_id)->sum('quantity');
+                $free = max(0, (int) $item->quantity - ($totalHeld - $ownHeld));
+                if ((int) $child->quantity < 1 || (int) $child->quantity > $free) {
+                    return 'insufficient';
+                }
+                if ($item->category?->requires_serial_number
+                    && ((int) $child->quantity !== 1 || (int) $item->quantity !== 1 || ! $item->serial_number)
+                ) {
+                    return 'invalid_allocation';
+                }
+
+                $quantityBefore = (int) $item->quantity;
+                $quantityAfter = $quantityBefore - (int) $child->quantity;
+                $locationBefore = $item->only(['building', 'room']);
+                $targetBuilding = $assignee->building ?? $parent->building ?? $item->building;
+                $targetRoom = $assignee->room ?? $parent->room ?? $item->room;
+                $item->quantity = $quantityAfter;
+                $item->building = $targetBuilding;
+                $item->room = $targetRoom;
+                if ($quantityAfter === 0) {
+                    $item->status = 'assigned';
+                    $item->assigned_to_user_id = $assigneeId;
+                }
+                $item->save();
+
+                $transaction = Transaction::create([
+                    'item_id' => $item->item_id,
+                    'from_user_id' => $actorId,
+                    'user_id' => $assigneeId,
+                    'quantity' => (int) $child->quantity,
+                    'issued_quantity' => (int) $child->quantity,
+                    'from_building' => $locationBefore['building'],
+                    'from_room' => $locationBefore['room'],
+                    'building' => $targetBuilding,
+                    'room' => $targetRoom,
+                    'transaction_date' => $now,
+                    'status' => 'assigned',
+                    'expected_return_date' => $parent->expected_return_date
+                        ?? self::defaultExpectedReturnDate($now),
+                ]);
+                $firstTransactionId ??= $transaction->id;
+
+                $child->update([
+                    'transaction_id' => $transaction->id,
+                    'status' => 'approved',
+                    'responded_at' => $now,
+                ]);
+
+                $this->recordMovement(
+                    $item->item_id,
+                    $actorId,
+                    'assignment',
+                    (int) $child->quantity,
+                    $quantityBefore,
+                    $quantityAfter,
+                    'assignment_request',
+                    $child->id,
+                    "Draft #{$parent->id} allocated inventory #{$item->item_id} to user #{$assigneeId}; transaction #{$transaction->id}",
+                    $locationBefore,
+                );
+            }
+
+            $parent->update([
+                'transaction_id' => $firstTransactionId,
+                'status' => 'approved',
+                'responded_at' => $now,
+            ]);
+
+            return 'allocated';
         });
     }
 
@@ -125,7 +333,7 @@ class InventoryOperationService
                 'transaction_date' => $attributes['transaction_date'],
                 'status' => 'assigned',
                 'manual_recipient_name' => $attributes['manual_recipient_name'],
-                'manual_department' => $attributes['manual_department'],
+                'manual_department' => $attributes['manual_department'] ?? null,
                 'manual_recipient_type' => $attributes['manual_recipient_type'] ?? null,
                 'manual_contact' => $attributes['manual_contact'] ?? null,
                 'manual_notes' => $attributes['manual_notes'] ?? null,
@@ -141,7 +349,7 @@ class InventoryOperationService
                 $quantityAfter,
                 'transaction',
                 $transaction->id,
-                "Manual issue to {$transaction->manual_recipient_name} ({$transaction->manual_department}); transaction #{$transaction->id}",
+                "Manual issue to {$transaction->manual_recipient_name}".($transaction->manual_department ? " ({$transaction->manual_department})" : '')."; transaction #{$transaction->id}",
                 $locationBefore,
             );
 
@@ -271,7 +479,8 @@ class InventoryOperationService
                 'room' => $targetRoom,
                 'transaction_date' => now(),
                 'status' => 'assigned',
-                'expected_return_date' => self::defaultExpectedReturnDate(now()),
+                'expected_return_date' => $assignmentRequest->expected_return_date
+                    ?? self::defaultExpectedReturnDate(now()),
             ]);
 
             $assignmentRequest->update([

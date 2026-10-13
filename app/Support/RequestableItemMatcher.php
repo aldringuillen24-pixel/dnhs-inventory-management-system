@@ -135,7 +135,8 @@ final class RequestableItemMatcher
     }
 
     /**
-     * Quantity already spoken for by requests sitting in `waiting for approval`.
+     * Quantity already spoken for by requests sitting in `waiting for approval`
+     * or held as an unallocated `draft`.
      *
      * Soft hold only: stock rows are NOT deducted until approval (see
      * InventoryOperationService::approveAssignment), so without this the UI
@@ -143,11 +144,15 @@ final class RequestableItemMatcher
      * queued. Displayed as "Available X, Pending Y"; validation uses
      * available minus pending. Terminal states (approved/declined/cancelled)
      * leave this pool automatically because the status changes.
+     *
+     * Draft parents carry the requested triple (their children carry only
+     * item_id), so the two hold pools stay disjoint: this counts parents,
+     * pendingHoldForItem counts children, never the same units twice.
      */
     public static function pendingQuantity(string $name, int $categoryId, ?string $unit): int
     {
         return (int) \App\Models\AssignmentRequest::query()
-            ->where('status', 'waiting for approval')
+            ->whereIn('status', ['waiting for approval', 'draft'])
             ->whereNotNull('requested_item_name')
             ->where('requested_category_id', $categoryId)
             ->get()
@@ -167,13 +172,14 @@ final class RequestableItemMatcher
     /**
      * Pending hold against one concrete inventory record: custodian-issued
      * assignments awaiting end-user acceptance (`waiting for approval` with
-     * this item_id). Stock is untouched until approval, so the assign modal
-     * must show and enforce quantity minus this hold.
+     * this item_id) plus unallocated draft children holding the same row.
+     * Stock is untouched until approval, so the assign modal must show and
+     * enforce quantity minus this hold.
      */
     public static function pendingHoldForItem(int $itemId): int
     {
         return (int) \App\Models\AssignmentRequest::query()
-            ->where('status', 'waiting for approval')
+            ->whereIn('status', ['waiting for approval', 'draft'])
             ->where('item_id', $itemId)
             ->sum('quantity');
     }

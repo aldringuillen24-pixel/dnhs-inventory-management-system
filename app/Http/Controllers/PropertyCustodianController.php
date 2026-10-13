@@ -1106,14 +1106,18 @@ class PropertyCustodianController extends Controller
 
         // Pending holds for the Available/All tabs: requests in
         // `waiting for approval` promise units the stock rows still show as
-        // available (deduction happens at approval). Loaded once; matched per
+        // available (deduction happens at approval). Unallocated `draft`
+        // children hold rows the same way. Loaded once; matched per
         // group below with the same normalisation the request flow uses.
+        // Draft parents carry only the requested triple (see
+        // pendingQuantity); draft children carry only item_id, so the two
+        // pools never count the same units twice.
         $holdItemTypeRequests = AssignmentRequest::query()
-            ->where('status', 'waiting for approval')
+            ->whereIn('status', ['waiting for approval', 'draft'])
             ->whereNotNull('requested_item_name')
             ->get(['requested_item_name', 'requested_category_id', 'requested_unit', 'quantity']);
         $holdByItemId = AssignmentRequest::query()
-            ->where('status', 'waiting for approval')
+            ->whereIn('status', ['waiting for approval', 'draft'])
             ->whereNotNull('item_id')
             ->selectRaw('item_id, SUM(quantity) as hold_quantity')
             ->groupBy('item_id')
@@ -1507,7 +1511,7 @@ class PropertyCustodianController extends Controller
 
         $groupedInventory = $inventoryItems->map(function (Inventory $item) {
             $pendingHold = (int) AssignmentRequest::query()
-                ->where('status', 'waiting for approval')
+                ->whereIn('status', ['waiting for approval', 'draft'])
                 ->where('item_id', $item->item_id)
                 ->sum('quantity');
 
@@ -1521,6 +1525,7 @@ class PropertyCustodianController extends Controller
                 'pending_hold' => $pendingHold,
                 'free_quantity' => max(0, (int) $item->quantity - $pendingHold),
                 'unit' => $item->unit,
+                'unit_cost' => $item->unit_cost === null ? null : (float) $item->unit_cost,
                 'inventory_item_no' => $item->inventory_item_no,
                 'serial_number' => $item->serial_number,
             ];
@@ -1545,7 +1550,7 @@ class PropertyCustodianController extends Controller
         $incomingRequests = AssignmentRequest::query()
             ->with([
                 'user:id,first_name,last_name,username,email',
-                'item:item_id,inventory_item_no,item_name,quantity,category_id,status,unit,serial_number',
+                'item:item_id,inventory_item_no,item_name,quantity,category_id,status,unit,unit_cost,serial_number',
                 'item.category:category_id,category_name',
                 'requestedCategory:category_id,category_name,requires_serial_number',
             ])
@@ -1603,7 +1608,7 @@ class PropertyCustodianController extends Controller
         $assignmentRequests = AssignmentRequest::query()
             ->with([
                 'targetUser:id,first_name,last_name,username',
-                'item:item_id,inventory_item_no,item_name,quantity,category_id,status',
+                'item:item_id,inventory_item_no,item_name,quantity,category_id,status,unit_cost',
                 'item.category:category_id,category_name',
             ])
             ->where('user_id', $custodianId)
@@ -1612,12 +1617,27 @@ class PropertyCustodianController extends Controller
             ->orderBy('requested_at', 'desc')
             ->get();
 
+        // Draft allocations: printed slips awaiting signed-slip collection.
+        // Hold-only rows (no deduction, no transaction, no ledger movement).
+        // Allocated or deleted from the Drafts tab; invisible everywhere else.
+        $draftRequests = AssignmentRequest::query()
+            ->with([
+                'user:id,first_name,last_name,username',
+                'targetUser:id,first_name,last_name,username',
+                'fulfillmentRequests:id,item_id,parent_request_id,quantity,status',
+                'fulfillmentRequests.item:item_id,inventory_item_no,item_name',
+            ])
+            ->where('status', 'draft')
+            ->whereNull('parent_request_id')
+            ->orderBy('requested_at', 'desc')
+            ->get();
+
         // Transfer requests awaiting custodian approval (peer-to-peer, step 3 of 3)
         $pendingTransfers = AssignmentRequest::query()
             ->with([
                 'user:id,first_name,last_name,username',
                 'targetUser:id,first_name,last_name,username',
-                'item:item_id,inventory_item_no,item_name,quantity,category_id,status',
+                'item:item_id,inventory_item_no,item_name,quantity,category_id,status,unit_cost',
                 'item.category:category_id,category_name',
             ])
             ->where('status', 'waiting for custodian approval')
@@ -1682,6 +1702,7 @@ class PropertyCustodianController extends Controller
             'endUsers'               => $endUsers,
             'incomingRequests'       => $incomingRequests,
             'assignmentRequests'     => $assignmentRequests,
+            'draftRequests'          => $draftRequests,
             'pendingTransfers'       => $pendingTransfers,
             'pendingReturns'         => $pendingReturns,
             'transactions'           => $transactions,
@@ -1733,6 +1754,205 @@ class PropertyCustodianController extends Controller
         }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Request approved successfully. Item has been assigned.');
+    }
+
+    /**
+     * Print-and-hold: persist the Assign modal's selection as a `draft`
+     * parent plus one `draft` child per inventory row. Nothing is deducted
+     * and no transaction or movement is written — the slip is printable
+     * immediately and the units are held until Allocate (or Delete).
+     */
+    public function storeDraft(Request $request)
+    {
+        $validated = $request->validate([
+            'item_id' => ['required', 'exists:inventory,item_id'],
+            'user_id' => ['required', 'exists:users,id'],
+            'quantity' => ['required', 'integer', 'min:1'],
+            'transaction_date' => ['nullable', 'date'],
+            'is_temporary' => ['sometimes', 'boolean'],
+            'expected_return_date' => [
+                Rule::requiredIf(fn () => $request->boolean('is_temporary')),
+                'nullable',
+                'date',
+                function (string $attribute, mixed $value, \Closure $fail) use ($request): void {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+                    $floor = now()->toDateString();
+                    if ($request->filled('transaction_date')) {
+                        try {
+                            $floor = Carbon::parse($request->input('transaction_date'))->toDateString();
+                        } catch (\Throwable) {
+                        }
+                    }
+                    if ((string) $value < $floor) {
+                        $fail('The expected return date must be on or after the assignment date.');
+                    }
+                },
+            ],
+        ]);
+
+        $endUser = User::with('role')->findOrFail($validated['user_id']);
+
+        if (strtolower((string) $endUser->role?->role_name) !== 'end user') {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Items can only be drafted for an End User.'], 422);
+            }
+
+            return redirect()->back()->withErrors(['user_id' => 'Items can only be drafted for an End User.'])->withInput();
+        }
+
+        $draft = $this->inventoryOperations->createDraft(
+            (int) $validated['item_id'],
+            (int) $request->user()->id,
+            (int) $endUser->id,
+            (int) $validated['quantity'],
+            $validated['transaction_date'] ?? null,
+            $validated['expected_return_date'] ?? null,
+        );
+
+        if (is_string($draft)) {
+            $message = match ($draft) {
+                'unavailable' => 'The selected item is not available for a draft hold.',
+                'insufficient' => 'The requested quantity exceeds the free stock (available minus units already promised).',
+                default => 'The selected item cannot be drafted in the requested quantity.',
+            };
+
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $message], 422);
+            }
+
+            return redirect()->back()->with('error', $message)->withInput();
+        }
+
+        $draft->loadMissing('fulfillmentRequests:id,item_id,parent_request_id');
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Draft saved. Print the slip, then allocate once the signed slip is collected.',
+                'draft_id' => (int) $draft->id,
+                'inventory_ids' => $draft->fulfillmentRequests->map(fn ($child) => (int) $child->item_id)->values()->all(),
+            ]);
+        }
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Draft saved. Print the slip, then allocate once the signed slip is collected.');
+    }
+
+    /**
+     * Preview a draft slip without saving it.
+     *
+     * Accepts slip fields and inventory IDs directly, generates a PDF preview
+     * without creating a draft request. Used by the Assign modal's slip preview.
+     */
+    public function draftSlipPreview(Request $request)
+    {
+        $validated = $request->validate([
+            'slip_fields' => ['nullable', 'array'],
+            'slip_fields.recipient_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.department_unit' => ['nullable', 'string', 'max:150'],
+            'slip_fields.designation' => ['nullable', 'string', 'max:150'],
+            'slip_fields.purpose' => ['nullable', 'string', Rule::in([
+                'Official Use (Off-site)',
+                'Transfer / Relocation',
+                'Repair / Maintenance',
+                'Disposal',
+            ])],
+            'slip_fields.conditions' => ['nullable', 'array'],
+            'slip_fields.conditions.*' => ['nullable', 'string', 'max:100'],
+            'slip_fields.expected_return_date' => ['nullable', 'date'],
+            'slip_fields.actual_return_date' => ['nullable', 'date'],
+            'slip_fields.released_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.released_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.released_by_date' => ['nullable', 'date'],
+            'slip_fields.received_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.received_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.received_by_date' => ['nullable', 'date'],
+            'slip_fields.approved_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.approved_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.approved_by_date' => ['nullable', 'date'],
+            'inventory_ids' => ['required', 'array', 'min:1'],
+            'inventory_ids.*' => ['required', 'integer', 'exists:inventory,item_id'],
+            'inventory_quantities' => ['nullable', 'array'],
+            'inventory_quantities.*' => ['required', 'integer', 'min:1'],
+            'document_date' => ['nullable', 'date'],
+        ]);
+
+        $inventoryIds = $validated['inventory_ids'];
+        $slipFields = $validated['slip_fields'] ?? [];
+
+        $items = Inventory::query()
+            ->with('category')
+            ->whereIn('item_id', $inventoryIds)
+            ->get()
+            ->keyBy('item_id');
+
+        abort_unless($items->count() === count($inventoryIds), 422, 'Selected inventory could not be found.');
+
+        $custodian = $request->user();
+        $lines = [];
+        foreach ($inventoryIds as $itemId) {
+            $item = $items->get((int) $itemId);
+            $quantity = (int) ($validated['inventory_quantities'][$itemId] ?? $item->quantity);
+            abort_unless($quantity <= (int) $item->quantity, 422, 'The requested quantity exceeds the available inventory.');
+            $lines[] = [
+                'item_id' => $item->item_id,
+                'item_no' => $item->inventory_item_no ?? (string) $item->item_id,
+                'description' => trim($item->item_name . ($item->serial_number ? ' (SN: ' . $item->serial_number . ')' : '')),
+                'qty' => $quantity,
+                'unit_cost' => (float) ($item->unit_cost ?? 0),
+                'amount' => (float) ($item->unit_cost ?? 0) * $quantity,
+                'condition' => $slipFields['conditions'][$itemId] ?? null,
+            ];
+        }
+
+        $data = [
+            'docNo' => 'DRAFT-PREVIEW',
+            'documentDate' => $validated['document_date'] ?? now()->toDateString(),
+            'recipientName' => $slipFields['recipient_name'] ?? '',
+            'custodianName' => trim($custodian->first_name . ' ' . $custodian->last_name) ?: $custodian->username,
+            'lines' => $lines,
+            'total' => collect($lines)->sum('amount'),
+            'expectedReturnDate' => $slipFields['expected_return_date'] ?? null,
+            'actualReturnDate' => $slipFields['actual_return_date'] ?? null,
+            'slipFields' => $slipFields,
+        ];
+
+        return Pdf::loadView('pdfs.property-release-slip', $data)->stream('DRAFT-PREVIEW.pdf');
+    }
+
+    /**
+     * Allocate a draft: the single custody-writing step of the draft flow.
+     * Revalidates against free stock excluding the draft's own hold, then
+     * assigns exactly once. Retries after success report already-processed;
+     * drafts starved by newer holds fail stale with Delete/Re-pick guidance.
+     */
+    public function allocateDraft(Request $request, int $id)
+    {
+        $result = $this->inventoryOperations->allocateDraft(
+            $id,
+            (int) $request->user()->id,
+        );
+
+        if ($result === 'allocated') {
+            if ($request->expectsJson()) {
+                return response()->json(['status' => 'success', 'message' => 'Draft allocated. Item has been assigned.']);
+            }
+
+            return redirect()->route('propertyCustodian.transactions')->with('success', 'Draft allocated. Item has been assigned.');
+        }
+
+        $message = match ($result) {
+            'processed' => 'This draft has already been processed.',
+            default => 'This draft can no longer be allocated: the held units are no longer available. Delete it or pick the units again.',
+        };
+        $status = $result === 'processed' ? 200 : 422;
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => $message], $status);
+        }
+
+        return redirect()->back()->with('error', $message);
     }
 
     public function releaseSlipData(int $id, Request $request)
@@ -1788,8 +2008,9 @@ class PropertyCustodianController extends Controller
             $validated['inventory_ids'] ?? [],
         );
         $slipFields = $validated['slip_fields'] ?? [];
-        $slipFields['released_by_name'] = $data['custodianName'];
-        $slipFields['received_by_name'] = $data['recipientName'];
+        $data['recipientName'] = $slipFields['recipient_name'] ?? $data['recipientName'];
+        $slipFields['released_by_name'] = $slipFields['released_by_name'] ?? $data['custodianName'];
+        $slipFields['received_by_name'] = $slipFields['received_by_name'] ?? $data['recipientName'];
         $data['slipFields'] = $slipFields;
         $data['expectedReturnDate'] = $slipFields['expected_return_date'] ?? $data['expectedReturnDate'];
         $data['actualReturnDate'] = $slipFields['actual_return_date'] ?? $data['actualReturnDate'];
@@ -1801,26 +2022,31 @@ class PropertyCustodianController extends Controller
             })
             ->all();
 
-        return Pdf::loadView('pdfs.property-release-slip', $data)
-            ->download($data['docNo'].'.pdf');
+        return $request->boolean('preview')
+            ? Pdf::loadView('pdfs.property-release-slip', $data)->stream($data['docNo'].'.pdf')
+            : Pdf::loadView('pdfs.property-release-slip', $data)->download($data['docNo'].'.pdf');
     }
 
     private function propertyReleaseSlipData(AssignmentRequest $assignmentRequest, User $custodian, array $inventoryIds = []): array
     {
         if ($assignmentRequest->status !== 'approved') {
             abort_unless(
-                in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT], true),
+                in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT, 'draft'], true),
                 409,
                 'A release slip is available only for a pending or approved request.',
             );
 
             $lines = $this->draftPropertyReleaseSlipLines($assignmentRequest, $inventoryIds);
             $assignmentRequest->loadMissing(['user.role', 'targetUser.role']);
-            $recipient = $assignmentRequest->requested_item_name
-                ? $assignmentRequest->user
-                : (strtolower((string) $assignmentRequest->targetUser?->role?->role_name) === 'end user'
-                    ? $assignmentRequest->targetUser
-                    : $assignmentRequest->user);
+            // Drafts are custodian-held for a named recipient: the slip goes to
+            // the target end user, not the custodian who keyed the draft.
+            $recipient = $assignmentRequest->status === 'draft'
+                ? ($assignmentRequest->targetUser ?? $assignmentRequest->user)
+                : ($assignmentRequest->requested_item_name
+                    ? $assignmentRequest->user
+                    : (strtolower((string) $assignmentRequest->targetUser?->role?->role_name) === 'end user'
+                        ? $assignmentRequest->targetUser
+                        : $assignmentRequest->user));
 
             return [
                 'docNo' => sprintf('PRS-%s-%06d', now()->format('Y'), $assignmentRequest->id),
@@ -2000,18 +2226,33 @@ class PropertyCustodianController extends Controller
         $cancelled = DB::transaction(function () use ($id, $validated): bool {
             $assignmentRequest = AssignmentRequest::query()->lockForUpdate()->findOrFail($id);
             if (
-                ! in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT], true)
+                ! in_array($assignmentRequest->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT, 'draft'], true)
                 || ! $assignmentRequest->requested_item_name
                 || $assignmentRequest->item_id
             ) {
                 return false;
             }
 
+            $wasDraft = $assignmentRequest->status === 'draft';
+
             $assignmentRequest->update([
                 'status' => 'cancelled',
                 'cancellation_reason' => $validated['cancellation_reason'],
                 'responded_at' => now(),
             ]);
+
+            // Draft holds live on the children: releasing the parent alone
+            // would strand promised units, so the whole draft set cancels.
+            if ($wasDraft) {
+                AssignmentRequest::query()
+                    ->where('parent_request_id', $assignmentRequest->id)
+                    ->where('status', 'draft')
+                    ->update([
+                        'status' => 'cancelled',
+                        'cancellation_reason' => $validated['cancellation_reason'],
+                        'responded_at' => now(),
+                    ]);
+            }
 
             return true;
         });
@@ -2105,7 +2346,7 @@ class PropertyCustodianController extends Controller
                 'unit' => ['required', 'string', 'max:255'],
                 'quantity' => ['required', 'integer', 'min:1'],
                 'manual_recipient_name' => ['required', 'string', 'max:255'],
-                'manual_department' => ['required', 'string', 'max:255'],
+                'manual_department' => ['nullable', 'string', 'max:255'],
                 'building' => ['nullable', 'string', 'max:255'],
                 'room' => ['nullable', 'string', 'max:255'],
                 'manual_recipient_type' => ['nullable', 'string', 'max:100'],
@@ -2132,6 +2373,27 @@ class PropertyCustodianController extends Controller
             'user_id' => ['required', 'exists:users,id'],
             'quantity' => ['required', 'integer', 'min:1'],
             'transaction_date' => ['nullable', 'date'],
+            'is_temporary' => ['sometimes', 'boolean'],
+            'expected_return_date' => [
+                Rule::requiredIf(fn () => $request->boolean('is_temporary')),
+                'nullable',
+                'date',
+                function (string $attribute, mixed $value, \Closure $fail) use ($request): void {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+                    $floor = now()->toDateString();
+                    if ($request->filled('transaction_date')) {
+                        try {
+                            $floor = Carbon::parse($request->input('transaction_date'))->toDateString();
+                        } catch (\Throwable) {
+                        }
+                    }
+                    if ((string) $value < $floor) {
+                        $fail('The expected return date must be on or after the assignment date.');
+                    }
+                },
+            ],
         ]);
 
         $endUser = User::with('role')->findOrFail($validated['user_id']);
@@ -2147,6 +2409,7 @@ class PropertyCustodianController extends Controller
             (int) $endUser->id,
             (int) $validated['quantity'],
             $validated['transaction_date'] ?? null,
+            $validated['expected_return_date'] ?? null,
         );
 
         if ($assignmentResult === 'unavailable') {
@@ -2187,6 +2450,8 @@ class PropertyCustodianController extends Controller
             'last_name' => ['nullable', 'string', 'max:255'],
             'username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')->ignore($user->id)],
             'email' => ['required', 'email', 'max:255', 'unique:users,email,' . $user->id],
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
             'current_password' => ['nullable', 'required_with:password', 'current_password'],
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
         ]);
@@ -2195,6 +2460,8 @@ class PropertyCustodianController extends Controller
         $user->last_name = $validated['last_name'] ?? '';
         $user->username = $validated['username'];
         $user->email = $validated['email'];
+        $user->building = $validated['building'] ?? null;
+        $user->room = $validated['room'] ?? null;
 
         if (!empty($validated['password'])) {
             $user->password = $validated['password'];

@@ -136,11 +136,15 @@ class EndUserController extends Controller
         $validated = $request->validate([
             'username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')->ignore($user->id)],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
         ]);
 
         $user->username = $validated['username'];
         $user->email = $validated['email'];
+        $user->building = $validated['building'] ?? null;
+        $user->room = $validated['room'] ?? null;
 
         if (!empty($validated['password'])) {
             $user->password = $validated['password'];
@@ -287,6 +291,9 @@ class EndUserController extends Controller
             ])
             ->where('target_user_id', $userId)
             ->whereNull('parent_request_id')
+            // Draft allocations are custodian-held prints, not requests the
+            // recipient can act on. They live in the custodian Drafts tab.
+            ->where('status', '!=', 'draft')
             ->orderBy('requested_at', 'desc');
     }
 

@@ -6,6 +6,7 @@ use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\Transaction;
 use App\Models\User;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -144,6 +145,16 @@ test('custodian can download a release slip for an approved request', function (
         ])
         ->assertOk()
         ->assertDownload($slip->json('docNo').'.pdf');
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.requests.slip-pdf', $request->id).'?preview=1', [
+            'slip_fields' => [
+                'purpose' => 'Official Use (Off-site)',
+                'conditions' => [$item->item_id => 'Good condition'],
+            ],
+        ])
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
 });
 
 test('custodian can prepare a draft release slip without approving the request', function () {
@@ -186,6 +197,106 @@ test('custodian can prepare a draft release slip without approving the request',
         ->and($item->fresh()->quantity)->toBe(3);
 });
 
+test('draft slip preview includes entered item conditions in the PDF data', function () {
+    $item = makeAvailableItem($this, 'Bondpaper', 4);
+    $item->update(['inventory_item_no' => 'INV-000588']);
+
+    $pdf = \Mockery::mock(\Barryvdh\DomPDF\PDF::class);
+    $pdf->shouldReceive('stream')
+        ->once()
+        ->with('DRAFT-PREVIEW.pdf')
+        ->andReturn(response('%PDF-preview', 200, ['Content-Type' => 'application/pdf']));
+
+    Pdf::shouldReceive('loadView')
+        ->once()
+        ->with('pdfs.property-release-slip', \Mockery::on(
+            fn (array $data): bool => ($data['lines'][0]['condition'] ?? null) === 'good'
+                && $data['lines'][0]['qty'] === 1
+                && $data['recipientName'] === 'Edited Recipient'
+                && $data['documentDate'] === '2026-10-10'
+                && $data['slipFields']['department_unit'] === 'Science'
+                && $data['slipFields']['designation'] === 'Teacher'
+                && $data['slipFields']['purpose'] === 'Official Use (Off-site)'
+                && $data['expectedReturnDate'] === '2026-11-01'
+                && $data['actualReturnDate'] === '2026-11-02'
+                && $data['slipFields']['released_by_signature'] === 'Released Signature'
+                && $data['slipFields']['released_by_name'] === 'Custodian Name'
+                && $data['slipFields']['released_by_date'] === '2026-11-03'
+                && $data['slipFields']['received_by_signature'] === 'Received Signature'
+                && $data['slipFields']['received_by_name'] === 'Recipient Name'
+                && $data['slipFields']['received_by_date'] === '2026-11-04'
+                && $data['slipFields']['approved_by_signature'] === 'Approved Signature'
+                && $data['slipFields']['approved_by_name'] === 'Supervisor Name'
+                && $data['slipFields']['approved_by_date'] === '2026-11-05'
+        ))
+        ->andReturn($pdf);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.assignments.draft.preview'), [
+            'inventory_ids' => [$item->item_id],
+            'inventory_quantities' => [$item->item_id => 1],
+            'document_date' => '2026-10-10',
+            'slip_fields' => [
+                'recipient_name' => 'Edited Recipient',
+                'department_unit' => 'Science',
+                'designation' => 'Teacher',
+                'purpose' => 'Official Use (Off-site)',
+                'conditions' => [$item->item_id => 'good'],
+                'expected_return_date' => '2026-11-01',
+                'actual_return_date' => '2026-11-02',
+                'released_by_signature' => 'Released Signature',
+                'released_by_name' => 'Custodian Name',
+                'released_by_date' => '2026-11-03',
+                'received_by_signature' => 'Received Signature',
+                'received_by_name' => 'Recipient Name',
+                'received_by_date' => '2026-11-04',
+                'approved_by_signature' => 'Approved Signature',
+                'approved_by_name' => 'Supervisor Name',
+                'approved_by_date' => '2026-11-05',
+            ],
+        ])
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
+});
+
+test('request slip preview preserves edited recipient and signatory names', function () {
+    $item = makeAvailableItem($this, 'Desk', 1);
+    $request = AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $pdf = \Mockery::mock(\Barryvdh\DomPDF\PDF::class);
+    $pdf->shouldReceive('stream')
+        ->once()
+        ->with(sprintf('PRS-%s-%06d.pdf', now()->format('Y'), $request->id))
+        ->andReturn(response('%PDF-preview', 200, ['Content-Type' => 'application/pdf']));
+
+    Pdf::shouldReceive('loadView')
+        ->once()
+        ->with('pdfs.property-release-slip', \Mockery::on(
+            fn (array $data): bool => $data['recipientName'] === 'Edited Recipient'
+                && $data['slipFields']['released_by_name'] === 'Edited Custodian'
+                && $data['slipFields']['received_by_name'] === 'Edited Recipient Signatory'
+        ))
+        ->andReturn($pdf);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.requests.slip-pdf', $request->id).'?preview=1', [
+            'slip_fields' => [
+                'recipient_name' => 'Edited Recipient',
+                'released_by_name' => 'Edited Custodian',
+                'received_by_name' => 'Edited Recipient Signatory',
+            ],
+        ])
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
+});
+
 test('registered assign through the api creates an approval request', function () {
     $item = makeAvailableItem($this, 'Notebook', 10);
 
@@ -214,13 +325,13 @@ test('manual assign through the api records a transaction', function () {
         'unit' => 'piece',
         'quantity' => 1,
         'manual_recipient_name' => 'Visiting Lecturer',
-        'manual_department' => 'Science',
         'transaction_date' => '2026-03-01',
     ])->assertOk()->assertJsonPath('status', 'success');
 
     $this->assertDatabaseHas('transactions', [
         'item_id' => $item->item_id,
         'manual_recipient_name' => 'Visiting Lecturer',
+        'manual_department' => null,
         'quantity' => 1,
     ]);
 });
@@ -236,9 +347,10 @@ test('manual return through the api restores inventory', function () {
         'transaction_date' => '2026-03-01',
         'expected_return_date' => '2026-04-01',
         'manual_recipient_name' => 'Event Crew',
-        'manual_department' => 'Admin',
         'status' => 'assigned',
     ]);
+
+    expect($transaction->fresh()->manual_department)->toBeNull();
 
     $this->actingAs($this->custodian)
         ->postJson(route('api.custodian.transactions.manual-return', $transaction->id), ['notes' => 'Returned after event'])
@@ -311,7 +423,6 @@ test('assigned inventory exposes eligible manual issues as returnable records', 
         'transaction_date' => '2026-09-24',
         'expected_return_date' => '2026-10-10',
         'manual_recipient_name' => 'Visiting Lecturer',
-        'manual_department' => 'Science',
         'from_building' => 'Main Building',
         'from_room' => 'Property Office',
         'status' => 'assigned',
@@ -324,6 +435,8 @@ test('assigned inventory exposes eligible manual issues as returnable records', 
         ->assertJsonPath('inventoryPages.assigned.data.0.sourceItems.0.receive_return_assignments.0.recipient', 'Visiting Lecturer')
         ->assertJsonPath('inventoryPages.assigned.data.0.sourceItems.0.receive_return_assignments.0.is_manual_return', true)
         ->assertJsonPath('inventoryPages.assigned.data.0.sourceItems.0.receive_return_assignments.0.expected_return_date', '2026-10-10');
+
+    expect($transaction->fresh()->manual_department)->toBeNull();
 });
 
 test('custodian can send selected available inventory records to maintenance together', function () {

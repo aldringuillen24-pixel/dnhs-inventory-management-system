@@ -1328,7 +1328,6 @@ test('manual issue rolls back its stock deduction when transaction creation fail
         'unit' => 'piece',
         'quantity' => 2,
         'manual_recipient_name' => 'Alex Rivera',
-        'manual_department' => 'Science Department',
         'transaction_date' => '2026-09-27',
     ], 999999))->toThrow(QueryException::class);
 
@@ -1359,7 +1358,6 @@ test('manual issue stores recipient snapshot and custodian can return the exact 
         'unit' => 'piece',
         'quantity' => 3,
         'manual_recipient_name' => 'Alex Rivera',
-        'manual_department' => 'Science Department',
         'manual_recipient_type' => 'Staff',
         'manual_contact' => 'EXT-204',
         'manual_notes' => 'Science fair presentation',
@@ -1371,9 +1369,8 @@ test('manual issue stores recipient snapshot and custodian can return the exact 
         ->post(route('propertyCustodian.transactions.assignItem'), [
             ...$manualIssueData,
             'manual_recipient_name' => '',
-            'manual_department' => '',
         ])
-        ->assertSessionHasErrors(['manual_recipient_name', 'manual_department']);
+        ->assertSessionHasErrors(['manual_recipient_name']);
 
     $this->actingAs($this->propertyCustodian)
         ->post(route('propertyCustodian.transactions.assignItem'), $manualIssueData)
@@ -1386,7 +1383,7 @@ test('manual issue stores recipient snapshot and custodian can return the exact 
         ->and($transaction->item_id)->toBe($inventory->item_id)
         ->and($transaction->from_user_id)->toBe($this->propertyCustodian->id)
         ->and($transaction->manual_recipient_name)->toBe('Alex Rivera')
-        ->and($transaction->manual_department)->toBe('Science Department')
+        ->and($transaction->manual_department)->toBeNull()
         ->and($transaction->manual_recipient_type)->toBe('Staff')
         ->and($transaction->manual_contact)->toBe('EXT-204')
         ->and($transaction->manual_notes)->toBe('Science fair presentation')
@@ -1404,7 +1401,6 @@ test('manual issue stores recipient snapshot and custodian can return the exact 
         ->get(route('propertyCustodian.transactions'))
         ->assertOk()
         ->assertSee('Alex Rivera')
-        ->assertSee('Science Department')
         ->assertSee('2026-10-10')
         ->assertSee('Record Return');
     $this->actingAs($this->endUser)
@@ -1448,7 +1444,6 @@ test('assigned inventory shows the manual issue recipient name', function () {
             'unit' => 'piece',
             'quantity' => 1,
             'manual_recipient_name' => 'Alex Rivera',
-            'manual_department' => 'Science Department',
             'transaction_date' => '2026-09-29',
         ])
         ->assertRedirect(route('propertyCustodian.transactions'));
@@ -1482,7 +1477,6 @@ test('manual issue enforces serialized quantity and does not allow returns witho
         'unit' => 'piece',
         'quantity' => 2,
         'manual_recipient_name' => 'Jordan Lee',
-        'manual_department' => 'Library',
         'transaction_date' => '2026-09-27',
     ];
 
@@ -1538,7 +1532,6 @@ test('manual issue rejects mismatched unavailable and insufficient inventory wit
         'unit' => 'ream',
         'quantity' => 1,
         'manual_recipient_name' => 'Casey Morgan',
-        'manual_department' => 'Science Department',
         'transaction_date' => '2026-09-27',
     ];
 

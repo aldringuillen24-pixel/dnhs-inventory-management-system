@@ -86,6 +86,8 @@ class UserController extends Controller
             'last_name' => ['nullable', 'string', 'max:255'],
             'username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')->ignore($user->id)],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
         ]);
 
@@ -93,6 +95,8 @@ class UserController extends Controller
         $user->last_name = $validatedData['last_name'] ?? '';
         $user->username = $validatedData['username'];
         $user->email = $validatedData['email'];
+        $user->building = $validatedData['building'] ?? null;
+        $user->room = $validatedData['room'] ?? null;
 
         if (!empty($validatedData['password'])) {
             $user->password = $validatedData['password'];

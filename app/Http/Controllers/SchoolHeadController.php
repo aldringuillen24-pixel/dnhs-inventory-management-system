@@ -296,12 +296,16 @@ class SchoolHeadController extends Controller
             'first_name' => ['required', 'string', 'max:255'],
             'last_name' => ['nullable', 'string', 'max:255'],
             'email' => ['required', 'email', Rule::unique('users', 'email')->ignore($user->id)],
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
         ]);
 
         $user->first_name = $validated['first_name'];
         $user->last_name = $validated['last_name'] ?? '';
         $user->email = $validated['email'];
+        $user->building = $validated['building'] ?? null;
+        $user->room = $validated['room'] ?? null;
         if (!empty($validated['password'])) {
             $user->password = $validated['password'];
         }

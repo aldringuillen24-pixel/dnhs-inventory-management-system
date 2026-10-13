@@ -124,6 +124,13 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/requests/{id}/decline', [PropertyCustodianController::class, 'declineRequest'])->name('requests.decline');
 
+    Route::get('/requests/{id}/slip-pdf', [PropertyCustodianController::class, 'releaseSlipPdf'])->name('requests.slip-pdf');
+
+    Route::post('/assignments/draft', [PropertyCustodianController::class, 'storeDraft'])->name('assignments.draft');
+    Route::post('/assignments/draft/preview', [PropertyCustodianController::class, 'draftSlipPreview'])->name('assignments.draft.preview');
+
+    Route::post('/drafts/{id}/allocate', [PropertyCustodianController::class, 'allocateDraft'])->name('drafts.allocate');
+
     Route::post('/transfers/{id}/approve', [PropertyCustodianController::class, 'approveTransfer'])->name('transfers.approve');
 
     Route::post('/transfers/{id}/decline', [PropertyCustodianController::class, 'declineTransfer'])->name('transfers.decline');
@@ -286,6 +293,9 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/requests/{id}/slip-pdf', [PropertyCustodianController::class, 'releaseSlipPdf'])->name('requests.slip-pdf');
         Route::post('/requests/{id}/cancel', [PropertyCustodianController::class, 'cancelItemRequest'])->name('requests.cancel');
         Route::post('/requests/{id}/decline', [PropertyCustodianController::class, 'declineRequest'])->name('requests.decline');
+        Route::post('/assignments/draft', [PropertyCustodianController::class, 'storeDraft'])->name('assignments.draft');
+        Route::post('/assignments/draft/preview', [PropertyCustodianController::class, 'draftSlipPreview'])->name('assignments.draft.preview');
+        Route::post('/drafts/{id}/allocate', [PropertyCustodianController::class, 'allocateDraft'])->name('drafts.allocate');
         Route::post('/transfers/{id}/approve', [PropertyCustodianController::class, 'approveTransfer'])->name('transfers.approve');
         Route::post('/transfers/{id}/decline', [PropertyCustodianController::class, 'declineTransfer'])->name('transfers.decline');
         Route::post('/returns/{id}/approve', [PropertyCustodianController::class, 'approveReturn'])->name('returns.approve');

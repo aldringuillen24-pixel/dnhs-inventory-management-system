@@ -26,7 +26,7 @@ const auth = useAuthStore();
 const toast = useToastStore();
 const working = ref(false);
 const errors = ref({});
-const form = reactive({ first_name: '', last_name: '', username: '', email: '', password: '', password_confirmation: '' });
+const form = reactive({ first_name: '', last_name: '', username: '', email: '', building: '', room: '', password: '', password_confirmation: '' });
 
 const profileEndpoint = computed(() => {
   switch (auth.role) {
@@ -52,6 +52,8 @@ function syncFromUser() {
   form.last_name = auth.user?.last_name ?? '';
   form.username = auth.user?.username ?? '';
   form.email = auth.user?.email ?? '';
+  form.building = auth.user?.building ?? '';
+  form.room = auth.user?.room ?? '';
   form.password = '';
   form.password_confirmation = '';
 }
@@ -69,7 +71,7 @@ async function save() {
   working.value = true;
   errors.value = {};
   try {
-    const payload = { email: form.email };
+    const payload = { email: form.email, building: form.building, room: form.room };
     if (needsUsername.value) payload.username = form.username;
     if (needsNameFields.value) {
       payload.first_name = form.first_name;

@@ -32,6 +32,14 @@
               <dt class="text-gray-500 dark:text-gray-400">Last name</dt>
               <dd class="text-right font-medium text-gray-800 dark:text-gray-200">{{ user?.last_name || '—' }}</dd>
             </div>
+            <div class="flex items-center justify-between gap-3 py-2">
+              <dt class="text-gray-500 dark:text-gray-400">Building</dt>
+              <dd class="text-right font-medium text-gray-800 dark:text-gray-200">{{ user?.building || '—' }}</dd>
+            </div>
+            <div class="flex items-center justify-between gap-3 py-2">
+              <dt class="text-gray-500 dark:text-gray-400">Room</dt>
+              <dd class="text-right font-medium text-gray-800 dark:text-gray-200">{{ user?.room || '—' }}</dd>
+            </div>
           </dl>
         </div>
       </section>
@@ -67,6 +75,16 @@
               <label class="compact-label sm:mb-0" for="profile-email">Email address</label>
               <input id="profile-email" :value="form.email" type="email" required maxlength="255" autocomplete="email" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('email', $event.target.value)" />
               <FieldError :errors="errors" field="email" />
+            </div>
+            <div class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+              <label class="compact-label sm:mb-0" for="profile-building">Building</label>
+              <input id="profile-building" :value="form.building" maxlength="255" autocomplete="off" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('building', $event.target.value)" />
+              <FieldError :errors="errors" field="building" />
+            </div>
+            <div class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+              <label class="compact-label sm:mb-0" for="profile-room">Room</label>
+              <input id="profile-room" :value="form.room" maxlength="255" autocomplete="off" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('room', $event.target.value)" />
+              <FieldError :errors="errors" field="room" />
             </div>
           </div>
 

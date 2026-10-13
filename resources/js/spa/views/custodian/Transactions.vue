@@ -306,6 +306,113 @@
             </div>
           </template>
 
+          <!-- DRAFTS TAB -->
+          <template v-else-if="activeTab === 'drafts'">
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="relative w-full max-w-sm">
+                  <svg class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    v-model="draftsSearch"
+                    type="search"
+                    placeholder="Search recipient, item…"
+                    aria-label="Search drafts"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                  />
+                </div>
+                <button
+                  v-if="draftsSearch"
+                  type="button"
+                  class="rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+                  @click="draftsSearch = ''"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ filteredDrafts.length }} of {{ drafts.length }} shown
+                </span>
+              </div>
+            </div>
+
+            <div class="mb-3 flex items-center justify-between border-b border-gray-100 pb-2.5 dark:border-white/5 min-[480px]:mb-4 min-[480px]:pb-3">
+              <div class="flex min-w-0 items-center gap-1.5 min-[480px]:gap-2">
+                <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-100 text-[10px] font-bold text-violet-700 dark:bg-violet-950 dark:text-violet-300 min-[480px]:h-6 min-[480px]:w-6 min-[480px]:text-xs">
+                  {{ drafts.length }}
+                </span>
+                <h3 class="text-xs font-bold text-gray-800 dark:text-white min-[480px]:text-sm">Draft Slips Awaiting Allocation</h3>
+              </div>
+              <span class="text-[11px] text-gray-400 dark:text-gray-500">Hold-only — no stock deducted until Allocate.</span>
+            </div>
+
+            <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
+              <table class="w-full min-w-[56rem] text-left text-xs">
+                <thead class="sticky top-0 z-10">
+                  <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400">
+                    <th class="px-4 py-3.5">Recipient</th>
+                    <th class="px-4 py-3.5">Item</th>
+                    <th class="px-4 py-3.5 text-center">Qty</th>
+                    <th class="px-4 py-3.5">Drafted On</th>
+                    <th class="px-4 py-3.5 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-white/5">
+                  <tr v-for="draft in filteredDrafts" :key="draft.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                    <td class="px-4 py-3.5 font-semibold text-gray-900 dark:text-white">
+                      {{ personName(draft.target_user ?? draft.targetUser) }}
+                    </td>
+                    <td class="px-4 py-3.5">
+                      <div class="font-medium text-gray-800 dark:text-gray-200">{{ draft.requested_item_name ?? 'Unknown item' }}</div>
+                      <span v-if="draftHoldNos(draft)" class="text-xs text-gray-400 font-mono">{{ draftHoldNos(draft) }}</span>
+                    </td>
+                    <td class="px-4 py-3.5 text-center font-bold text-gray-900 dark:text-white">
+                      {{ draft.quantity }}
+                    </td>
+                    <td class="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ formatDate(draft.requested_at) }}
+                    </td>
+                    <td class="px-4 py-3.5">
+                      <div class="flex flex-row items-center justify-center gap-1.5 whitespace-nowrap">
+                        <a
+                          :href="draftSlipHref(draft)"
+                          target="_blank"
+                          rel="noopener"
+                          class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                        >
+                          Reprint
+                        </a>
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+                          @click="confirmAction = { kind: 'allocate-draft', id: draft.id, label: `Allocate ${draft.quantity} to ${personName(draft.target_user ?? draft.targetUser)}? Signed slip collected.` }"
+                        >
+                          Allocate
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                          @click="openPrompt('cancel-draft', draft.id)"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr v-if="!filteredDrafts.length">
+                    <td colspan="5" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
+                      {{ draftsSearch.trim() ? `No results for '${draftsSearch.trim()}'.` : 'No draft slips. Print & Draft from Assign to hold stock here.' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+
           <!-- 2. TRANSFERS TAB -->
           <template v-else-if="activeTab === 'transfers'">
             <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -872,7 +979,7 @@
     </template>
 
     <!-- Modals -->
-    <AssignModal :open="assignOpen" :items="availableItems" :end-users="endUsers" @close="assignOpen = false" @saved="onAssignSaved" />
+    <AssignModal :open="assignOpen" :items="availableItems" :end-users="endUsers" @close="assignOpen = false" @saved="onAssignSaved" @drafted="onDraftSaved" />
     <ApproveRequestModal :open="reviewRequest !== null" :request="reviewRequest" @close="reviewRequest = null" @approved="onApproveSaved" />
 
     <PromptModal
@@ -953,6 +1060,7 @@ const historySearch = ref('');
 const historyDateFrom = ref('');
 const historyDateTo = ref('');
 const requestsSearch = ref('');
+const draftsSearch = ref('');
 const transfersSearch = ref('');
 const returnsSearch = ref('');
 const ledgerSearch = ref('');
@@ -969,6 +1077,7 @@ const availableItems = ref([]);
 const endUsers = ref([]);
 const incoming = ref([]);
 const assignments = ref([]);
+const drafts = ref([]);
 const transfers = ref([]);
 const returns = ref([]);
 const history = ref([]);
@@ -976,6 +1085,7 @@ const ledger = ref([]);
 
 const tabs = computed(() => [
   { key: 'requests', label: 'Requests', count: incoming.value.length + assignments.value.length },
+  { key: 'drafts', label: 'Drafts', count: drafts.value.length },
   { key: 'transfers', label: 'Transfers', count: transfers.value.length },
   { key: 'returns', label: 'Returns', count: returns.value.length },
   { key: 'history', label: 'History', count: history.value.length },
@@ -987,6 +1097,7 @@ const exportPdfHref = computed(() => {
   const params = new URLSearchParams({ tab: activeTab.value });
   const searchByTab = {
     requests: requestsSearch.value,
+    drafts: draftsSearch.value,
     transfers: transfersSearch.value,
     returns: returnsSearch.value,
     history: historySearch.value,
@@ -1016,6 +1127,8 @@ function tabCountBadgeClass(key, isActive) {
       return incoming.value.length > 0 ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300';
     case 'transfers':
       return transfers.value.length > 0 ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300' : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300';
+    case 'drafts':
+      return drafts.value.length > 0 ? 'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300' : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300';
     case 'returns':
       return returns.value.length > 0 ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300' : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300';
     default:
@@ -1158,6 +1271,8 @@ const promptConfig = computed(() => {
       return { title: 'Decline Return', subtitle: "Reject end user's return request.", label: 'Reason / Notes (Optional)', required: false, confirmLabel: 'Confirm Decline', danger: true };
     case 'manual-return':
       return { title: 'Record Manual Return', subtitle: 'Return the manually issued item back to stockroom inventory.', label: 'Notes (optional)', required: false, confirmLabel: 'Confirm Return', danger: false };
+    case 'cancel-draft':
+      return { title: 'Delete Draft', subtitle: 'Release the held units back to free stock.', label: 'Reason (Required)', required: true, confirmLabel: 'Delete Draft', danger: true };
     default:
       return { title: '', subtitle: '', label: 'Notes', required: false, confirmLabel: 'Confirm', danger: false };
   }
@@ -1207,6 +1322,38 @@ const filteredAssignments = computed(() =>
     assignment.quantity,
     assignment.status,
     assignment.requested_at,
+  ])),
+);
+
+function draftChildren(draft) {
+  return draft?.fulfillment_requests ?? draft?.fulfillmentRequests ?? [];
+}
+
+function draftHoldNos(draft) {
+  return draftChildren(draft)
+    .map((child) => child.item?.inventory_item_no ?? (child.item_id ? `Inventory #${child.item_id}` : ''))
+    .filter(Boolean)
+    .join(', ');
+}
+
+function draftSlipHref(draft) {
+  const params = new URLSearchParams({ preview: '1' });
+  draftChildren(draft).forEach((child) => {
+    if (child.item_id) {
+      params.append('inventory_ids[]', String(child.item_id));
+    }
+  });
+  return `/property-custodian/requests/${draft.id}/slip-pdf?${params.toString()}`;
+}
+
+const filteredDrafts = computed(() =>
+  drafts.value.filter((draft) => matchesSearch(draftsSearch.value, [
+    personName(draft.target_user ?? draft.targetUser),
+    draft.requested_item_name,
+    draftHoldNos(draft),
+    draft.quantity,
+    draft.status,
+    draft.requested_at,
   ])),
 );
 
@@ -1369,6 +1516,7 @@ function applyTransactionsPayload(data) {
   endUsers.value = data.endUsers ?? [];
   incoming.value = data.incomingRequests ?? [];
   assignments.value = data.assignmentRequests ?? [];
+  drafts.value = data.draftRequests ?? [];
   transfers.value = data.pendingTransfers ?? [];
   returns.value = data.pendingReturns ?? [];
   history.value = data.transactions ?? [];
@@ -1382,6 +1530,12 @@ function reloadAfterChange() {
 
 function onAssignSaved() {
   assignOpen.value = false;
+  reloadAfterChange();
+}
+
+function onDraftSaved() {
+  assignOpen.value = false;
+  activeTab.value = 'drafts';
   reloadAfterChange();
 }
 
@@ -1417,6 +1571,7 @@ async function submitPrompt(text) {
     'decline-transfer': [(id) => `/custodian/transfers/${id}/decline`, { notes: text || null }],
     'decline-return': [(id) => `/custodian/returns/${id}/decline`, { notes: text || null }],
     'manual-return': [(id) => `/custodian/transactions/${id}/manual-return`, { notes: text || null }],
+    'cancel-draft': [(id) => `/custodian/requests/${id}/cancel`, { cancellation_reason: text }],
   };
 
   const [urlFor, payload] = routes[target.kind];
@@ -1431,6 +1586,7 @@ async function submitConfirm() {
 
   const urls = {
     'approve-transfer': `/custodian/transfers/${action.id}/approve`,
+    'allocate-draft': `/custodian/drafts/${action.id}/allocate`,
   };
 
   confirmAction.value = null;
