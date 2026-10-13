@@ -59,6 +59,41 @@
         </button>
       </div>
 
+      <div class="flex flex-wrap items-center gap-2 border-b border-gray-200/80 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-gray-900/50">
+        <div class="relative w-full sm:max-w-xs">
+          <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          </svg>
+          <input
+            v-model="filterSearch"
+            type="search"
+            placeholder="Search item, category…"
+            aria-label="Filter requests"
+            class="w-full rounded-md border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:py-2 min-[480px]:text-sm [&::-webkit-search-cancel-button]:hidden"
+          />
+        </div>
+        <select
+          v-model="filterStatus"
+          aria-label="Filter requests by status"
+          class="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:py-2 min-[480px]:text-sm"
+        >
+          <option value="">All Statuses</option>
+          <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
+        </select>
+        <a
+          :href="exportRequestsHref"
+          class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5 min-[480px]:py-2 min-[480px]:text-sm"
+        >
+          <svg class="h-4 w-4 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          </svg>
+          Export PDF
+        </a>
+        <span class="ml-auto text-xs text-gray-500 dark:text-gray-400">
+          Showing {{ activeTab === 'my-requests' ? filteredMyRequests.length : filteredIncomingRequests.length }} of {{ activeTab === 'my-requests' ? myRequests.length : incomingRequests.length }}
+        </span>
+      </div>
+
       <div v-if="activeTab === 'my-requests'" class="overflow-x-auto">
         <table class="w-full min-w-[56rem] text-left text-xs">
           <thead class="sticky top-0 z-10">
@@ -79,7 +114,7 @@
             </tr>
           </tbody>
           <tbody v-else>
-            <tr v-for="request in myRequests" :key="request.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+            <tr v-for="request in filteredMyRequests" :key="request.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
               <td class="px-4 py-3.5">
                 <div class="font-semibold text-gray-900 dark:text-white">{{ request.requested_item_name ?? request.item?.item_name ?? 'Unknown item' }}</div>
                 <span v-if="request.item?.inventory_item_no" class="text-xs text-gray-500 dark:text-gray-400">{{ request.item.inventory_item_no }}</span>
@@ -102,8 +137,8 @@
                 <span v-else class="text-xs text-gray-400">—</span>
               </td>
             </tr>
-            <tr v-if="!myRequests.length">
-              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">No requests yet. Use “Request Item” to start one.</td>
+            <tr v-if="!filteredMyRequests.length">
+              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">{{ myRequests.length ? 'No requests match the current filters.' : 'No requests yet. Use “Request Item” to start one.' }}</td>
             </tr>
           </tbody>
         </table>
@@ -129,7 +164,7 @@
             </tr>
           </tbody>
           <tbody v-else>
-            <tr v-for="request in incomingRequests" :key="request.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+            <tr v-for="request in filteredIncomingRequests" :key="request.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
               <td class="px-4 py-3.5">
                 <div class="font-semibold text-gray-900 dark:text-white">{{ request.item?.item_name ?? request.requested_item_name ?? 'Unknown item' }}</div>
                 <span v-if="request.item?.inventory_item_no" class="text-xs text-gray-500 dark:text-gray-400">{{ request.item.inventory_item_no }}</span>
@@ -163,8 +198,8 @@
                 <span v-else class="text-xs text-gray-400">No action needed</span>
               </td>
             </tr>
-            <tr v-if="!incomingRequests.length">
-              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">No incoming requests.</td>
+            <tr v-if="!filteredIncomingRequests.length">
+              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">{{ incomingRequests.length ? 'No requests match the current filters.' : 'No incoming requests.' }}</td>
             </tr>
           </tbody>
         </table>
@@ -211,6 +246,45 @@ const myRequests = ref([]);
 const incomingRequests = ref([]);
 const categories = ref([]);
 const pendingIncoming = ref(0);
+
+const filterSearch = ref('');
+const filterStatus = ref('');
+
+const statusOptions = computed(() => [...new Set(
+  [...myRequests.value, ...incomingRequests.value]
+    .map((request) => request.status)
+    .filter(Boolean),
+)].sort());
+
+function requestMatches(request) {
+  if (filterStatus.value && request.status !== filterStatus.value) {
+    return false;
+  }
+  const query = filterSearch.value.toLowerCase().trim();
+  if (!query) {
+    return true;
+  }
+  return [
+    request.requested_item_name,
+    request.item?.item_name,
+    request.item?.inventory_item_no,
+    request.requested_category?.category_name,
+    request.requestedCategory?.category_name,
+  ].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
+}
+
+const filteredMyRequests = computed(() => myRequests.value.filter(requestMatches));
+const filteredIncomingRequests = computed(() => incomingRequests.value.filter(requestMatches));
+
+const exportRequestsHref = computed(() => {
+  const params = new URLSearchParams({
+    tab: activeTab.value === 'incoming' ? 'incoming' : 'my',
+    status: filterStatus.value,
+    search: filterSearch.value.trim(),
+  });
+
+  return `/end-user/requests/export-pdf?${params.toString()}`;
+});
 
 const pendingStatuses = ['waiting for approval', 'waiting for transfer approval'];
 

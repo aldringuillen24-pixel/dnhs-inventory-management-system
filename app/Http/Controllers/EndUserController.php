@@ -11,6 +11,7 @@ use App\Models\Inventory;
 use App\Models\User;
 use App\Services\InventoryOperationService;
 use App\Support\RequestableItemMatcher;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Carbon;
@@ -155,31 +156,10 @@ class EndUserController extends Controller
         $user = Auth::user();
 
         // 1. My Requests (requests created by this end user to custodian/others)
-        $myRequests = AssignmentRequest::query()
-            ->with([
-                'item:item_id,item_name,inventory_item_no',
-                'requestedCategory:category_id,category_name',
-                'targetUser:id,first_name,last_name,role_id',
-                'targetUser.role:role_id,role_name',
-                'transaction',
-                'fulfillmentRequests.item:item_id,item_name,inventory_item_no',
-                'fulfillmentRequests.transaction',
-            ])
-            ->where('user_id', $user->id)
-            ->orderBy('requested_at', 'desc')
-            ->get();
+        $myRequests = $this->myRequestsQuery($user->id)->get();
 
         // 2. Incoming Requests — custodian assignments AND transfer requests directed to this user
-        $incomingRequests = AssignmentRequest::query()
-            ->with([
-                'item:item_id,item_name,inventory_item_no',
-                'user:id,first_name,last_name,email,role_id',
-                'user.role:role_id,role_name',
-            ])
-            ->where('target_user_id', $user->id)
-            ->whereNull('parent_request_id')
-            ->orderBy('requested_at', 'desc')
-            ->get();
+        $incomingRequests = $this->incomingRequestsQuery($user->id)->get();
 
         // Catalogue of every requestable item type, not only the types holding
         // stock right now. An out-of-stock item has to stay selectable, or a
@@ -279,6 +259,94 @@ class EndUserController extends Controller
             'pendingIncomingCount' => $pendingIncomingCount,
             'myPendingCount'       => $myPendingCount,
         ]);
+    }
+
+    private function myRequestsQuery(int $userId)
+    {
+        return AssignmentRequest::query()
+            ->with([
+                'item:item_id,item_name,inventory_item_no',
+                'requestedCategory:category_id,category_name',
+                'targetUser:id,first_name,last_name,role_id',
+                'targetUser.role:role_id,role_name',
+                'transaction',
+                'fulfillmentRequests.item:item_id,item_name,inventory_item_no',
+                'fulfillmentRequests.transaction',
+            ])
+            ->where('user_id', $userId)
+            ->orderBy('requested_at', 'desc');
+    }
+
+    private function incomingRequestsQuery(int $userId)
+    {
+        return AssignmentRequest::query()
+            ->with([
+                'item:item_id,item_name,inventory_item_no',
+                'user:id,first_name,last_name,email,role_id',
+                'user.role:role_id,role_name',
+            ])
+            ->where('target_user_id', $userId)
+            ->whereNull('parent_request_id')
+            ->orderBy('requested_at', 'desc');
+    }
+
+    private function applyRequestFilters($query, ?string $status, string $search)
+    {
+        if ($status !== null && $status !== '') {
+            $query->where('status', $status);
+        }
+
+        if ($search !== '') {
+            $query->where(function ($scope) use ($search): void {
+                $scope->where('requested_item_name', 'like', "%{$search}%")
+                    ->orWhereHas('item', fn ($item) => $item
+                        ->where('item_name', 'like', "%{$search}%")
+                        ->orWhere('inventory_item_no', 'like', "%{$search}%"))
+                    ->orWhereHas('requestedCategory', fn ($category) => $category
+                        ->where('category_name', 'like', "%{$search}%"));
+            });
+        }
+
+        return $query;
+    }
+
+    public function exportRequestsPdf(Request $request)
+    {
+        $user = Auth::user();
+        $validated = $request->validate([
+            'tab' => ['nullable', 'string', Rule::in(['my', 'incoming', 'all'])],
+            'status' => ['nullable', 'string', 'max:100'],
+            'search' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $tab = $validated['tab'] ?? 'all';
+        $status = $validated['status'] ?? null;
+        $search = strtolower(trim($validated['search'] ?? ''));
+
+        $myRequests = collect();
+        $incomingRequests = collect();
+        if (in_array($tab, ['my', 'all'], true)) {
+            $myRequests = $this->applyRequestFilters($this->myRequestsQuery($user->id), $status, $search)->get();
+        }
+        if (in_array($tab, ['incoming', 'all'], true)) {
+            $incomingRequests = $this->applyRequestFilters($this->incomingRequestsQuery($user->id), $status, $search)->get();
+        }
+
+        $requester = trim($user->first_name . ' ' . $user->last_name) ?: $user->username;
+        $filterSummary = 'Tab: ' . ($tab === 'my' ? 'My Requests' : ($tab === 'incoming' ? 'Incoming Requests' : 'All'))
+            . ($status ? "; Status: {$status}" : '')
+            . ($search !== '' ? "; Search: \"{$validated['search']}\"" : '');
+
+        $pdf = Pdf::loadView('pdfs.end-user-requests', [
+            'tab' => $tab,
+            'myRequests' => $myRequests,
+            'incomingRequests' => $incomingRequests,
+            'filterSummary' => $filterSummary,
+            'generatedAt' => now()->format('F j, Y g:i A'),
+            'requester' => $requester,
+        ]);
+
+        return $pdf->download('my-requests_' . now()->format('Y-m-d_His') . '.pdf');
     }
 
     /**
@@ -395,7 +463,24 @@ class EndUserController extends Controller
     {
         $user = Auth::user();
 
-        $inventoryAssignments = Inventory::query()
+        $activityRows = $this->buildAssignedActivityRows($user);
+
+        $endUsers = User::whereHas('role', function ($query) {
+            $query->where('role_name', 'End User');
+        })
+        ->whereKeyNot(Auth::id())
+        ->get();
+
+        return response()->json([
+            'title' => 'My Assigned Items',
+            'activityRows' => $activityRows,
+            'endUsers' => $endUsers,
+        ]);
+    }
+
+    private function inventoryAssignmentRows($user)
+    {
+        return Inventory::query()
             ->where('status', 'assigned')
             ->where('assigned_to_user_id', $user->id)
             ->where('quantity', '>', 0)
@@ -416,8 +501,11 @@ class EndUserController extends Controller
                     'request'   => $pendingReturnRequest,
                 ];
             })->toBase();
+    }
 
-        $assignmentRequests = AssignmentRequest::query()
+    private function userAssignmentRows($user)
+    {
+        return AssignmentRequest::query()
             ->with(['item:item_id,item_name,inventory_item_no', 'transaction'])
             ->where('target_user_id', $user->id)
             ->where('quantity', '>', 0)
@@ -443,10 +531,11 @@ class EndUserController extends Controller
                     'request'   => $request,
                 ];
             })->toBase();
+    }
 
-        $assignedItems = $inventoryAssignments->merge($assignmentRequests);
-
-        $requestedItems = AssignmentRequest::query()
+    private function requestedItemRows($user)
+    {
+        return AssignmentRequest::query()
             ->with(['item:item_id,item_name,inventory_item_no', 'targetUser.role'])
             ->where('user_id', $user->id)
             // Only items requisitioned from the Property Custodian (not outgoing transfers sent to colleagues)
@@ -473,15 +562,14 @@ class EndUserController extends Controller
                     'request'   => $request,
                 ];
             })->toBase();
+    }
 
-        $endUsers = User::whereHas('role', function ($query) {
-            $query->where('role_name', 'End User');
-        })
-        ->whereKeyNot(Auth::id())
-        ->get();
+    private function buildAssignedActivityRows($user)
+    {
+        $assignedItems = $this->inventoryAssignmentRows($user)->merge($this->userAssignmentRows($user));
 
-        $activityRows = $assignedItems
-            ->merge($requestedItems)
+        return $assignedItems
+            ->merge($this->requestedItemRows($user))
             ->groupBy(fn ($row) => $row['type'] . '|' . ($row['item_id'] ?? $row['item_name']))
             ->map(function ($group) {
                 return $group->sortByDesc(fn ($row) => $row['date'])->first();
@@ -489,12 +577,45 @@ class EndUserController extends Controller
             ->values()
             ->sortByDesc(fn ($row) => $row['date'])
             ->values();
+    }
 
-        return response()->json([
-            'title' => 'My Assigned Items',
-            'activityRows' => $activityRows,
-            'endUsers' => $endUsers,
+    public function exportAssignedItemsPdf(Request $request)
+    {
+        $user = Auth::user();
+        $validated = $request->validate([
+            'status' => ['nullable', 'string', 'max:100'],
+            'search' => ['nullable', 'string', 'max:100'],
         ]);
+
+        $status = $validated['status'] ?? null;
+        $search = strtolower(trim($validated['search'] ?? ''));
+
+        $rows = $this->buildAssignedActivityRows($user)->filter(function ($row) use ($status, $search): bool {
+            if ($status !== null && $status !== '' && ($row['status'] ?? null) !== $status) {
+                return false;
+            }
+            if ($search === '') {
+                return true;
+            }
+
+            return collect([$row['item_name'] ?? null, $row['type'] ?? null])
+                ->filter()
+                ->contains(fn ($value): bool => str_contains(strtolower((string) $value), $search));
+        })->values();
+
+        $holder = trim($user->first_name . ' ' . $user->last_name) ?: $user->username;
+        $filterSummary = 'Holder: ' . $holder
+            . ($status ? "; Status: {$status}" : '')
+            . ($search !== '' ? "; Search: \"{$validated['search']}\"" : '');
+
+        $pdf = Pdf::loadView('pdfs.end-user-assigned-items', [
+            'rows' => $rows,
+            'filterSummary' => $filterSummary,
+            'generatedAt' => now()->format('F j, Y g:i A'),
+            'holder' => $holder,
+        ]);
+
+        return $pdf->download('my-assigned-items_' . now()->format('Y-m-d_His') . '.pdf');
     }
 
     public function requestTransfer(Request $request)

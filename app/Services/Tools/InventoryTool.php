@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\AiCapabilityPolicy;
 use App\Services\Tools\Concerns\InteractsWithInventory;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 
 /**
  * Stock, availability, location and reporting facts.
@@ -189,7 +190,9 @@ class InventoryTool implements ToolContract
         $itemName = trim((string) ($request['item_name'] ?? ''));
         $locationQuery = trim((string) ($request['location_query'] ?? ''));
 
-        if (isset($request['inventory_id'])) {
+        if (is_array($request['inventory_ids'] ?? null)) {
+            $query->whereIn('item_id', $request['inventory_ids']);
+        } elseif (isset($request['inventory_id'])) {
             $query->whereKey((int) $request['inventory_id']);
         } elseif ($itemName !== '') {
             $query->whereRaw('LOWER(TRIM(item_name)) = ?', [mb_strtolower($itemName)]);
@@ -339,6 +342,10 @@ class InventoryTool implements ToolContract
 
     protected function itemStatus(array $request): array
     {
+        if (preg_match('/\b(?:condition|how old|age of|acquisition age|when was)\b/iu', (string) ($request['original_question'] ?? '')) === 1) {
+            return $this->conditionAndAge($request);
+        }
+
         $records = $this->inventoryRecordsForRequest($request, true);
         if ($this->hasNoMatchingItem($request, $records)) {
             return $this->result('not_found', $request['intent'], $request['capability']);
@@ -354,8 +361,42 @@ class InventoryTool implements ToolContract
             'quantity' => (int) $item->quantity,
             'unit' => $item->unit,
             'serial_number' => $item->serial_number,
+            'inventory_no' => $item->inventory_item_no,
+            'building' => $item->building,
+            'room' => $item->room,
         ])->all();
 
         return $this->result('success', $request['intent'], $request['capability'], ['status_items' => $items]);
+    }
+
+    protected function conditionAndAge(array $request): array
+    {
+        $records = is_array($request['inventory_ids'] ?? null)
+            ? Inventory::query()->whereIn('item_id', $request['inventory_ids'])->orderBy('item_id')->get()
+            : $this->inventoryRecordsForRequest($request, true);
+        if ($this->hasNoMatchingItem($request, $records)) {
+            return $this->result('not_found', $request['intent'], $request['capability']);
+        }
+        if ($this->needsRecordClarification($request, $records)) {
+            return $this->recordClarification($request, $records);
+        }
+
+        $today = Carbon::today();
+        $items = $records->take(25)->map(fn (Inventory $item): array => [
+            'item_name' => $item->item_name,
+            'status' => $item->status,
+            'acquired_on' => $item->date_acquired?->toDateString(),
+            'age_years' => $item->date_acquired?->diffInYears($today),
+            'lifespan_years' => $item->lifespan_years,
+            'expected_end_date' => $item->expected_end_date?->toDateString(),
+        ])->values()->all();
+
+        return $this->result('success', $request['intent'], $request['capability'], [
+            'condition_age_analytics' => [
+                'items' => $items,
+                'evidence' => 'Condition is represented by the persisted inventory status; age is calculated from date_acquired.',
+                'uncertainty' => 'No separate condition-inspection score or physical assessment is stored in inventory.',
+            ],
+        ]);
     }
 }

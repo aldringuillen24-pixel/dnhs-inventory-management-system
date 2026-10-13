@@ -38,13 +38,17 @@
                   :to="item.to"
                   :title="item.name"
                   :aria-label="item.name"
-                  class="menu-item group"
+                  class="menu-item group relative"
                   :class="isActive(item.to) ? 'menu-item-active' : 'menu-item-inactive'"
                 >
                   <span :class="isActive(item.to) ? 'menu-item-icon-active' : 'menu-item-icon-inactive'" v-html="icon(item.icon)" />
                   <span v-show="ui.isExpanded || ui.isMobileOpen" class="menu-item-text flex items-center gap-2">
                     {{ item.name }}
+                    <span v-if="badgeCount(item) > 0" class="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">
+                      {{ badgeCount(item) }}
+                    </span>
                   </span>
+                  <span v-if="!(ui.isExpanded || ui.isMobileOpen) && badgeCount(item) > 0" class="absolute right-3 top-3 h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
                 </RouterLink>
                 <a
                   v-else
@@ -75,14 +79,16 @@
 </template>
 
 <script setup>
-import { computed, watch } from 'vue';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
+import { useNavBadgeStore } from '../../stores/navBadge';
 import { ICONS, menuForRole } from '../../config/menu';
 
 const ui = useUiStore();
 const auth = useAuthStore();
+const navBadge = useNavBadgeStore();
 const route = useRoute();
 
 const logoUrl = '/images/logo/dnhs_school_logo.svg';
@@ -113,4 +119,17 @@ const activeNavPath = computed(() => {
 function isActive(path) {
   return activeNavPath.value === path;
 }
+
+function badgeCount(item) {
+  return item.badge === 'transaction' ? navBadge.count : 0;
+}
+
+onMounted(() => {
+  navBadge.fetch();
+  navBadge.startPolling();
+});
+
+onUnmounted(() => {
+  navBadge.stopPolling();
+});
 </script>

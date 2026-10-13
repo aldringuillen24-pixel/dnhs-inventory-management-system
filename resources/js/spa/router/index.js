@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { useNavBadgeStore } from '../stores/navBadge';
 import RoleLanding from '../views/RoleLanding.vue';
 import SignIn from '../views/auth/SignIn.vue';
 import Onboarding from '../views/auth/Onboarding.vue';
@@ -181,6 +182,10 @@ router.beforeEach(async (to) => {
     document.title = `${to.meta.title ?? 'App'} | Dian-ay Inventory`;
 
     return true;
+});
+
+router.afterEach(() => {
+    useNavBadgeStore().fetch();
 });
 
 export default router;

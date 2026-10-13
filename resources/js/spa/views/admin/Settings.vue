@@ -251,6 +251,58 @@
               </div>
             </div>
 
+            <div class="mt-4 border-t border-gray-100 pt-3.5 dark:border-white/5">
+              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Gemini key pool (max 5 active)</h3>
+              <p class="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">Quota-hit keys fail over automatically. Keys are stored encrypted and shown masked.</p>
+              <ul v-if="aiKeys.length" class="mt-2 space-y-1.5">
+                <li
+                  v-for="key in aiKeys"
+                  :key="key.id"
+                  class="flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50/60 px-2.5 py-1.5 text-xs dark:border-white/5 dark:bg-white/[0.03]"
+                >
+                  <span class="font-medium text-gray-800 dark:text-gray-200">{{ key.label }}</span>
+                  <span class="font-mono text-gray-500 dark:text-gray-400">{{ key.masked_key }}</span>
+                  <span
+                    class="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                    :class="key.is_active ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400'"
+                  >
+                    {{ key.is_active ? 'Active' : 'Off' }}
+                  </span>
+                  <span v-if="key.last_error" class="text-[11px] text-rose-600 dark:text-rose-400">{{ key.last_error }}</span>
+                  <span class="ml-auto inline-flex items-center gap-1.5">
+                    <button type="button" :disabled="keyWorking" class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" @click="pingKey(key.id)">Ping</button>
+                    <button type="button" :disabled="keyWorking" class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" @click="toggleKey(key)">{{ key.is_active ? 'Disable' : 'Enable' }}</button>
+                    <button type="button" :disabled="keyWorking" class="rounded border border-rose-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:bg-gray-800" @click="deleteKey(key.id)">Delete</button>
+                  </span>
+                </li>
+              </ul>
+              <p v-else class="mt-2 text-[11px] text-gray-400 dark:text-gray-500">No pooled keys — using the <span class="font-mono">GEMINI_API_KEY</span> env value.</p>
+              <div class="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  v-model="newKeyLabel"
+                  maxlength="30"
+                  placeholder="Label (e.g. key-1)"
+                  class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 sm:max-w-40"
+                />
+                <input
+                  v-model="newKeyValue"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="Paste Gemini API key (min 20 chars)"
+                  class="w-full flex-1 rounded-md border border-gray-200 px-3 py-1.5 font-mono text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                />
+                <button
+                  type="button"
+                  :disabled="keyWorking || !newKeyLabel.trim() || newKeyValue.length < 20"
+                  class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-emerald-600 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-500/40 dark:bg-gray-800 dark:text-emerald-300"
+                  @click="addKey"
+                >
+                  {{ keyWorking ? 'Saving…' : 'Add key' }}
+                </button>
+              </div>
+              <p v-if="keyMessage" class="mt-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">{{ keyMessage }}</p>
+            </div>
+
             <div class="mt-4 flex justify-end border-t border-gray-100 pt-3.5 dark:border-white/5">
               <button
                 type="submit"
@@ -289,6 +341,11 @@ const diagnostics = ref({});
 const inventoryForm = reactive({ low_stock_threshold: 5, default_lifespan_years: 5, return_due_days: 14, auto_reminder_days: 3 });
 const aiForm = reactive({ primary_model: '', fallback_model: '', max_history_messages: 6 });
 const formErrors = ref({});
+const aiKeys = ref([]);
+const newKeyLabel = ref('');
+const newKeyValue = ref('');
+const keyWorking = ref(false);
+const keyMessage = ref('');
 
 const activeTab = ref('diagnostics');
 
@@ -340,6 +397,7 @@ async function load(options = {}) {
       diagnostics.value = data.systemDiagnostics ?? {};
       Object.assign(inventoryForm, data.inventoryPolicy ?? {});
       Object.assign(aiForm, data.aiConfig ?? {});
+      aiKeys.value = data.aiKeys ?? [];
     },
     onStart: () => {
       error.value = '';
@@ -386,6 +444,69 @@ async function pingAi() {
     pingResult.value = requestError?.response?.data?.message ?? 'AI connectivity check failed.';
   } finally {
     pinging.value = false;
+  }
+}
+
+async function refreshKeys() {
+  const { data } = await api.get('/admin/settings/keys');
+  aiKeys.value = data.keys ?? [];
+}
+
+async function addKey() {
+  keyWorking.value = true;
+  keyMessage.value = '';
+  try {
+    await api.post('/admin/settings/keys', { label: newKeyLabel.value.trim(), key: newKeyValue.value });
+    newKeyLabel.value = '';
+    newKeyValue.value = '';
+    await refreshKeys();
+    keyMessage.value = 'Key saved.';
+  } catch (requestError) {
+    keyMessage.value = requestError?.response?.data?.message
+      ?? Object.values(requestError?.response?.data?.errors ?? {}).flat().join(' ')
+      ?? 'Could not save key.';
+  } finally {
+    keyWorking.value = false;
+  }
+}
+
+async function toggleKey(key) {
+  keyWorking.value = true;
+  keyMessage.value = '';
+  try {
+    await api.patch(`/admin/settings/keys/${key.id}`, { is_active: !key.is_active });
+    await refreshKeys();
+  } catch (requestError) {
+    keyMessage.value = requestError?.response?.data?.message ?? 'Could not update key.';
+  } finally {
+    keyWorking.value = false;
+  }
+}
+
+async function deleteKey(id) {
+  keyWorking.value = true;
+  keyMessage.value = '';
+  try {
+    await api.delete(`/admin/settings/keys/${id}`);
+    await refreshKeys();
+  } catch (requestError) {
+    keyMessage.value = requestError?.response?.data?.message ?? 'Could not delete key.';
+  } finally {
+    keyWorking.value = false;
+  }
+}
+
+async function pingKey(id) {
+  keyWorking.value = true;
+  keyMessage.value = '';
+  try {
+    const { data } = await api.post(`/admin/settings/keys/${id}/ping`);
+    keyMessage.value = data.message ?? (data.ok ? 'Key responded.' : 'Key did not respond.');
+    await refreshKeys();
+  } catch (requestError) {
+    keyMessage.value = requestError?.response?.data?.message ?? 'Key ping failed.';
+  } finally {
+    keyWorking.value = false;
   }
 }
 

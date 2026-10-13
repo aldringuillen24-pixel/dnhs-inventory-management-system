@@ -185,6 +185,7 @@ import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import api from '../../lib/axios';
 import { useAuthStore } from '../../stores/auth';
+import { useNavBadgeStore } from '../../stores/navBadge';
 import FieldError from '../../components/ui/feedback/FieldError.vue';
 
 const router = useRouter();
@@ -219,6 +220,7 @@ async function backToSignIn() {
     await api.post('/logout').catch(() => {});
   } finally {
     auth.clear();
+    useNavBadgeStore().clear();
     window.location.href = '/spa/signin';
   }
 }

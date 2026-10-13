@@ -123,6 +123,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { Eye, EyeOff, LockKeyhole, ShieldCheck, TriangleAlert, UserRound } from 'lucide';
 import api from '../../lib/axios';
 import { useAuthStore } from '../../stores/auth';
+import { useNavBadgeStore } from '../../stores/navBadge';
 import { useToastStore } from '../../stores/toast';
 import FieldError from '../../components/ui/feedback/FieldError.vue';
 import LucideIcon from '../../components/ui/data-display/LucideIcon.vue';
@@ -184,6 +185,7 @@ async function submit() {
     }
 
     auth.setPayload(data);
+    useNavBadgeStore().fetch();
 
     if (auth.onboardingRequired) {
       router.push({ name: 'onboarding' });

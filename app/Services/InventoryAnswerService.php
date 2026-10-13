@@ -7,6 +7,7 @@ use App\Models\Inventory;
 use App\Models\User;
 use App\Services\Response\LocalAnswerComposer;
 use App\Services\Tools\Concerns\InteractsWithInventory;
+use App\Services\Tools\CompoundPlanExecutor;
 use App\Services\Tools\ToolRouter;
 use Illuminate\Support\Str;
 
@@ -24,11 +25,15 @@ class InventoryAnswerService
 {
     use InteractsWithInventory;
 
+    protected ?CompoundPlanExecutor $compoundPlanExecutor;
+
     public function __construct(
         protected AiCapabilityPolicy $policy,
         protected ToolRouter $toolRouter,
         protected LocalAnswerComposer $localComposer,
+        ?CompoundPlanExecutor $compoundPlanExecutor = null,
     ) {
+        $this->compoundPlanExecutor = $compoundPlanExecutor;
     }
 
     /**
@@ -40,7 +45,31 @@ class InventoryAnswerService
      */
     public function answer(User $user, array $routedQuestion): array
     {
-        return $this->toolRouter->dispatch($user, $this->scopeToNamedCategory($user, $routedQuestion));
+        $request = $this->scopeToNamedCategory($user, $routedQuestion);
+        if (CompoundPlanExecutor::isMultiEvidenceQuestion($request)) {
+            $results = $this->multiEvidenceExecutor()->execute($user, [
+                'kind' => 'single',
+                'requests' => [$request],
+            ]);
+
+            if (count($results) > 1) {
+                return [
+                    'status' => 'success',
+                    'intent' => $request['intent'] ?? 'factual',
+                    'capability' => $request['capability'] ?? AiCapabilityPolicy::VIEW_MAINTENANCE,
+                    'answer' => ['compound_reply' => $this->mergeReplies($results, $user)],
+                    'explanation_data' => [],
+                    'retrieval_trace' => $results[0]['retrieval_trace'] ?? [],
+                ];
+            }
+        }
+
+        return $this->toolRouter->dispatch($user, $request);
+    }
+
+    private function multiEvidenceExecutor(): CompoundPlanExecutor
+    {
+        return $this->compoundPlanExecutor ??= app(CompoundPlanExecutor::class);
     }
 
     /**
@@ -986,6 +1015,41 @@ public function clarificationReply(User $user, array $pending): string
             . '. Which one do you mean? Please specify the category, serial number, or inventory ID.';
     }
 
+    /**
+     * Render a read-only scenario projection: header, verdict, math,
+     * disclaimer — in that order, and nothing else.
+     *
+     * The header is built once in the tool and rendered here verbatim, so
+     * every type shares one Assuming line from one layer. The verdict leads
+     * the body with the headline integer; the detail carries only the
+     * comparator math behind it, and zero-valued excess or shortfall
+     * clauses are already omitted upstream. The disclaimer closes every
+     * reply identically, and every projected line stays in the conditional
+     * mood ("if … were …") so a hypothetical can never read as an action
+     * taken, an order placed, or a recorded fact. This is the hypotheticals
+     * extension of the forbidden-claim rule: scenario replies are
+     * local-only templates, so no provider wording can smuggle an acted
+     * claim in.
+     *
+     * @param  array<string, mixed>  $projection
+     */
+    private function formatScenarioProjection(array $projection): string
+    {
+        $lines = [];
+        if (is_string($projection['header'] ?? null) && trim($projection['header']) !== '') {
+            $lines[] = trim($projection['header']);
+        }
+        if (is_string($projection['verdict'] ?? null) && trim($projection['verdict']) !== '') {
+            $lines[] = trim($projection['verdict']);
+        }
+        if (is_string($projection['detail'] ?? null) && trim($projection['detail']) !== '') {
+            $lines[] = trim($projection['detail']);
+        }
+        $lines[] = 'Projection only — no stock was changed.';
+
+        return implode("\n", $lines);
+    }
+
     public function localReply(array $result, ?User $user = null): string
     {
         if (($result['status'] ?? null) === 'clarification') {
@@ -1010,7 +1074,17 @@ public function clarificationReply(User $user, array $pending): string
             return $this->policy->assistantHelpText($user);
         }
         if (($result['status'] ?? null) === 'insufficient_data') {
+            $missing = $result['answer']['missing_evidence'] ?? null;
+            if (is_array($missing) && $missing !== []) {
+                return 'Insufficient evidence: '.implode(' ', array_filter($missing, 'is_string'));
+            }
+
             return 'There is not enough inventory data to answer that question yet.';
+        }
+        if (($result['status'] ?? null) === 'invalid_request') {
+            return is_string($result['answer']['message'] ?? null)
+                ? $result['answer']['message']
+                : 'The request could not be safely routed.';
         }
         if (($result['status'] ?? null) === 'not_found') {
             return ! empty($result['answer']['location_query'])
@@ -1019,6 +1093,84 @@ public function clarificationReply(User $user, array $pending): string
         }
 
         $answer = $result['answer'] ?? [];
+        if (is_string($answer['scenario_refusal'] ?? null)) {
+            return $answer['scenario_refusal'];
+        }
+        if (isset($answer['scenario_projection']) && is_array($answer['scenario_projection'])) {
+            return $this->formatScenarioProjection($answer['scenario_projection']);
+        }
+        if (is_string($answer['compound_reply'] ?? null)) {
+            return $answer['compound_reply'];
+        }
+        if (isset($answer['maintenance_analytics']) && is_array($answer['maintenance_analytics'])) {
+            return $this->formatMaintenanceAnalytics($answer['maintenance_analytics']);
+        }
+        if (isset($answer['stock_out_analytics']) && is_array($answer['stock_out_analytics'])) {
+            $analytics = $answer['stock_out_analytics'];
+            $period = $analytics['period'] ?? [];
+            $summary = sprintf(
+                'Recorded stock-outs from %s to %s: %d movements, %d units.',
+                $period['start'] ?? 'unknown',
+                $period['end'] ?? 'unknown',
+                (int) ($analytics['movement_count'] ?? 0),
+                (int) ($analytics['quantity'] ?? 0),
+            );
+            foreach ($analytics['monthly'] ?? [] as $month) {
+                $summary .= sprintf(
+                    "\n- %s: %d movements, %d units",
+                    $month['month'],
+                    (int) $month['movement_count'],
+                    (int) $month['quantity'],
+                );
+            }
+
+            return $summary."\n".$analytics['uncertainty'];
+        }
+        if (isset($answer['condition_age_analytics']) && is_array($answer['condition_age_analytics'])) {
+            $analytics = $answer['condition_age_analytics'];
+            $lines = collect($analytics['items'] ?? [])->map(function (array $item): string {
+                $age = is_numeric($item['age_years'] ?? null)
+                    ? $item['age_years'].' years old'
+                    : 'age not recorded';
+                $lifespan = is_numeric($item['lifespan_years'] ?? null)
+                    ? '; expected lifespan '.$item['lifespan_years'].' years'
+                    : '; expected lifespan not recorded';
+
+                return sprintf(
+                    '- %s: status %s; %s%s.',
+                    $item['item_name'],
+                    $item['status'],
+                    $age,
+                    $lifespan,
+                );
+            })->implode("\n");
+
+            return ($lines === '' ? 'No matching inventory records were found.' : $lines)
+                ."\n".$analytics['evidence']
+                ."\n".$analytics['uncertainty'];
+        }
+        if (isset($answer['recurring_equipment_summary']) && is_array($answer['recurring_equipment_summary'])) {
+            $summary = $answer['recurring_equipment_summary'];
+            $items = collect($summary['items'] ?? [])->map(function (array $item): string {
+                $location = implode(', ', array_filter([
+                    $item['building'] ?? null,
+                    $item['room'] ?? null,
+                ], fn ($value): bool => is_string($value) && trim($value) !== ''));
+                $location = $location === '' ? 'location not recorded' : $location;
+
+                return sprintf(
+                    '- %s (Inventory ID %d) at %s: %d recorded maintenance entries',
+                    $item['item_name'] ?? 'Item',
+                    (int) ($item['inventory_id'] ?? 0),
+                    $location,
+                    (int) ($item['record_count'] ?? 0),
+                );
+            })->implode("\n");
+
+            return ($items === '' ? 'No item has two or more maintenance entries in the retrieved records.' : $items)
+                ."\n".$summary['evidence_basis']
+                ."\n".$summary['uncertainty'];
+        }
         if (isset($answer['registered_users'], $answer['inventory_records'], $answer['transactions_logged'])) {
             return sprintf(
                 'System summary: %d registered %s, %d inventory %s, and %d logged %s.',
@@ -1051,6 +1203,38 @@ public function clarificationReply(User $user, array $pending): string
                 );
             })->implode("\n");
         }
+        if (isset($answer['ledger_summary']) && is_array($answer['ledger_summary'])) {
+            $summary = $answer['ledger_summary'];
+            $counts = collect($summary['movement_counts'] ?? [])
+                ->filter(fn ($row): bool => is_array($row) && isset($row['movement_type']))
+                ->map(fn (array $row): string => sprintf(
+                    '%s: %d',
+                    str_replace('_', ' ', (string) $row['movement_type']),
+                    (int) ($row['movement_count'] ?? 0)
+                ))->values();
+            $latest = collect($summary['latest_movements'] ?? [])
+                ->filter(fn ($row): bool => is_array($row))
+                ->map(fn (array $movement): string => '- ' . implode('; ', array_filter([
+                    $movement['item_name'] ?? 'Item',
+                    isset($movement['movement_type']) ? str_replace('_', ' ', (string) $movement['movement_type']) : null,
+                    isset($movement['quantity']) ? 'Quantity: ' . $movement['quantity'] : null,
+                    isset($movement['date']) ? 'Date: ' . $movement['date'] : null,
+                    isset($movement['actor']) ? 'By: ' . $movement['actor'] : null,
+                ])))->values();
+
+            if ($counts->isEmpty() && $latest->isEmpty()) {
+                return 'No stock movements recorded.';
+            }
+
+            $lines = 'Stock movement summary'
+                . ($counts->isNotEmpty() ? ' (' . $counts->implode('; ') . ')' : '')
+                . '.';
+            if ($latest->isNotEmpty()) {
+                $lines .= "\nLatest 5 movements:\n" . $latest->implode("\n");
+            }
+
+            return $lines;
+        }
         foreach ([
             'status_items' => 'Inventory status',
             'assignment_records' => 'Assignment',
@@ -1058,18 +1242,29 @@ public function clarificationReply(User $user, array $pending): string
             'disposal_records' => 'Disposal',
             'ready_to_dispose_items' => 'Ready for disposal',
             'purchase_history' => 'Stock-in',
+            'transfer_records' => 'Transfer',
+            'return_records' => 'Return',
+            'pending_requests' => 'Pending request',
+            'requests' => 'Request',
         ] as $key => $label) {
             if (isset($answer[$key])) {
                 if ($answer[$key] === []) {
                     return 'No matching inventory records were found.';
                 }
 
-                return collect($answer[$key])->map(function (array $record) use ($label): string {
+                $lines = collect($answer[$key])->map(function (array $record) use ($label): string {
                     $parts = array_filter([
                         $record['item_name'] ?? null,
                         isset($record['inventory_id']) ? 'Inventory ID ' . $record['inventory_id'] : null,
+                        isset($record['inventory_no']) ? 'Asset Tag: ' . $record['inventory_no'] : null,
+                        isset($record['building']) ? 'Building: ' . $record['building'] : null,
+                        isset($record['room']) ? 'Room: ' . $record['room'] : null,
+                        isset($record['serial_number']) ? 'Serial: ' . $record['serial_number'] : null,
                         isset($record['status']) ? 'Status: ' . $record['status'] : null,
                         isset($record['assigned_to']) ? 'Assigned to: ' . $record['assigned_to'] : null,
+                        isset($record['requester']) ? 'Requester: ' . $record['requester'] : null,
+                        isset($record['from']) ? 'From: ' . $record['from'] : null,
+                        isset($record['to']) ? 'To: ' . $record['to'] : null,
                         isset($record['quantity']) ? 'Quantity: ' . $record['quantity'] . ' ' . ($record['unit'] ?? 'units') : null,
                         isset($record['date']) ? 'Date: ' . $record['date'] : null,
                         isset($record['issue']) ? 'Issue: ' . $record['issue'] : null,
@@ -1078,6 +1273,14 @@ public function clarificationReply(User $user, array $pending): string
 
                     return '- ' . $label . ': ' . implode('; ', $parts);
                 })->implode("\n");
+
+                // Record lists are capped at the 25 latest: say so rather
+                // than letting the list read as the complete set.
+                if (in_array($key, ['assignment_records', 'transfer_records', 'return_records'], true) && count($answer[$key]) === 25) {
+                    $lines .= "\nShowing the latest 25 records.";
+                }
+
+                return $lines;
             }
         }
         if (isset($answer['available_count'])) {
@@ -1265,6 +1468,13 @@ public function mergeReplies(array $results, ?User $user = null): string
             return null;
         }
 
+        if (($result['intent'] ?? null) === 'forecast' || ($subRequest['label'] ?? null) === 'Forecast') {
+            return 'Forecast';
+        }
+        if (is_string($subRequest['label'] ?? null)) {
+            return $subRequest['label'];
+        }
+
         foreach (['item_name', 'location_query'] as $key) {
             $value = $subRequest[$key] ?? null;
             if (is_string($value) && trim($value) !== '') {
@@ -1277,6 +1487,89 @@ public function mergeReplies(array $results, ?User $user = null): string
         }
 
         return null;
+    }
+
+    /**
+     * Render aggregated maintenance evidence and state where the data is limited.
+     *
+     * @param  array<string, mixed>  $analytics
+     */
+    private function formatMaintenanceAnalytics(array $analytics): string
+    {
+        $type = $analytics['type'] ?? null;
+        if ($type === 'repair_decision') {
+            $lines = collect($analytics['items'] ?? [])->map(function (array $item): string {
+                $ratio = is_numeric($item['repair_to_unit_cost_ratio'] ?? null)
+                    ? ' (repair cost is '.number_format((float) $item['repair_to_unit_cost_ratio'] * 100, 0).'% of recorded unit cost)'
+                    : ' (cost comparison unavailable)';
+
+                return '- '.$item['item_name'].': '.str_replace('_', ' ', $item['decision']).$ratio
+                    .'; status '.$item['status']
+                    .'; age '.($item['age_years'] ?? 'unknown').' years'
+                    .'; recorded repairs '.(int) $item['maintenance_count']
+                    .'; known repair cost $'.number_format((float) $item['known_repair_cost_total'], 2)
+                    .'. '.implode(' ', $item['caveats'] ?? []);
+            })->implode("\n");
+
+            return ($lines === '' ? 'No matching inventory records were found.' : $lines)
+                ."\n".$analytics['criteria'];
+        }
+
+        $period = $analytics['period'] ?? [];
+        if ($type === 'cost_summary') {
+            $lines = collect($analytics['items'] ?? [])->map(fn (array $item): string => sprintf(
+                '- %s: %d maintenance records; recorded cost total %.2f; %d records missing a cost',
+                $item['item_name'],
+                (int) $item['record_count'],
+                (float) $item['known_cost_total'],
+                (int) $item['missing_cost_count'],
+            ))->implode("\n");
+
+            return sprintf(
+                'Recorded maintenance costs from %s to %s (%d records):',
+                $period['start'] ?? 'unknown',
+                $period['end'] ?? 'unknown',
+                (int) ($analytics['record_count'] ?? 0),
+            )."\n".($lines === '' ? 'No records found.' : $lines)
+                ."\n".$analytics['uncertainty'];
+        }
+        if ($type === 'location_frequency') {
+            $lines = collect($analytics['locations'] ?? [])->map(fn (array $location): string => sprintf(
+                '- %s, %s: %d recorded maintenance issues',
+                $location['building'],
+                $location['room'],
+                (int) $location['issue_count'],
+            ))->implode("\n");
+
+            return sprintf(
+                'Maintenance issue counts from %s to %s (%d records):',
+                $period['start'] ?? 'unknown',
+                $period['end'] ?? 'unknown',
+                (int) ($analytics['record_count'] ?? 0),
+            )."\n".($lines === '' ? 'No records found.' : $lines)
+                ."\n".$analytics['uncertainty'];
+        }
+
+        $items = collect($analytics['items'] ?? [])->map(fn (array $item): string => sprintf(
+            '- %s: %d maintenance records; last recorded %s',
+            $item['item_name'],
+            (int) $item['issue_count'],
+            $item['last_issue_date'] ?? 'date unknown',
+        ))->implode("\n");
+        $problems = collect($analytics['recurring_problems'] ?? [])->map(fn (array $problem): string => sprintf(
+            '- %s: %d records',
+            $problem['problem'],
+            (int) $problem['occurrences'],
+        ))->implode("\n");
+
+        return sprintf(
+            'Maintenance records from %s to %s (%d total):',
+            $period['start'] ?? 'unknown',
+            $period['end'] ?? 'unknown',
+            (int) ($analytics['record_count'] ?? 0),
+        )."\n".($items === '' ? 'No repeated item records found.' : $items)
+            .($problems === '' ? '' : "\nRecognized recurring issue terms (categories may overlap):\n".$problems)
+            ."\n".$analytics['uncertainty'];
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AiApiKey;
 use App\Models\Inventory;
 use App\Models\User;
 use App\Models\UserAuditLog;
@@ -10,6 +11,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 
 class AdminSettingsController extends Controller
 {
@@ -37,7 +40,7 @@ class AdminSettingsController extends Controller
             'cacheDriver'       => config('cache.default'),
             'sessionLifetime'   => config('session.lifetime'),
             'queueDriver'       => config('queue.default'),
-            'geminiKeySet'      => !empty(config('services.gemini.api_key')),
+            'geminiKeySet'      => $this->geminiKeySet(),
             'activeAiModel'     => config('services.gemini.model', 'gemini-3.1-flash-lite'),
             'totalAuditLogs'    => UserAuditLog::count(),
             'totalUsers'        => User::count(),
@@ -72,8 +75,59 @@ class AdminSettingsController extends Controller
             'systemDiagnostics',
             'inventoryPolicy',
             'securityPolicy',
-            'aiConfig'
-        ));
+            'aiConfig',
+        ) + ['aiKeys' => $this->maskedKeys()]);
+    }
+
+    /**
+     * Pool holds keys when migrated; env GEMINI_API_KEY seeds otherwise.
+     */
+    private function geminiKeySet(): bool
+    {
+        if (! empty(config('services.gemini.api_key'))) {
+            return true;
+        }
+
+        try {
+            return Schema::hasTable('ai_api_keys')
+                && AiApiKey::query()->where('is_active', true)->exists();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function maskedKeys(): array
+    {
+        try {
+            if (! Schema::hasTable('ai_api_keys')) {
+                return [];
+            }
+
+            return AiApiKey::query()->orderBy('priority')->orderBy('id')
+                ->get()->map(fn (AiApiKey $key): array => $key->toMaskedArray())->all();
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * @throws ValidationException when the 5-active-key cap is reached.
+     */
+    private function ensureKeyCapacity(?int $ignoreId = null): void
+    {
+        $active = AiApiKey::query()->where('is_active', true);
+        if ($ignoreId !== null) {
+            $active->where('id', '!=', $ignoreId);
+        }
+
+        if ($active->count() >= AiApiKey::MAX_ACTIVE) {
+            throw ValidationException::withMessages([
+                'key' => ['At most '.AiApiKey::MAX_ACTIVE.' active API keys are allowed. Deactivate or remove one first.'],
+            ]);
+        }
     }
 
     public function update(Request $request)
@@ -184,5 +238,74 @@ class AdminSettingsController extends Controller
                 'message' => 'Connection failed: ' . $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Masked key-pool list. Full key material is never returned.
+     */
+    public function keys(): JsonResponse
+    {
+        return response()->json(['keys' => $this->maskedKeys()]);
+    }
+
+    public function storeKey(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'label' => ['required', 'string', 'max:30'],
+            'key' => ['required', 'string', 'min:20', 'max:500'],
+            'priority' => ['nullable', 'integer', 'min:0', 'max:1000'],
+        ]);
+
+        $this->ensureKeyCapacity();
+
+        $record = AiApiKey::create([
+            'label' => $validated['label'],
+            'key_encrypted' => AiApiKey::encryptKey($validated['key']),
+            'is_active' => true,
+            'priority' => $validated['priority'] ?? 0,
+        ]);
+
+        return response()->json(['key' => $record->toMaskedArray()], 201);
+    }
+
+    public function updateKey(Request $request, AiApiKey $key): JsonResponse
+    {
+        $validated = $request->validate([
+            'label' => ['sometimes', 'string', 'max:30'],
+            'is_active' => ['sometimes', 'boolean'],
+            'priority' => ['sometimes', 'integer', 'min:0', 'max:1000'],
+        ]);
+
+        if (($validated['is_active'] ?? $key->is_active) && ! $key->is_active) {
+            $this->ensureKeyCapacity($key->id);
+        }
+
+        $key->fill($validated);
+        $key->save();
+
+        return response()->json(['key' => $key->fresh()->toMaskedArray()]);
+    }
+
+    public function destroyKey(AiApiKey $key): JsonResponse
+    {
+        $key->delete();
+
+        return response()->json(['deleted' => true]);
+    }
+
+    /**
+     * 8-token probe against one pooled key only.
+     */
+    public function pingKey(AiApiKey $key, GeminiApiService $geminiApi): JsonResponse
+    {
+        $ok = $geminiApi->probe($key);
+
+        return response()->json([
+            'ok' => $ok,
+            'message' => $ok
+                ? "Key '{$key->label}' responded successfully."
+                : "Key '{$key->label}' did not respond. Check the key, quota, and model access.",
+            'key' => $key->fresh()->toMaskedArray(),
+        ]);
     }
 }

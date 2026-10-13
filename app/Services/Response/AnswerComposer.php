@@ -45,6 +45,10 @@ class AnswerComposer
         AiCapabilityPolicy::VIEW_READY_TO_DISPOSE,
         AiCapabilityPolicy::VIEW_INVENTORY_LOCATION,
         AiCapabilityPolicy::VIEW_PURCHASE_HISTORY,
+        AiCapabilityPolicy::VIEW_TRANSFER_HISTORY,
+        AiCapabilityPolicy::VIEW_RETURN_HISTORY,
+        AiCapabilityPolicy::VIEW_LEDGER_SUMMARY,
+        AiCapabilityPolicy::VIEW_SCENARIO,
     ];
 
     /**
@@ -57,6 +61,296 @@ class AnswerComposer
      * never saw.
      */
     private const MAX_GENERATED_ROWS = 25;
+
+    private const INVENTORY_FACT_FIELDS = [
+        'item_name' => true,
+        'quantity' => true,
+        'available_quantity' => true,
+        'assigned_quantity' => true,
+        'unit' => true,
+        'stock_status' => true,
+        'statuses' => true,
+        'calculated_at' => true,
+        'discrepancies' => true,
+    ];
+
+    /**
+     * Only the capability's answer fields cross the Gemini boundary.
+     *
+     * Nested array values describe allowed record fields; `true` allows only a
+     * scalar or a flat list of scalars. Anything not listed is dropped.
+     */
+    private const GEMINI_FACT_FIELDS = [
+        AiCapabilityPolicy::VIEW_OWN_ASSIGNMENTS => [
+            'assigned_items' => [
+                'item_name' => true,
+                'quantity' => true,
+                'unit' => true,
+                'status' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+                'calculated_at' => true,
+                'discrepancies' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_OWN_REQUESTS => [
+            'pending_count' => true,
+            'requests' => [
+                'item_name' => true,
+                'quantity' => true,
+                'unit' => true,
+                'status' => true,
+                'requested_at' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_WAREHOUSE_AVAILABILITY => [
+            'available_count' => true,
+            'item_types' => true,
+            'item_name' => true,
+            'unit' => true,
+            'quantity' => true,
+            'available_quantity' => true,
+            'assigned_quantity' => true,
+            'stock_status' => true,
+            'calculated_at' => true,
+            'discrepancies' => true,
+            'items' => self::INVENTORY_FACT_FIELDS,
+            'item_details' => self::INVENTORY_FACT_FIELDS,
+        ],
+        AiCapabilityPolicy::VIEW_INVENTORY_STOCK => [
+            'available_count' => true,
+            'item_types' => true,
+            'item_name' => true,
+            'unit' => true,
+            'quantity' => true,
+            'available_quantity' => true,
+            'assigned_quantity' => true,
+            'stock_status' => true,
+            'calculated_at' => true,
+            'discrepancies' => true,
+            'items' => self::INVENTORY_FACT_FIELDS,
+            'item_details' => self::INVENTORY_FACT_FIELDS,
+            'inventory_identifiers' => [
+                'item_name' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+                'serial_number' => true,
+            ],
+            'product_names' => true,
+        ],
+        AiCapabilityPolicy::VIEW_INVENTORY_LOCATION => [
+            'location_items' => [
+                'item_name' => true,
+                'building' => true,
+                'room' => true,
+                'status' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_PENDING_REQUESTS => [
+            'pending_count' => true,
+            // requester is a display name only; emails, ids and notes stay out.
+            'pending_requests' => [
+                'item_name' => true,
+                'quantity' => true,
+                'unit' => true,
+                'status' => true,
+                'requester' => true,
+                'requested_at' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_LOW_STOCK => [
+            'low_stock_count' => true,
+            'items' => self::INVENTORY_FACT_FIELDS,
+            'item_details' => self::INVENTORY_FACT_FIELDS,
+        ],
+        AiCapabilityPolicy::VIEW_EXECUTIVE_REPORTS => [
+            'total_items' => true,
+            'available_items' => true,
+            'assigned_items' => true,
+            'calculated_at' => true,
+            'discrepancies' => true,
+        ],
+        AiCapabilityPolicy::VIEW_SYSTEM_SUMMARY => [
+            'registered_users' => true,
+            'inventory_records' => true,
+            'transactions_logged' => true,
+        ],
+        AiCapabilityPolicy::VIEW_INVENTORY_VALUATION => [
+            'items' => [
+                'item_name' => true,
+                'quantity' => true,
+                'unit' => true,
+                'unit_cost' => true,
+                'total_value' => true,
+            ],
+            'valuation_metric' => true,
+        ],
+        AiCapabilityPolicy::VIEW_ASSIGNMENTS => [
+            'assignment_records' => [
+                'item_name' => true,
+                'quantity' => true,
+                'unit' => true,
+                'status' => true,
+                'date' => true,
+                'assigned_to' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+                'serial_number' => true,
+                'building' => true,
+                'room' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_MAINTENANCE => [
+            // repair_notes stay out: free-form technician remarks, not facts.
+            // The short issue statement crosses; analytics untouched.
+            'maintenance_records' => [
+                'item_name' => true,
+                'status' => true,
+                'date' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+                'issue' => true,
+            ],
+            'maintenance_analytics' => [
+                'type' => true,
+                'period' => ['start' => true, 'end' => true],
+                'record_count' => true,
+                'locations' => ['building' => true, 'room' => true, 'issue_count' => true],
+                'items' => [
+                    'item_name' => true,
+                    'issue_count' => true,
+                    'last_issue_date' => true,
+                    'record_count' => true,
+                    'known_cost_total' => true,
+                    'missing_cost_count' => true,
+                    'status' => true,
+                    'acquired_on' => true,
+                    'age_years' => true,
+                    'lifespan_years' => true,
+                    'maintenance_count' => true,
+                    'known_repair_cost_total' => true,
+                    'missing_repair_cost_count' => true,
+                    'recorded_unit_cost_proxy' => true,
+                    'repair_to_unit_cost_ratio' => true,
+                    'decision' => true,
+                    'caveats' => true,
+                ],
+                'recurring_problems' => ['problem' => true, 'occurrences' => true],
+                'uncertainty' => true,
+                'criteria' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_DISPOSAL => [
+            'disposal_count' => true,
+            // Movement notes stay out: they are free-form operational remarks,
+            // not short formal disposal reasons. Status + date carry the why.
+            'disposal_records' => [
+                'item_name' => true,
+                'status' => true,
+                'quantity' => true,
+                'unit' => true,
+                'date' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_READY_TO_DISPOSE => [
+            'ready_to_dispose_items' => [
+                'item_name' => true,
+                'status' => true,
+                'quantity' => true,
+                'unit' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_PURCHASE_HISTORY => [
+            'purchase_history' => [
+                'item_name' => true,
+                'quantity' => true,
+                'unit' => true,
+                'date' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+            ],
+            'stock_out_analytics' => [
+                'period' => ['start' => true, 'end' => true],
+                'movement_count' => true,
+                'quantity' => true,
+                'monthly' => ['month' => true, 'movement_count' => true, 'quantity' => true],
+                'evidence' => true,
+                'uncertainty' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_TRANSFER_HISTORY => [
+            // Party names are display names only; notes, contacts and ids stay out.
+            'transfer_records' => [
+                'item_name' => true,
+                'quantity' => true,
+                'unit' => true,
+                'date' => true,
+                'from' => true,
+                'to' => true,
+                'status' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_RETURN_HISTORY => [
+            'return_records' => [
+                'item_name' => true,
+                'quantity' => true,
+                'unit' => true,
+                'date' => true,
+                'from' => true,
+                'to' => true,
+                'status' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_LEDGER_SUMMARY => [
+            // Summary only: per-type counts plus the latest five redacted
+            // movements. Notes and movement details never cross.
+            'ledger_summary' => [
+                'movement_counts' => [
+                    'movement_type' => true,
+                    'movement_count' => true,
+                ],
+                'latest_movements' => [
+                    'item_name' => true,
+                    'movement_type' => true,
+                    'quantity' => true,
+                    'date' => true,
+                    'actor' => true,
+                ],
+            ],
+        ],
+        AiCapabilityPolicy::VIEW_ITEM_STATUS => [
+            'status_items' => [
+                'item_name' => true,
+                'status' => true,
+                'quantity' => true,
+                'unit' => true,
+                'inventory_id' => true,
+                'inventory_no' => true,
+                'building' => true,
+                'room' => true,
+            ],
+            'condition_age_analytics' => [
+                'items' => [
+                    'item_name' => true,
+                    'status' => true,
+                    'acquired_on' => true,
+                    'age_years' => true,
+                    'lifespan_years' => true,
+                    'expected_end_date' => true,
+                ],
+                'evidence' => true,
+                'uncertainty' => true,
+            ],
+        ],
+    ];
 
     public function __construct(private GeminiApiService $geminiApi)
     {
@@ -88,7 +382,12 @@ class AnswerComposer
             return $fallback;
         }
 
-        $packet = $this->rowCap($facts);
+        $fieldAllowlist = self::GEMINI_FACT_FIELDS[$capability] ?? null;
+        if ($fieldAllowlist === null) {
+            return $fallback;
+        }
+
+        $packet = $this->rowCap($this->filterAllowedFields($facts, $fieldAllowlist));
 
         try {
             $reply = $this->geminiApi->generate(
@@ -111,6 +410,57 @@ class AnswerComposer
         return $this->isGroundedReply($reply, $packet, $mode)
             ? trim($reply)
             : $fallback;
+    }
+
+    /**
+     * Filter an answer packet by its capability's response schema.
+     *
+     * @param  array<string, mixed>  $facts
+     * @param  array<string, mixed>  $fieldAllowlist
+     * @return array<string, mixed>
+     */
+    private function filterAllowedFields(array $facts, array $fieldAllowlist): array
+    {
+        $filtered = [];
+
+        foreach ($fieldAllowlist as $field => $nestedAllowlist) {
+            if (! array_key_exists($field, $facts)) {
+                continue;
+            }
+
+            $value = $facts[$field];
+            if ($nestedAllowlist === true) {
+                if (is_array($value)) {
+                    if (! array_is_list($value)) {
+                        continue;
+                    }
+
+                    $scalars = array_values(array_filter($value, 'is_scalar'));
+                    if ($scalars !== [] || $value === []) {
+                        $filtered[$field] = $scalars;
+                    }
+                } elseif (is_scalar($value)) {
+                    $filtered[$field] = $value;
+                }
+
+                continue;
+            }
+
+            if (! is_array($value)) {
+                continue;
+            }
+
+            if (array_is_list($value)) {
+                $filtered[$field] = array_values(array_map(
+                    fn (array $record): array => $this->filterAllowedFields($record, $nestedAllowlist),
+                    array_filter($value, 'is_array'),
+                ));
+            } else {
+                $filtered[$field] = $this->filterAllowedFields($value, $nestedAllowlist);
+            }
+        }
+
+        return $filtered;
     }
 
     /**

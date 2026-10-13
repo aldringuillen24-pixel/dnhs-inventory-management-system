@@ -68,6 +68,7 @@ class ConversationContextSelector
             'candidate_ids' => $candidateIds,
             'candidate_names' => $this->namesFor($candidateIds),
             'topic' => $this->safeTopic($topic),
+            'last_resolved' => $this->safeLastResolved($lastResolved),
         ];
 
         return $this->enforceBudget($payload);
@@ -162,12 +163,19 @@ class ConversationContextSelector
 
         usort($scored, fn (array $a, array $b): int => $b['score'] <=> $a['score']);
 
-        return array_map(fn (array $entry): array => [
-            'question' => $this->clip($entry['turn']['question'] ?? null),
-            'reply' => $this->clip($entry['turn']['reply'] ?? null),
-            'entity_refs' => $entry['turn']['entity_refs'] ?? [],
-            'item_name' => $this->clip($entry['turn']['item_name'] ?? null),
-        ], array_slice($scored, 0, self::RELEVANT_TURNS));
+        return array_map(function (array $entry): array {
+            $rememberedIds = $this->cleanIds($entry['turn']['entity_refs'] ?? []);
+            $entityRefs = $this->currentInventoryIds($rememberedIds);
+
+            return [
+                'question' => $this->clip($entry['turn']['question'] ?? null),
+                'reply' => $this->clip($entry['turn']['reply'] ?? null),
+                'entity_refs' => $entityRefs,
+                'item_name' => $rememberedIds !== [] && $entityRefs === []
+                    ? null
+                    : $this->clip($entry['turn']['item_name'] ?? null),
+            ];
+        }, array_slice($scored, 0, self::RELEVANT_TURNS));
     }
 
     /**
@@ -295,7 +303,7 @@ class ConversationContextSelector
      */
     private function entityRegistry(User $user, string $sessionId): array
     {
-        return $this->turnLog->entityRegistry($user, $sessionId);
+        return $this->currentInventoryIds($this->turnLog->entityRegistry($user, $sessionId));
     }
 
     /**
@@ -309,11 +317,107 @@ class ConversationContextSelector
             $ids = $this->cleanIds($lastResolved['candidate_ids'] ?? []);
         }
 
-        return $ids;
+        return $this->currentInventoryIds($ids);
     }
 
     private function summary(User $user, string $sessionId): string
     {
         return $this->turnLog->summary($user, $sessionId);
+    }
+
+    /**
+     * Limit remembered ids and names to inventory rows that still exist.
+     *
+     * The ids remain references only; a later answer must still go through the
+     * current capability gate and retrieve current tool facts.
+     *
+     * @param  array<int, int>  $ids
+     * @return array<int, int>
+     */
+    private function currentInventoryIds(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $existing = Inventory::query()
+            ->whereIn('item_id', $ids)
+            ->pluck('item_id')
+            ->map(fn ($id): int => (int) $id)
+            ->flip();
+
+        return array_values(array_filter($ids, fn (int $id): bool => $existing->has($id)));
+    }
+
+    /**
+     * Only structured, bounded selectors are sent from durable memory.
+     *
+     * @param  array<string, mixed>|null  $lastResolved
+     * @return array<string, mixed>
+     */
+    private function safeLastResolved(?array $lastResolved): array
+    {
+        if ($lastResolved === null) {
+            return [];
+        }
+
+        $rememberedInventoryId = is_int($lastResolved['inventory_id'] ?? null)
+            ? $lastResolved['inventory_id']
+            : null;
+        $currentInventoryId = $rememberedInventoryId !== null
+            && in_array($rememberedInventoryId, $this->currentInventoryIds([$rememberedInventoryId]), true)
+            ? $rememberedInventoryId
+            : null;
+        $hasStaleInventoryReference = $rememberedInventoryId !== null && $currentInventoryId === null;
+
+        $safe = [];
+        foreach ([
+            'topic_action' => 32,
+            'intent' => 64,
+            'capability' => 64,
+            'response_type' => 32,
+            'item_name' => self::MAX_FIELD_LENGTH,
+            'serial_number' => self::MAX_FIELD_LENGTH,
+            'location_query' => self::MAX_FIELD_LENGTH,
+            'date_range' => 80,
+            'source_question' => 255,
+        ] as $key => $maxLength) {
+            if ($hasStaleInventoryReference && in_array($key, ['item_name', 'serial_number'], true)) {
+                continue;
+            }
+            $value = $lastResolved[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                $safe[$key] = mb_substr(trim($value), 0, $maxLength);
+            }
+        }
+
+        if ($currentInventoryId !== null) {
+            $safe['inventory_id'] = $currentInventoryId;
+        }
+        if (is_int($lastResolved['category_id'] ?? null) && $lastResolved['category_id'] > 0) {
+            $safe['category_id'] = $lastResolved['category_id'];
+        }
+
+        $filters = $lastResolved['filters'] ?? null;
+        if (is_array($filters)) {
+            $safe['filters'] = array_filter([
+                'category_id' => is_int($filters['category_id'] ?? null) && $filters['category_id'] > 0
+                    ? $filters['category_id']
+                    : null,
+                'unit' => is_string($filters['unit'] ?? null) && trim($filters['unit']) !== ''
+                    ? mb_substr(trim($filters['unit']), 0, 100)
+                    : null,
+            ], fn ($value): bool => $value !== null);
+        }
+        if (is_string($lastResolved['query'] ?? null) && trim($lastResolved['query']) !== '') {
+            $safe['query'] = mb_substr(trim($lastResolved['query']), 0, 80);
+        }
+
+        $safe['entity_refs'] = $this->currentInventoryIds($this->cleanIds([
+            ...$this->cleanIds($lastResolved['entity_refs'] ?? []),
+            ...array_filter([$currentInventoryId], fn ($id): bool => is_int($id)),
+        ]));
+
+        return $safe;
     }
 }

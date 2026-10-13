@@ -117,13 +117,61 @@ class PropertyCustodianController extends Controller
                 ];
             });
 
+        // Sidebar Transaction badge: same queues the Transactions page shows,
+        // counted with the same status predicates (no new tables).
+        $pendingIncomingCount = AssignmentRequest::query()
+            ->whereIn('status', ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT])
+            ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
+            ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'))
+            ->count();
+        $pendingTransferCount = AssignmentRequest::query()
+            ->where('status', 'waiting for custodian approval')
+            ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
+            ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'End User'))
+            ->count();
+        $pendingReturnCount = AssignmentRequest::query()
+            ->where('status', 'waiting for custodian approval')
+            ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
+            ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'))
+            ->count();
+
         return response()->json([
             'title' => 'Property Custodian Dashboard',
+            'pendingActionCount' => $pendingIncomingCount + $pendingTransferCount + $pendingReturnCount,
             'metrics' => [
                 'inventory' => Inventory::where('status', '!=', 'disposed')->sum('quantity'),
                 'available' => Inventory::where('status', 'available')->sum('quantity'),
                 'lowStock' => $lowStockCount,
-                'pendingRequests' => AssignmentRequest::whereIn('status', ['waiting for approval', 'waiting for transfer approval'])->count(),
+                // Custodian-actionable queues only, mirroring the Transactions
+                // tabs: incoming requests plus custodian assignments awaiting
+                // acceptance. Peer transfers still awaiting the recipient
+                // ('waiting for transfer approval') are excluded — the
+                // custodian cannot act on those.
+                'pendingRequests' => AssignmentRequest::query()
+                    ->whereIn('status', ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT])
+                    ->where(function ($query) use ($request): void {
+                        $query->where(function ($incoming): void {
+                            $incoming->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
+                                ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'));
+                        })->orWhere(function ($assignments) use ($request): void {
+                            // Same scope as the Transactions assignments queue:
+                            // this custodian's rows awaiting end-user acceptance.
+                            $assignments->where('status', 'waiting for approval')
+                                ->where('user_id', $request->user()?->id)
+                                ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'End User'));
+                        });
+                    })
+                    ->count(),
+                'pendingTransfers' => AssignmentRequest::query()
+                    ->where('status', 'waiting for custodian approval')
+                    ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
+                    ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'End User'))
+                    ->count(),
+                'pendingReturns' => AssignmentRequest::query()
+                    ->where('status', 'waiting for custodian approval')
+                    ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
+                    ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'))
+                    ->count(),
                 'approachingLifespan' => (int) $approachingLifespanCount,
                 'expiredLifespan' => (int) $expiredLifespanCount,
             ],
@@ -1312,6 +1360,141 @@ class PropertyCustodianController extends Controller
         return response()->stream($callback, 200, $headers);
     }
 
+    public function exportInventoryPdf(Request $request)
+    {
+        $workspace = $request->query('workspace') ?: 'all';
+        if ($workspace === 'under_maintenance') {
+            $workspace = 'under_repair';
+        }
+        $workspaces = ['all', 'available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
+        if (! in_array($workspace, $workspaces, true)) {
+            $workspace = 'all';
+        }
+
+        $filters = Validator::make(
+            [
+                'search' => trim((string) $request->query('search', '')),
+                'category_id' => $request->query('category_id') ?: null,
+            ],
+            [
+                'search' => ['nullable', 'string', 'max:100'],
+                'category_id' => ['nullable', 'integer', 'exists:categories,category_id'],
+            ]
+        )->validate();
+
+        $search = strtolower($filters['search'] ?? '');
+        $categoryId = $filters['category_id'] ?? null;
+
+        $query = Inventory::query()->with(['category', 'assignedTo']);
+
+        if ($workspace === 'all') {
+            $query->where('status', '!=', 'disposed');
+        } elseif ($workspace === 'assigned') {
+            $query->whereIn('status', Inventory::CUSTODY_STATUSES);
+        } else {
+            $query->where('status', $workspace);
+        }
+
+        if ($categoryId) {
+            $query->where('category_id', $categoryId);
+        }
+
+        if ($search !== '') {
+            $query->where(function ($scope) use ($search): void {
+                $scope->where('item_name', 'like', "%{$search}%")
+                    ->orWhere('ics_no', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%")
+                    ->orWhereHas('category', fn ($category) => $category->where('category_name', 'like', "%{$search}%"))
+                    ->orWhereHas('assignedTo', fn ($user) => $user
+                        ->where('first_name', 'like', "%{$search}%")
+                        ->orWhere('last_name', 'like', "%{$search}%")
+                        ->orWhere('username', 'like', "%{$search}%"));
+            });
+        }
+
+        // Same group key as the listing: (name, category, unit, status, ics_no).
+        $groups = $query->orderBy('item_name')->get()
+            ->groupBy(fn (Inventory $item): string => implode('|', [
+                (string) $item->item_name,
+                (string) $item->category_id,
+                (string) $item->unit,
+                (string) ($item->status ?? ''),
+                (string) ($item->ics_no ?? ''),
+            ]))
+            ->map(fn ($items) => [
+                'item_name' => $items->first()->item_name,
+                'ics_no' => $items->first()->ics_no,
+                'category' => $items->first()->category?->category_name ?? 'Uncategorized',
+                'quantity' => (int) $items->sum('quantity'),
+                'unit_cost' => (float) $items->avg('unit_cost'),
+                'total_cost' => (float) $items->sum(fn (Inventory $item): float => (int) $item->quantity * (float) $item->unit_cost),
+                'status' => ucwords(str_replace('_', ' ', (string) $items->first()->status)),
+            ])
+            ->sortBy('item_name')
+            ->values();
+
+        $filterSummary = "Workspace: {$workspace}"
+            . ($search !== '' ? "; Search: \"{$filters['search']}\"" : '')
+            . ($categoryId ? '; Category: ' . (Category::find($categoryId)?->category_name ?? $categoryId) : '');
+
+        $pdf = Pdf::loadView('pdfs.inventory-export', [
+            'groups' => $groups,
+            'totalQuantity' => $groups->sum('quantity'),
+            'totalValue' => $groups->sum('total_cost'),
+            'filterSummary' => $filterSummary,
+            'generatedAt' => now()->format('F j, Y g:i A'),
+            'preparedBy' => trim($request->user()->first_name . ' ' . $request->user()->last_name)
+                ?: $request->user()->username,
+        ]);
+        $pdf->setPaper('a4', 'landscape');
+
+        return $pdf->download("dnhs_inventory_{$workspace}_" . now()->format('Y-m-d_His') . '.pdf');
+    }
+
+    public function exportTransactionsPdf(Request $request)
+    {
+        $filters = Validator::make(
+            [
+                'tab' => $request->query('tab', 'requests'),
+                'search' => trim((string) $request->query('search', '')),
+                'date_from' => $request->query('date_from') ?: null,
+                'date_to' => $request->query('date_to') ?: null,
+            ],
+            [
+                'tab' => ['required', 'string', 'in:requests,transfers,returns,history,ledger'],
+                'search' => ['nullable', 'string', 'max:100'],
+                'date_from' => ['nullable', 'date'],
+                'date_to' => ['nullable', 'date'],
+            ]
+        )->validate();
+
+        $tab = $filters['tab'];
+        $search = (string) ($filters['search'] ?? '');
+        $dateFrom = $filters['date_from'] ? substr((string) $filters['date_from'], 0, 10) : null;
+        $dateTo = $filters['date_to'] ? substr((string) $filters['date_to'], 0, 10) : null;
+
+        $rows = app(\App\Support\TransactionsExportRows::class)
+            ->forTab($tab, (int) $request->user()->id, $search, $dateFrom, $dateTo);
+
+        $filterSummary = 'Tab: '.$tab
+            . ($search !== '' ? '; Search: "'.$search.'"' : '')
+            . ($tab === 'history' && ($dateFrom || $dateTo)
+                ? '; Dates: '.($dateFrom ?? '…').' to '.($dateTo ?? '…')
+                : '');
+
+        $pdf = Pdf::loadView('pdfs.transactions-export', [
+            'tab' => $tab,
+            'rows' => collect($rows),
+            'filterSummary' => $filterSummary,
+            'generatedAt' => now()->format('F j, Y g:i A'),
+            'preparedBy' => trim($request->user()->first_name.' '.$request->user()->last_name)
+                ?: $request->user()->username,
+        ]);
+        $pdf->setPaper('a4', 'landscape');
+
+        return $pdf->download('transactions_'.$tab.'_'.now()->format('Y-m-d_His').'.pdf');
+    }
+
     // Transactions method to display the transactions page with available inventory items, incoming requests, and transactions
     public function transactions(Request $request)
     {
@@ -1457,7 +1640,11 @@ class PropertyCustodianController extends Controller
 
         // Metrics calculation
         $totalAssignedCount   = Transaction::where('status', 'assigned')->sum('quantity');
-        $pendingRequestsCount = $incomingRequests->count() + $pendingTransfers->count();
+        // Per-queue counts matching the tabs that render them: Requests lists
+        // incoming requests plus custodian assignments awaiting acceptance;
+        // Transfers and Returns list their own custodian-approval queues.
+        // Peer transfers still awaiting the recipient never inflate these.
+        $pendingRequestsCount = $incomingRequests->count() + $assignmentRequests->count();
         $totalTransactionsCount = $transactions->count();
         $today = now()->toDateString();
         $overdueReturnsCount  = Transaction::query()
@@ -1501,6 +1688,8 @@ class PropertyCustodianController extends Controller
             'auditLedger'            => $auditLedger,
             'totalAssignedCount'     => $totalAssignedCount,
             'pendingRequestsCount'   => $pendingRequestsCount,
+            'pendingTransfersCount'  => $pendingTransfers->count(),
+            'pendingReturnsCount'    => $pendingReturns->count(),
             'totalTransactionsCount' => $totalTransactionsCount,
             'overdueReturnsCount'    => $overdueReturnsCount,
         ]);

@@ -52,10 +52,11 @@ class RequestTool implements ToolContract
         }
 
         $requests = AssignmentRequest::query()->where('user_id', $user->id)->latest('requested_at')->limit(10)
-            ->get(['item_id', 'quantity', 'status', 'requested_at'])->load('item:item_id,item_name')
+            ->get(['item_id', 'quantity', 'status', 'requested_at'])->load('item:item_id,item_name,unit')
             ->map(fn (AssignmentRequest $itemRequest): array => [
                 'item_name' => $itemRequest->item?->item_name ?? 'Item',
                 'quantity' => (int) $itemRequest->quantity,
+                'unit' => $itemRequest->item?->unit ?? 'units',
                 'status' => $itemRequest->status,
                 'requested_at' => $itemRequest->requested_at?->toDateString(),
             ])->all();
@@ -70,11 +71,16 @@ class RequestTool implements ToolContract
             'waiting for transfer approval',
             'waiting for custodian approval',
             AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
-        ])->get(['item_id', 'requested_item_name', 'requested_unit', 'quantity', 'requested_at'])->load('item:item_id,item_name,unit')
+        ])->get(['item_id', 'requested_item_name', 'requested_unit', 'quantity', 'requested_at', 'user_id'])->load([
+            'item:item_id,item_name,unit',
+            'user:id,first_name,last_name',
+        ])
             ->map(fn (AssignmentRequest $itemRequest): array => [
                 'item_name' => $itemRequest->item?->item_name ?? $itemRequest->requested_item_name ?? 'Item',
                 'quantity' => (int) $itemRequest->quantity,
                 'unit' => $itemRequest->item?->unit ?? $itemRequest->requested_unit ?? 'units',
+                'status' => $itemRequest->status,
+                'requester' => $itemRequest->user?->full_name ?? 'Unknown',
                 'requested_at' => $itemRequest->requested_at?->toDateString(),
             ]);
 

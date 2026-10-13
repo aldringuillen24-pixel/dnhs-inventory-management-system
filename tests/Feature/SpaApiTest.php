@@ -234,3 +234,47 @@ test('end user dashboard api returns metrics as JSON', function () {
             'recentActivity',
         ]);
 });
+
+test('custodian dashboard badge counts pending incoming, transfer, and return requests', function () {
+    $secondEndUser = User::create([
+        'role_id' => $this->roles['End User']->role_id,
+        'first_name' => 'Second',
+        'last_name' => 'User',
+        'username' => 'spa-end-user-2',
+        'email' => 'spa-end-user-2@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->custodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $secondEndUser->id,
+        'quantity' => 1,
+        'status' => 'waiting for custodian approval',
+        'requested_at' => now(),
+    ]);
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->custodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for custodian approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->custodian)->getJson(route('api.custodian.dashboard'))
+        ->assertOk()
+        ->assertJsonPath('pendingActionCount', 3);
+});
+
+test('custodian dashboard badge is zero with no pending actions', function () {
+    $this->actingAs($this->custodian)->getJson(route('api.custodian.dashboard'))
+        ->assertOk()
+        ->assertJsonPath('pendingActionCount', 0);
+});

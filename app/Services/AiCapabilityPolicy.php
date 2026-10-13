@@ -24,6 +24,10 @@ class AiCapabilityPolicy
     public const VIEW_READY_TO_DISPOSE = 'view_ready_to_dispose';
     public const VIEW_PURCHASE_HISTORY = 'view_purchase_history';
     public const VIEW_ITEM_STATUS = 'view_item_status';
+    public const VIEW_TRANSFER_HISTORY = 'view_transfer_history';
+    public const VIEW_RETURN_HISTORY = 'view_return_history';
+    public const VIEW_LEDGER_SUMMARY = 'view_ledger_summary';
+    public const VIEW_SCENARIO = 'view_scenario';
 
     private const CAPABILITIES = [
         self::VIEW_OWN_ASSIGNMENTS,
@@ -44,6 +48,10 @@ class AiCapabilityPolicy
         self::VIEW_READY_TO_DISPOSE,
         self::VIEW_PURCHASE_HISTORY,
         self::VIEW_ITEM_STATUS,
+        self::VIEW_TRANSFER_HISTORY,
+        self::VIEW_RETURN_HISTORY,
+        self::VIEW_LEDGER_SUMMARY,
+        self::VIEW_SCENARIO,
     ];
 
     private const PROPERTY_CUSTODIAN_CAPABILITIES = [
@@ -64,6 +72,10 @@ class AiCapabilityPolicy
         self::VIEW_READY_TO_DISPOSE,
         self::VIEW_PURCHASE_HISTORY,
         self::VIEW_ITEM_STATUS,
+        self::VIEW_TRANSFER_HISTORY,
+        self::VIEW_RETURN_HISTORY,
+        self::VIEW_LEDGER_SUMMARY,
+        self::VIEW_SCENARIO,
     ];
 
     private const ROLE_CAPABILITIES = [
@@ -102,6 +114,10 @@ class AiCapabilityPolicy
             'ready_to_dispose' => self::VIEW_READY_TO_DISPOSE,
             'location' => self::VIEW_INVENTORY_LOCATION,
             'purchase_history' => self::VIEW_PURCHASE_HISTORY,
+            'transfer_history' => self::VIEW_TRANSFER_HISTORY,
+            'return_history' => self::VIEW_RETURN_HISTORY,
+            'ledger_summary' => self::VIEW_LEDGER_SUMMARY,
+            'scenario' => self::VIEW_SCENARIO,
             default => null,
         };
     }
@@ -201,6 +217,9 @@ class AiCapabilityPolicy
         }
         if (isset($capabilities[self::VIEW_ITEM_STATUS])) {
             $help[] = 'item status';
+        }
+        if (isset($capabilities[self::VIEW_SCENARIO])) {
+            $help[] = 'what-if scenario projections';
         }
 
         if (isset($capabilities[self::VIEW_OWN_REQUESTS])) {

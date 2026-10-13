@@ -2,19 +2,143 @@
 
 namespace App\Services;
 
+use App\Models\AiApiKey;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class GeminiApiService
 {
+    /**
+     * Retryable failures: the next pooled key may succeed. Anything else
+     * (notably 400) stops rotation so bad requests don't burn the pool.
+     */
+    private const RETRYABLE_STATUSES = [429, 500, 503];
+
     public function generate(string $systemInstruction, string $input, array $generationConfig = []): ?string
     {
-        $apiKey = config('services.gemini.api_key');
         $model = config('services.gemini.model');
-        if (! is_string($apiKey) || trim($apiKey) === '' || ! is_string($model) || trim($model) === '') {
+        if (! is_string($model) || trim($model) === '') {
             return null;
         }
 
+        $pool = $this->activePool();
+
+        foreach ($pool as $keyRecord) {
+            try {
+                $plaintext = $keyRecord->decryptedKey();
+            } catch (\Throwable $exception) {
+                Log::warning('Gemini API key could not be decrypted.', [
+                    'key_id' => $keyRecord->id,
+                ]);
+                $keyRecord->forceFill(['last_error' => 'Key could not be decrypted.'])->save();
+
+                continue;
+            }
+
+            $attempt = $this->requestOnce($plaintext, $model, $systemInstruction, $input, $generationConfig, $keyRecord->id);
+
+            if ($attempt['text'] !== null) {
+                $keyRecord->forceFill(['last_used_at' => now(), 'last_error' => null])->save();
+
+                return $attempt['text'];
+            }
+
+            $keyRecord->forceFill(['last_error' => $attempt['error']])->save();
+
+            if (! $attempt['retryable']) {
+                return null;
+            }
+        }
+
+        // Pool configured but every key failed retryably: fall through to
+        // the local fallback (null), never to the env seed.
+        if (count($pool) > 0) {
+            return null;
+        }
+
+        // Zero keys: today's behavior — single GEMINI_API_KEY env fallback.
+        $apiKey = config('services.gemini.api_key');
+        if (! is_string($apiKey) || trim($apiKey) === '') {
+            return null;
+        }
+
+        return $this->requestOnce($apiKey, $model, $systemInstruction, $input, $generationConfig, null)['text'];
+    }
+
+    /**
+     * 8-token connectivity probe against one pooled key (per-key ping).
+     */
+    public function probe(AiApiKey $keyRecord): bool
+    {
+        $model = config('services.gemini.model');
+        if (! is_string($model) || trim($model) === '') {
+            return false;
+        }
+
+        try {
+            $plaintext = $keyRecord->decryptedKey();
+        } catch (\Throwable) {
+            $keyRecord->forceFill(['last_error' => 'Key could not be decrypted.'])->save();
+
+            return false;
+        }
+
+        $attempt = $this->requestOnce(
+            $plaintext,
+            $model,
+            'Return only the requested short text.',
+            'Reply with exactly: ok',
+            ['maxOutputTokens' => 8],
+            $keyRecord->id
+        );
+
+        $keyRecord->forceFill([
+            'last_used_at' => $attempt['text'] !== null ? now() : $keyRecord->last_used_at,
+            'last_error' => $attempt['text'] !== null ? null : $attempt['error'],
+        ])->save();
+
+        return $attempt['text'] !== null;
+    }
+
+    /**
+     * Active pooled keys ordered by priority. Empty when the table has not
+     * been migrated yet, so old installs keep working on the env key.
+     *
+     * @return AiApiKey[]
+     */
+    private function activePool(): array
+    {
+        try {
+            if (! Schema::hasTable('ai_api_keys')) {
+                return [];
+            }
+
+            return AiApiKey::query()
+                ->where('is_active', true)
+                ->orderBy('priority')
+                ->orderBy('id')
+                ->get()
+                ->all();
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * One request with one key. Logs status + key_id, never the key value.
+     *
+     * @return array{text: ?string, retryable: bool, error: ?string, status: ?int}
+     */
+    private function requestOnce(
+        string $apiKey,
+        string $model,
+        string $systemInstruction,
+        string $input,
+        array $generationConfig,
+        ?int $keyId
+    ): array {
         try {
             $response = Http::withHeaders([
                 'x-goog-api-key' => $apiKey,
@@ -38,12 +162,21 @@ class GeminiApiService
                 ]);
 
             if (! $response->successful()) {
+                $status = $response->status();
                 Log::warning('Gemini API returned an unsuccessful response.', [
-                    'status' => $response->status(),
+                    'status' => $status,
+                    'key_id' => $keyId,
                     'model' => $model,
                 ]);
 
-                return null;
+                $retryable = in_array($status, self::RETRYABLE_STATUSES, true);
+
+                return [
+                    'text' => null,
+                    'retryable' => $retryable,
+                    'error' => "HTTP {$status}",
+                    'status' => $status,
+                ];
             }
 
             $parts = $response->json('candidates.0.content.parts', []);
@@ -63,20 +196,30 @@ class GeminiApiService
                 Log::warning('Gemini API returned no text candidate.', [
                     'finish_reason' => $response->json('candidates.0.finishReason'),
                     'block_reason' => $response->json('promptFeedback.blockReason'),
+                    'key_id' => $keyId,
                     'model' => $model,
                 ]);
 
-                return null;
+                return ['text' => null, 'retryable' => true, 'error' => 'Empty response', 'status' => 200];
             }
 
-            return $text;
-        } catch (\Throwable $exception) {
-            Log::warning('Gemini API request failed.', [
+            return ['text' => $text, 'retryable' => false, 'error' => null, 'status' => 200];
+        } catch (ConnectionException $exception) {
+            Log::warning('Gemini API request timed out.', [
+                'key_id' => $keyId,
                 'model' => $model,
                 'exception' => $exception->getMessage(),
             ]);
 
-            return null;
+            return ['text' => null, 'retryable' => true, 'error' => 'Timeout', 'status' => null];
+        } catch (\Throwable $exception) {
+            Log::warning('Gemini API request failed.', [
+                'key_id' => $keyId,
+                'model' => $model,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return ['text' => null, 'retryable' => true, 'error' => 'Request failed', 'status' => null];
         }
     }
 }

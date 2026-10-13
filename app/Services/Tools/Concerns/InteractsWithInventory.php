@@ -4,6 +4,7 @@ namespace App\Services\Tools\Concerns;
 
 use App\Models\Category;
 use App\Models\Inventory;
+use Carbon\CarbonImmutable;
 
 /**
  * Inventory query and grouping helpers shared by every tool.
@@ -16,6 +17,68 @@ use App\Models\Inventory;
  */
 trait InteractsWithInventory
 {
+    /**
+     * Resolve only explicit ISO date ranges or bounded "last N months" phrases.
+     *
+     * @return array{start: ?CarbonImmutable, end: ?CarbonImmutable, error: ?string}
+     */
+    protected function analyticsDateRange(array $request, int $defaultMonths = 3): array
+    {
+        $question = (string) ($request['original_question'] ?? '');
+        $now = CarbonImmutable::now();
+        $start = null;
+        $end = $now->endOfDay();
+
+        if (preg_match('/\bfrom\s+(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})\b/i', $question, $matches) === 1) {
+            try {
+                $start = CarbonImmutable::createFromFormat('!Y-m-d', $matches[1]);
+                $rangeEnd = CarbonImmutable::createFromFormat('!Y-m-d', $matches[2]);
+                if ($start->format('Y-m-d') !== $matches[1] || $rangeEnd->format('Y-m-d') !== $matches[2]) {
+                    throw new \InvalidArgumentException;
+                }
+                $end = $rangeEnd->endOfDay();
+            } catch (\Throwable) {
+                return ['start' => null, 'end' => null, 'error' => 'Use valid dates in YYYY-MM-DD format.'];
+            }
+
+            if ($start->greaterThan($end) || $start->diffInDays($end) > 3660) {
+                return ['start' => null, 'end' => null, 'error' => 'The date range must be ordered and no longer than ten years.'];
+            }
+
+            return ['start' => $start->startOfDay(), 'end' => $end, 'error' => null];
+        }
+
+        if (preg_match('/\blast\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\s+months?\b/i', $question, $matches) === 1) {
+            $months = [
+                'one' => 1, 'two' => 2, 'three' => 3, 'four' => 4, 'five' => 5,
+                'six' => 6, 'seven' => 7, 'eight' => 8, 'nine' => 9, 'ten' => 10,
+            ][$matches[1]] ?? (int) $matches[1];
+            if ($months < 1 || $months > 120) {
+                return ['start' => null, 'end' => null, 'error' => 'Choose a period from one to 120 months.'];
+            }
+            $start = $now->subMonthsNoOverflow($months)->startOfDay();
+        } elseif ($defaultMonths > 0) {
+            $start = $now->subMonthsNoOverflow($defaultMonths)->startOfDay();
+        }
+
+        return ['start' => $start, 'end' => $end, 'error' => null];
+    }
+
+    protected function filterMaintenanceDateRange($query, array $range): void
+    {
+        if ($range['start'] === null || $range['end'] === null) {
+            return;
+        }
+
+        $query->where(function ($dateQuery) use ($range): void {
+            $dateQuery->whereBetween('started_at', [$range['start'], $range['end']])
+                ->orWhere(function ($createdQuery) use ($range): void {
+                    $createdQuery->whereNull('started_at')
+                        ->whereBetween('created_at', [$range['start'], $range['end']]);
+                });
+        });
+    }
+
     protected function result(string $status, ?string $intent, ?string $capability, array $answer = []): array
     {
         return [
@@ -62,6 +125,105 @@ trait InteractsWithInventory
             || (is_string($request['serial_number'] ?? null) && trim($request['serial_number']) !== '');
 
         return ! isset($request['inventory_id']) && $hasSelector && $records->count() > 1;
+    }
+
+    /**
+     * A holder mention in the raw question, if any.
+     *
+     * Only assignment phrasing counts ("assigned/issued to X", "held by X",
+     * "X's …", "my assignments"): a bare name elsewhere in the sentence is
+     * not a holder filter. Returns the raw mention, or 'me' handling is left
+     * to the resolver.
+     */
+    protected function holderMention(array $request): ?string
+    {
+        $question = trim((string) ($request['original_question'] ?? ''));
+        if ($question === '') {
+            return null;
+        }
+
+        $name = '[^\s?.,;!]+(?:\s+[^\s?.,;!]+){0,2}';
+        if (preg_match('/\bassigned\s+to\s+(me|myself)\b/i', $question) === 1
+            || preg_match('/\bmy\s+assignments?\b/i', $question) === 1) {
+            return 'me';
+        }
+        foreach ([
+            '/\bassigned\s+to\s+(' . $name . ')/iu',
+            '/\bissued\s+to\s+(' . $name . ')/iu',
+            '/\bheld\s+by\s+(' . $name . ')/iu',
+        ] as $pattern) {
+            if (preg_match($pattern, $question, $matches) === 1 && trim($matches[1]) !== '') {
+                return trim($matches[1]);
+            }
+        }
+
+        if (preg_match('/\b([A-Z][\p{L}\'.-]*(?:\s+[A-Z][\p{L}\'.-]*){0,2})\'s\b/u', $question, $matches) === 1) {
+            return trim($matches[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve a holder mention to a user, if it names exactly one.
+     *
+     * Matching is by full name or username, exact first then substring, all
+     * in PHP so no raw SQL is involved. Zero matches is 'unmatched', more
+     * than one is 'ambiguous'; both use the existing clarification shape.
+     * Display names only cross into replies — never emails or contacts.
+     *
+     * @return array{mention: ?string, status: string, user: ?\App\Models\User, candidates: array<int, string>}
+     */
+    protected function resolveAssignmentHolder(array $request, ?object $user = null): array
+    {
+        $none = ['mention' => null, 'status' => 'none', 'user' => null, 'candidates' => []];
+        $mention = $this->holderMention($request);
+        if ($mention === null || $mention === '') {
+            return $none;
+        }
+
+        if ($user !== null && preg_match('/^(me|myself)$/i', $mention) === 1) {
+            return ['mention' => $mention, 'status' => 'self', 'user' => $user, 'candidates' => []];
+        }
+
+        $needle = mb_strtolower($mention);
+        $users = \App\Models\User::query()->get(['id', 'first_name', 'last_name', 'username']);
+        $displayOf = fn ($holder): string => trim($holder->full_name) !== ''
+            ? trim($holder->full_name)
+            : (string) $holder->username;
+
+        $exact = $users->filter(fn ($holder): bool =>
+            mb_strtolower($displayOf($holder)) === $needle
+            || mb_strtolower((string) $holder->username) === $needle)->values();
+        $matches = $exact->isNotEmpty() ? $exact : $users->filter(fn ($holder): bool =>
+            str_contains(mb_strtolower($displayOf($holder)), $needle)
+            || str_contains(mb_strtolower((string) $holder->username), $needle))->values();
+
+        if ($matches->isEmpty()) {
+            return ['mention' => $mention, 'status' => 'unmatched', 'user' => null, 'candidates' => []];
+        }
+
+        if ($matches->count() > 1) {
+            $names = $matches->map($displayOf);
+            $candidates = $matches->values()->map(function ($holder) use ($displayOf, $names): string {
+                $label = $displayOf($holder);
+                return $names->filter(fn ($other): bool => $other === $label)->count() > 1
+                    ? "{$label} ({$holder->username})"
+                    : $label;
+            })->values()->all();
+
+            return ['mention' => $mention, 'status' => 'ambiguous', 'user' => null, 'candidates' => $candidates];
+        }
+
+        return ['mention' => $mention, 'status' => 'resolved', 'user' => $matches->first(), 'candidates' => []];
+    }
+
+    /**
+     * Escape a value for use inside a LIKE pattern.
+     */
+    protected function escapeLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value);
     }
 
     protected function recordClarification(array $request, $records): array

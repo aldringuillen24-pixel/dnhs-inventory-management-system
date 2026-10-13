@@ -58,6 +58,7 @@ class DisposalTool implements ToolContract
                 'unit' => $item->unit,
                 'date' => $movement?->created_at?->toDateString(),
                 'notes' => $movement?->notes,
+                'inventory_no' => $item->inventory_item_no,
             ];
         })->values()->all();
 
@@ -87,6 +88,7 @@ class DisposalTool implements ToolContract
             'status' => $item->status,
             'quantity' => (int) $item->quantity,
             'unit' => $item->unit,
+            'inventory_no' => $item->inventory_item_no,
         ])->values()->all();
 
         return $this->result('success', $request['intent'], $request['capability'], ['ready_to_dispose_items' => $items]);

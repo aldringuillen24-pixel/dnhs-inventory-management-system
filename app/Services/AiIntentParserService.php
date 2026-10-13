@@ -24,6 +24,10 @@ class AiIntentParserService
         'ready_to_dispose',
         'location',
         'purchase_history',
+        'transfer_history',
+        'return_history',
+        'ledger_summary',
+        'scenario',
         'explanation',
         'continue',
         'inherit',
@@ -392,6 +396,15 @@ private function groundedIds(array $context): array
         $ids = [...$ids, ...$this->cleanIds($context[$key] ?? [])];
     }
 
+    $lastResolved = $context['last_resolved'] ?? null;
+    if (is_array($lastResolved)) {
+        $ids = [
+            ...$ids,
+            ...$this->cleanIds($lastResolved['entity_refs'] ?? []),
+            ...$this->cleanIds([$lastResolved['inventory_id'] ?? null]),
+        ];
+    }
+
     foreach (['relevant_turns', 'recent_turns'] as $key) {
         foreach ((array) ($context[$key] ?? []) as $turn) {
             if (! is_array($turn)) {
@@ -428,6 +441,11 @@ private function contextNames(array $context): array
         if (is_array($topic) && is_string($topic['item_name'] ?? null)) {
             $names[] = trim($topic['item_name']);
         }
+    }
+
+    $lastResolved = $context['last_resolved'] ?? null;
+    if (is_array($lastResolved) && is_string($lastResolved['item_name'] ?? null)) {
+        $names[] = trim($lastResolved['item_name']);
     }
 
     return array_values(array_unique(array_filter($names)));
@@ -514,6 +532,7 @@ private function referenceResolutionPrompt(): string
     return 'Rewrite one user question so it stands on its own, and report whether it can be answered. '
         .'Return one JSON object with exactly these keys: resolved_question, is_follow_up, ambiguity, referenced_item_id, topic_action. '
         .'resolved_question must replace pronouns such as "it", "that one", "those", "the second one" and "the other projector" with the item they refer to, using only what the context supplies. Never invent an item, an id, a name, or a cause. If the question cannot be resolved, return it unchanged. '
+        .'The context contains historical questions and selectors only. They identify the intended subject; their old replies are not current facts. The controller will revalidate remembered entities and retrieve fresh database facts before answering. '
         .'is_follow_up is true only when the question depends on an earlier turn. '
         .'ambiguity must be null when the question can be answered, no_entity when it needs an item but none can be identified, ambiguous_candidate when more than one supplied candidate could be meant, or no_topic when it asks something but no earlier topic applies. '
         .'referenced_item_id must be the exact inventory id the question resolves to, or null when none. '
@@ -642,13 +661,6 @@ public function route(string $question, array $activeTopic = [], array $turns = 
             return null;
         }
 
-        // forecast and recommendation are delegated to the Forecast page and
-        // must never fan out into the factual tools.
-        if ($capability === \App\Services\AiCapabilityPolicy::VIEW_DEMAND_FORECAST
-            || $capability === \App\Services\AiCapabilityPolicy::VIEW_PROCUREMENT_PRIORITIES) {
-            return null;
-        }
-
         $filters = $subRequest['filters'];
 
         return [
@@ -656,7 +668,7 @@ public function route(string $question, array $activeTopic = [], array $turns = 
             'normalized_question' => mb_strtolower(trim($question)),
             'canonical_question_key' => hash('sha256', mb_strtolower(trim($question))),
             'classification_confidence' => 'ai_validated',
-            'intent' => 'factual',
+            'intent' => $intent === 'forecast' ? 'forecast' : 'factual',
             'capability' => $capability,
             'item_name' => $subRequest['item_name'],
             'inventory_id' => $subRequest['inventory_id'],
@@ -692,6 +704,16 @@ public function route(string $question, array $activeTopic = [], array $turns = 
             'canonical_question_key' => hash('sha256', $normalized),
             'classification_confidence' => 'ai_validated',
         ];
+
+        // What-if phrasing is detected locally, before anything else: a
+        // hypothetical must reach the read-only ScenarioTool even when it
+        // names no inventoried item yet, and an open-ended future must be
+        // refused with its closest supported computation rather than
+        // answered as a fact or dropped as unsupported.
+        $scenario = $this->detectScenario($question, $normalized, $common);
+        if ($scenario !== null) {
+            return $scenario;
+        }
 
         if ($this->isClearlyNonInventoryQuestion($normalized)) {
             return [
@@ -882,6 +904,105 @@ public function route(string $question, array $activeTopic = [], array $turns = 
         return $route;
     }
 
+    /**
+     * Detect an explicit hypothetical and route it to the read-only
+     * ScenarioTool without spending a provider call.
+     *
+     * A scenario trigger word is required: a bare "assign 5 chairs" is an
+     * action request and must never become a projection. Numerics and the
+     * item scope are extracted locally; the tool validates them and asks
+     * for clarification when they are missing or ambiguous.
+     *
+     * @param  array<string, mixed>  $common
+     * @return array<string, mixed>|null
+     */
+    private function detectScenario(string $question, string $normalized, array $common): ?array
+    {
+        if (preg_match('/\b(what if|suppose|supposing|simulat\w+|scenario)\b/u', $normalized) !== 1) {
+            return null;
+        }
+
+        // Open-ended futures are refused by the tool with the closest
+        // supported computation, so they still route as scenarios.
+        if (preg_match('/\b(enrollments?|enrolments?|typhoon|storm surge|flood|earthquake|fire|disaster|prices?\s+(?:rise|rises|rising|increase|increases|go(?:es)?\s+up|doubl\w+)|demand\s+doubl\w+|budget\s+cuts?)\b/u', $normalized, $matches) === 1) {
+            return $this->scenarioRoute($common, $question, 'open_ended', null, $this->scenarioItem($question, ''), $matches[0]);
+        }
+
+        $type = null;
+        $quantity = null;
+        $clause = '';
+        if (preg_match('/\bassign(?:ing|ed|s)?\s+(\d+)\b/u', $normalized, $matches) === 1) {
+            [$type, $quantity, $clause] = ['bulk_assign', (int) $matches[1], $matches[0]];
+        } elseif (preg_match('/\b(?:remov(?:e|ed|ing)?|unassign(?:ed|ing)?|return(?:ed|ing)?)\s+(\d+)\b/u', $normalized, $matches) === 1) {
+            [$type, $quantity, $clause] = ['bulk_remove', (int) $matches[1], $matches[0]];
+        } elseif (preg_match('/\bdispos\w*\s+(\d+)\b/u', $normalized, $matches) === 1) {
+            [$type, $quantity, $clause] = ['dispose_set', (int) $matches[1], $matches[0]];
+        } elseif (preg_match('/\b(?:need|needs|target|reach|get to|raise(?: it| them)? to|bring(?: it| them)? to)\s+(\d+)\b/u', $normalized, $matches) === 1
+            || preg_match('/\b(\d+)\s+\S+\s+(?:needed|required)\b/u', $normalized, $matches) === 1) {
+            [$type, $quantity, $clause] = ['gap_to_target', (int) $matches[1], $matches[0]];
+        } elseif (preg_match('/\bstock\s+(?:was|were|of|at|is)\s+(\d+)\b/u', $normalized, $matches) === 1) {
+            [$type, $quantity, $clause] = ['stock_level', (int) $matches[1], $matches[0]];
+        } elseif (preg_match('/\b(?:had|have|with)\s+(\d+)\b.{0,40}\b(?:in stock|available|left|remaining)\b/u', $normalized, $matches) === 1) {
+            [$type, $quantity, $clause] = ['stock_level', (int) $matches[1], $matches[0]];
+        }
+
+        return $this->scenarioRoute($common, $question, $type, $quantity, $this->scenarioItem($question, $clause), null);
+    }
+
+    /**
+     * @param  array<string, mixed>  $common
+     * @return array<string, mixed>
+     */
+    private function scenarioRoute(array $common, string $question, ?string $type, ?int $quantity, ?string $item, ?string $topic): array
+    {
+        return [
+            ...$common,
+            'intent' => 'scenario',
+            'capability' => \App\Services\AiCapabilityPolicy::VIEW_SCENARIO,
+            'item_name' => $item,
+            'inventory_id' => null,
+            'serial_number' => null,
+            'location_query' => null,
+            'category_id' => null,
+            'unit' => null,
+            'query' => null,
+            'filters' => [],
+            'response_type' => 'detail',
+            'needs_external_explanation' => false,
+            'needs_clarification' => false,
+            'vague' => false,
+            'follow_up' => false,
+            'starts_new_topic' => true,
+            'topic_action' => 'new_topic',
+            'request_type' => 'scenario',
+            'entity_candidate' => $item,
+            'entity_candidate_status' => $item === null ? 'missing' : 'unresolved',
+            'ambiguous' => false,
+            'scenario' => ['type' => $type, 'quantity' => $quantity, 'topic' => $topic],
+        ];
+    }
+
+    /**
+     * The item a what-if question is about: the trigger, the typed clause
+     * and filler words stripped, leaving the noun phrase behind.
+     */
+    private function scenarioItem(string $question, string $clause): ?string
+    {
+        // "scenario" doubles as an item-name word (e.g. "Scenario Widget"),
+        // so only a leading "scenario:"-style label is stripped as a
+        // trigger; the other triggers never name inventory.
+        $text = (string) preg_replace('/\bscenario\s*[:\-,]/iu', ' ', $question);
+        $text = (string) preg_replace('/\b(what if|suppose|supposing|simulat\w+)\b/iu', ' ', $text);
+        if ($clause !== '') {
+            $text = (string) preg_replace('/'.preg_quote($clause, '/').'/iu', ' ', $text);
+        }
+        $text = (string) preg_replace('/\b(the|a|an|of|units?|pieces?|pcs|rim|reams?|sets?|boxes?|rolls?|in stock|available|left|remaining|was|were|is|are|had|have|has|with|to|for|from|more|would|be|become|get|got|we|our|school|stock|items?)\b/iu', ' ', $text);
+        $text = trim((string) preg_replace('/\s+/u', ' ', $text) ?? '');
+        $text = trim($text, " \t\n\r\0\x0B?.,;:!-");
+
+        return $text === '' ? null : mb_substr($text, 0, 160);
+    }
+
     private function isClearlyNonInventoryQuestion(string $question): bool
     {
         if (preg_match('/\bweather\b/u', $question) === 1) {
@@ -983,7 +1104,7 @@ public function route(string $question, array $activeTopic = [], array $turns = 
         }
 
         foreach ($subRequests as $subRequest) {
-            if ($this->validateSubRequest($subRequest, $question, $isCompound) === null) {
+            if ($this->validateSubRequest($subRequest, $question) === null) {
                 return null;
             }
         }
@@ -1041,7 +1162,7 @@ public function route(string $question, array $activeTopic = [], array $turns = 
             'explanation_topic' => $explanationTopic,
             'is_compound' => $isCompound,
             'sub_requests' => array_values(array_map(
-                fn (array $subRequest): array => $this->validateSubRequest($subRequest, $question, $isCompound),
+                fn (array $subRequest): array => $this->validateSubRequest($subRequest, $question),
                 $subRequests,
             )),
         ];
@@ -1056,13 +1177,10 @@ public function route(string $question, array $activeTopic = [], array $turns = 
      * rather than silently repaired, because a sub-request that slipped through
      * would be authorised and queried on its own terms.
      *
-     * Compound turns must never decompose into a forecast sub-request: demand
-     * forecasting is delegated to the handoff, which is single-intent.
-     *
      * @param  array<string, mixed>  $subRequest
      * @return array<string, mixed>|null
      */
-    private function validateSubRequest(array $subRequest, string $question, bool $isCompound): ?array
+    private function validateSubRequest(array $subRequest, string $question): ?array
     {
         $expectedKeys = ['intent', 'item_name', 'inventory_id', 'serial_number', 'location_query', 'filters', 'query', 'response_type'];
         if (array_diff(array_keys($subRequest), $expectedKeys) !== []
@@ -1080,7 +1198,7 @@ public function route(string $question, array $activeTopic = [], array $turns = 
         $responseType = $subRequest['response_type'];
 
         if (! is_string($intent) || ! in_array($intent, self::INTENTS, true)
-            || in_array($intent, ['forecast', 'explanation', 'continue', 'inherit', 'unsupported', 'unclear'], true)
+            || in_array($intent, ['explanation', 'continue', 'inherit', 'unsupported', 'unclear'], true)
             || ! (is_null($itemName) || (is_string($itemName) && trim($itemName) !== '' && mb_strlen(trim($itemName)) <= 255))
             || ! (is_null($inventoryId) || (is_int($inventoryId) && $inventoryId > 0))
             || ! (is_null($serialNumber) || (is_string($serialNumber) && trim($serialNumber) !== '' && mb_strlen(trim($serialNumber)) <= 255))
@@ -1137,12 +1255,13 @@ public function route(string $question, array $activeTopic = [], array $turns = 
     private function systemPrompt(): string
     {
         return 'Classify the user question only. Do not answer it, access data, or propose actions. Return one JSON object with exactly these keys: intent, topic_action, item_name, inventory_id, serial_number, location_query, filters, query, response_type, explanation, explanation_topic, is_compound, sub_requests. '
-            .'intent must be availability, stock, pending_requests, low_stock, forecast, executive_reports, system_summary, inventory_valuation, own_assignments, own_requests, item_status, assignments, maintenance, disposal, ready_to_dispose, location, purchase_history, explanation, continue, inherit, unsupported, or unclear. Procurement and restock questions are not handled here; classify them as unsupported. '
+            .'intent must be availability, stock, pending_requests, low_stock, forecast, executive_reports, system_summary, inventory_valuation, own_assignments, own_requests, item_status, assignments, maintenance, disposal, ready_to_dispose, location, purchase_history, transfer_history, return_history, ledger_summary, explanation, continue, inherit, unsupported, or unclear. Standalone procurement and restock questions are handed off; for a mixed compound question, classify each forecasting part as forecast. '
+            .'Use transfer_history for completed custody transfers between users, return_history for completed item returns to the stockroom, and ledger_summary for recent stock movement activity. '
             .'topic_action must be continue_topic, new_topic, or unclear. Use continue when the message only refers to the active topic and inherit when a new named item continues the active topic action. Use an active topic only for follow-ups or action inheritance; otherwise classify the new request independently. '
             .'Map explanation questions to intent explanation and set explanation_topic to the supported fact topic; otherwise explanation_topic must be null. Use only item names, inventory IDs, serial numbers, location names, units, and category IDs explicitly stated in the question; use null when absent. '
             .'filters must contain exactly category_id and unit. query must be null, pending_count, inventory_identifiers, or product_name. Use pending_count only when explicitly counting pending requests; use inventory_identifiers only when asking for an inventory number, ID, or asset tag; use product_name only when asking for the product name. For ordinary availability or stock questions, query must be null, including count questions. '
             .'response_type must be detail, count, list, explanation, or same_as_topic. explanation must be a boolean and true only for intent explanation. '
-            .'is_compound must be true only when the question asks for two or more separate inventory facts that can be answered independently. When it is false, sub_requests must be an empty array. When it is true, sub_requests must hold one entry per separate question in the order asked, each with exactly the keys intent, item_name, inventory_id, serial_number, location_query, filters, query, response_type; the top-level fields must then describe the first sub-request and topic_action must be new_topic. A sub-request intent must never be forecast, explanation, continue, inherit, unsupported or unclear, and its response_type must never be same_as_topic. Never return SQL, permissions, database instructions, answers, or additional keys.';
+            .'is_compound must be true only when the question asks for two or more separate inventory or forecast facts that can be answered independently. When it is false, sub_requests must be an empty array. When it is true, sub_requests must hold one entry per separate question in the order asked, each with exactly the keys intent, item_name, inventory_id, serial_number, location_query, filters, query, response_type; the top-level fields must then describe the first sub-request and topic_action must be new_topic. A sub-request intent must never be explanation, continue, inherit, unsupported or unclear, and its response_type must never be same_as_topic. Forecast sub-requests are handed off to the Forecast service, never to an inventory tool. Never return SQL, permissions, database instructions, answers, or additional keys.';
     }
 
     private function structuredResponseSchema(): array
@@ -1181,7 +1300,7 @@ public function route(string $question, array $activeTopic = [], array $turns = 
                 'items' => [
                     'type' => 'OBJECT',
                     'properties' => [
-                        'intent' => ['type' => 'STRING', 'enum' => array_values(array_diff(self::INTENTS, ['forecast', 'explanation', 'continue', 'inherit', 'unsupported', 'unclear']))],
+                        'intent' => ['type' => 'STRING', 'enum' => array_values(array_diff(self::INTENTS, ['explanation', 'continue', 'inherit', 'unsupported', 'unclear']))],
                         'item_name' => ['type' => 'STRING', 'nullable' => true, 'maxLength' => 255],
                         'inventory_id' => ['type' => 'INTEGER', 'nullable' => true, 'minimum' => 1],
                         'serial_number' => ['type' => 'STRING', 'nullable' => true, 'maxLength' => 255],

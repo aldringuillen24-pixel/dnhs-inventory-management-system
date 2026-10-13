@@ -2873,3 +2873,238 @@ test('return quantity above the assigned quantity is rejected', function () {
     expect(AssignmentRequest::where('item_id', $inventory->item_id)
         ->where('status', 'waiting for custodian approval')->count())->toBe(0);
 });
+
+test('requests exportPdf with status filter returns matching rows as pdf', function () {
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'requested_item_name' => 'Bond Paper',
+        'quantity' => 2,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'requested_item_name' => 'Office Chair',
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $response = $this->actingAs($this->endUser)->get(route('endUser.requests.export-pdf', [
+        'tab' => 'my',
+        'status' => 'approved',
+        'search' => '',
+    ]));
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/pdf');
+    expect($response->headers->get('Content-Disposition'))->toContain('my-requests_');
+
+    $html = view('pdfs.end-user-requests', [
+        'tab' => 'my',
+        'myRequests' => AssignmentRequest::where('user_id', $this->endUser->id)->where('status', 'approved')->get(),
+        'incomingRequests' => collect(),
+        'filterSummary' => 'Tab: My Requests; Status: approved',
+        'generatedAt' => now()->format('F j, Y g:i A'),
+        'requester' => 'End User',
+    ])->render();
+
+    expect($html)->toContain('Bond Paper')->and($html)->not->toContain('Office Chair');
+});
+
+test('requests exportPdf with search filter returns matching rows as pdf', function () {
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'requested_item_name' => 'Bond Paper',
+        'quantity' => 2,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'requested_item_name' => 'Office Chair',
+        'quantity' => 1,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $response = $this->actingAs($this->endUser)->get(route('endUser.requests.export-pdf', [
+        'tab' => 'my',
+        'status' => '',
+        'search' => 'bond',
+    ]));
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/pdf');
+
+    $html = view('pdfs.end-user-requests', [
+        'tab' => 'my',
+        'myRequests' => AssignmentRequest::where('user_id', $this->endUser->id)
+            ->where('requested_item_name', 'like', '%bond%')->get(),
+        'incomingRequests' => collect(),
+        'filterSummary' => 'Tab: My Requests; Search: "bond"',
+        'generatedAt' => now()->format('F j, Y g:i A'),
+        'requester' => 'End User',
+    ])->render();
+
+    expect($html)->toContain('Bond Paper')->and($html)->not->toContain('Office Chair');
+});
+
+test('requests exportPdf isolates tabs and rejects other roles', function () {
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'requested_item_name' => 'Bond Paper',
+        'quantity' => 2,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)->get(route('endUser.requests.export-pdf', [
+        'tab' => 'incoming',
+        'status' => '',
+        'search' => '',
+    ]))->assertOk()->assertHeader('Content-Type', 'application/pdf');
+
+    $html = view('pdfs.end-user-requests', [
+        'tab' => 'incoming',
+        'myRequests' => collect(),
+        'incomingRequests' => collect(),
+        'filterSummary' => 'Tab: Incoming Requests',
+        'generatedAt' => now()->format('F j, Y g:i A'),
+        'requester' => 'End User',
+    ])->render();
+
+    expect($html)->toContain('No records match the current filters.')
+        ->and($html)->not->toContain('Bond Paper');
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('endUser.requests.export-pdf'))
+        ->assertForbidden();
+});
+
+test('assigned exportPdf with status filter returns matching rows as pdf', function () {
+    $category = Category::firstOrCreate(
+        ['category_name' => 'Office Supplies'],
+        ['requires_serial_number' => false]
+    );
+    $bond = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 29,
+        'status' => 'available',
+        'date_acquired' => '2026-10-01',
+    ]);
+    $chair = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Office Chair',
+        'quantity' => 1,
+        'status' => 'available',
+        'date_acquired' => '2026-10-01',
+    ]);
+    AssignmentRequest::create([
+        'item_id' => $bond->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 29,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+    AssignmentRequest::create([
+        'item_id' => $chair->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+    AssignmentRequest::create([
+        'item_id' => $chair->item_id,
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for custodian approval',
+        'requested_at' => now(),
+    ]);
+
+    $response = $this->actingAs($this->endUser)->get(route('endUser.assigned-items.export-pdf', [
+        'status' => 'approved',
+        'search' => '',
+    ]));
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/pdf');
+    expect($response->headers->get('Content-Disposition'))->toContain('my-assigned-items_');
+
+    $html = view('pdfs.end-user-assigned-items', [
+        'rows' => collect([
+            ['type' => 'Assigned', 'item_name' => 'Bond Paper', 'quantity' => 29, 'date' => now(), 'status' => 'approved'],
+        ]),
+        'filterSummary' => 'Holder: End User; Status: approved',
+        'generatedAt' => now()->format('F j, Y g:i A'),
+        'holder' => 'End User',
+    ])->render();
+
+    expect($html)->toContain('Bond Paper')->and($html)->not->toContain('Office Chair');
+});
+
+test('assigned exportPdf with search filter returns matching rows as pdf', function () {
+    $category = Category::firstOrCreate(
+        ['category_name' => 'Office Supplies'],
+        ['requires_serial_number' => false]
+    );
+    $bond = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 29,
+        'status' => 'available',
+        'date_acquired' => '2026-10-01',
+    ]);
+    AssignmentRequest::create([
+        'item_id' => $bond->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 29,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)->get(route('endUser.assigned-items.export-pdf', [
+        'status' => '',
+        'search' => 'bond',
+    ]))->assertOk()->assertHeader('Content-Type', 'application/pdf');
+});
+
+test('assigned exportPdf empty result renders no-records and rejects other roles', function () {
+    $this->actingAs($this->endUser)->get(route('endUser.assigned-items.export-pdf', [
+        'status' => '',
+        'search' => 'zzz-no-match',
+    ]))->assertOk()->assertHeader('Content-Type', 'application/pdf');
+
+    $html = view('pdfs.end-user-assigned-items', [
+        'rows' => collect(),
+        'filterSummary' => 'Holder: End User',
+        'generatedAt' => now()->format('F j, Y g:i A'),
+        'holder' => 'End User',
+    ])->render();
+
+    expect($html)->toContain('No records match the current filters.');
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('endUser.assigned-items.export-pdf'))
+        ->assertForbidden();
+});

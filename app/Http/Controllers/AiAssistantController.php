@@ -87,12 +87,6 @@ class AiAssistantController extends Controller
                 ]);
             }
 
-            // Forecast, urgency and procurement questions are delegated to the Demand
-            // Forecast page rather than answered here.
-            if ($this->forecastHandoff->owns($request, $user, $validated['message'])) {
-                return $this->forecastHandoff->reply($request, $user, $validated['message']);
-            }
-
             $state = $this->conversationContext->loadState($request, $user);
 
             $comparisonContext = $state->comparison;
@@ -138,9 +132,12 @@ class AiAssistantController extends Controller
             if ($context === null) {
                 $context = $this->rebuiltContext($request, $user);
             }
+            $sessionId = $this->turnLog->sessionId($request, $user);
+            $lastResolved = $this->turnLog->lastResolved($user, $sessionId);
 
             // Load any pending clarification context from the session
-            $pendingClarification = $state->pendingClarification;
+            $pendingClarification = $state->pendingClarification
+                ?? $this->turnLog->lastClarification($user, $sessionId);
             if ($pendingClarification !== null) {
                 $pendingClarification = $this->answerService->refreshClarificationContext($user, $pendingClarification);
                 if ($pendingClarification === null) {
@@ -201,7 +198,7 @@ class AiAssistantController extends Controller
             }
 
             if ($routedQuestion === null && $pendingClarification === null) {
-                $routedQuestion = $this->applicationFollowUp($validated['message'], $context);
+                $routedQuestion = $this->applicationFollowUp($validated['message'], $context, $lastResolved, $user);
             }
 
             // Reference resolution is the fallback, not the first choice.
@@ -238,6 +235,12 @@ class AiAssistantController extends Controller
             // below, so ordinary questions are unaffected.
             if (($routedQuestion['plan']['kind'] ?? 'single') === 'compound') {
                 return $this->answerCompound($request, $user, $validated['message'], $routedQuestion);
+            }
+
+            // Keep the existing single-turn forecast handoff, but only after
+            // compound questions have had a chance to route each part.
+            if ($this->forecastHandoff->owns($request, $user, $validated['message'])) {
+                return $this->forecastHandoff->reply($request, $user, $validated['message']);
             }
 
             if ($result === null) {
@@ -283,7 +286,7 @@ class AiAssistantController extends Controller
                 $reply,
                 $routedQuestion,
                 $result,
-                $this->answerService->lastCandidateIds($result),
+                $this->durableCandidateIds($request, $user, $result),
                 $this->answerService->lastEntityRefs($result),
             );
 
@@ -300,6 +303,20 @@ class AiAssistantController extends Controller
                 'message' => 'Unable to process your question at this moment. Please try again.',
             ], 500);
         }
+    }
+
+    private function durableCandidateIds(Request $request, User $user, array $result): array
+    {
+        $candidateIds = $this->answerService->lastCandidateIds($result);
+        if (($result['status'] ?? null) !== 'clarification') {
+            return $candidateIds;
+        }
+
+        $pending = $this->conversationContext->loadState($request, $user)->pendingClarification;
+
+        return is_array($pending['candidate_ids'] ?? null)
+            ? array_values(array_filter($pending['candidate_ids'], fn ($id): bool => is_int($id) && $id > 0))
+            : [];
     }
 
     public function compare(InventoryComparisonRequest $request): JsonResponse
@@ -333,9 +350,6 @@ class AiAssistantController extends Controller
             }
         }
 
-        // The recorded turns stay until retention expires. Only the identity of
-        // the conversation in progress is dropped, so the next message opens a
-        // new one rather than inheriting what the last one resolved.
         $this->turnLog->forgetSession($request);
 
         return response()->json(['success' => true]);
@@ -360,7 +374,54 @@ class AiAssistantController extends Controller
      */
 private function answerCompound(Request $request, User $user, string $message, array $routedQuestion): JsonResponse
     {
-        $results = $this->compoundPlanExecutor->execute($user, $routedQuestion['plan']);
+        $results = $this->compoundPlanExecutor->execute(
+            $user,
+            $routedQuestion['plan'],
+            function (User $partUser, array $subRequest) use ($request): array {
+                $subject = $subRequest['item_name'] ?? null;
+                $inventoryId = $subRequest['inventory_id'] ?? null;
+                $forecastQuestion = 'Demand forecast'
+                    .(is_string($subject) && trim($subject) !== '' ? ' for '.$subject : '')
+                    .(is_int($inventoryId) ? ' inventory ID '.$inventoryId : '')
+                    .'; when should we restock?';
+
+                if (! $this->forecastHandoff->owns($request, $partUser, $forecastQuestion)) {
+                    return [
+                        'status' => 'unsupported',
+                        'intent' => 'forecast',
+                        'capability' => AiCapabilityPolicy::VIEW_DEMAND_FORECAST,
+                        'answer' => [],
+                        'explanation_data' => [],
+                    ];
+                }
+
+                $response = $this->forecastHandoff->reply($request, $partUser, $forecastQuestion);
+                $payload = $response->getData(true);
+                if ($response->getStatusCode() === 403) {
+                    return [
+                        'status' => 'forbidden',
+                        'intent' => 'forecast',
+                        'capability' => AiCapabilityPolicy::VIEW_DEMAND_FORECAST,
+                        'answer' => [],
+                        'explanation_data' => [],
+                    ];
+                }
+
+                $forecastReply = $payload['reply'] ?? $payload['message'] ?? null;
+
+                return [
+                    'status' => 'success',
+                    'intent' => 'forecast',
+                    'capability' => AiCapabilityPolicy::VIEW_DEMAND_FORECAST,
+                    'answer' => [
+                        'compound_reply' => is_string($forecastReply)
+                            ? $forecastReply
+                            : 'No validated forecast answer is available.',
+                    ],
+                    'explanation_data' => [],
+                ];
+            },
+        );
         $reply = $this->answerService->mergeReplies($results, $user);
         $primary = $results[0] ?? ['status' => 'unsupported', 'intent' => null, 'capability' => null, 'answer' => []];
 
@@ -374,7 +435,25 @@ private function answerCompound(Request $request, User $user, string $message, a
             is_string($primary['capability'] ?? null) ? $primary['capability'] : null,
             $request,
         );
-
+        $candidateIds = [];
+        $entityRefs = [];
+        foreach ($results as $partResult) {
+            if (($partResult['status'] ?? null) !== 'success') {
+                continue;
+            }
+            $candidateIds = [...$candidateIds, ...$this->answerService->lastCandidateIds($partResult)];
+            $entityRefs = [...$entityRefs, ...$this->answerService->lastEntityRefs($partResult)];
+        }
+        $this->turnLog->record(
+            $user,
+            $this->turnLog->sessionId($request, $user),
+            $message,
+            $reply,
+            $routedQuestion,
+            $primary,
+            array_values(array_unique($candidateIds)),
+            array_values(array_unique($entityRefs)),
+        );
         return response()->json([
             'success' => true,
             'reply' => $reply,
@@ -532,17 +611,27 @@ private function answerCompound(Request $request, User $user, string $message, a
         }
     }
 
-    private function applicationFollowUp(string $question, ?array $context): ?array
+    private function applicationFollowUp(
+        string $question,
+        ?array $context,
+        ?array $lastResolved = null,
+        ?User $user = null,
+    ): ?array
     {
         $normalized = mb_strtolower(trim($question));
         $normalized = trim(preg_replace('/[^\pL\pN\s?]/u', ' ', $normalized) ?? $normalized);
         $normalized = trim(preg_replace('/\s+/u', ' ', $normalized) ?? $normalized);
 
+        $periodFollowUp = $this->periodFollowUp($question, $normalized, $context, $lastResolved, $user);
+        if ($periodFollowUp !== null) {
+            return $periodFollowUp;
+        }
+
         $followUp = match (true) {
             preg_match('/^why(?:\s+(?:is|are)\s+(?:it|this|that)\s+[^?]+)?\??$/u', $normalized) === 1 => 'why',
             preg_match('/^(?:how many|what(?: is| are) the)\s+(?:units?\s+)?(?:are\s+)?(?:available|left|remaining)(?:\s+now)?\??$/u', $normalized) === 1 => 'availability',
             preg_match('/^(?:is|are)\s+(?:it|this|that)\s+(?:available|in stock|low)(?:\s+in stock)?\??$/u', $normalized) === 1 => 'availability',
-            preg_match('/^(?:where is|where are)\s+(?:it|this|that|they)\s*(?:stored|located)?\??$/u', $normalized) === 1 => 'location',
+            preg_match('/^(?:where is|where are)\s+(?:it|this|that|that item|the item|that equipment|the equipment|they)\s*(?:stored|located)?\??$/u', $normalized) === 1 => 'location',
             preg_match('/^(?:who has|who is using)\s+(?:it|this|that|them)\??$/u', $normalized) === 1 => 'holder',
             preg_match('/^(?:it|this|that|those|they)\??$/u', $normalized) === 1 => 'same_topic',
             default => null,
@@ -641,6 +730,109 @@ private function answerCompound(Request $request, User $user, string $message, a
             'request_type' => $intent,
             'entity_candidate' => $context['item_name'] ?? null,
             'entity_candidate_status' => 'resolved',
+        ];
+    }
+
+    /**
+     * Repeat a supported historical query over a newly requested period.
+     *
+     * The stored question is used only to recover the query shape. The original
+     * tool is called again, so no stored result is treated as current.
+     *
+     * @param  array<string, mixed>|null  $context
+     * @param  array<string, mixed>|null  $lastResolved
+     * @return array<string, mixed>|null
+     */
+    private function periodFollowUp(
+        string $question,
+        string $normalized,
+        ?array $context,
+        ?array $lastResolved,
+        ?User $user,
+    ): ?array {
+        if (preg_match('/^(?:what about|how about|and for|for)\s+(?:the\s+)?(last\s+(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+months?)\??$/u', $normalized, $matches) !== 1) {
+            return null;
+        }
+
+        $capability = $lastResolved['capability'] ?? null;
+        $sourceQuestion = $lastResolved['source_question'] ?? null;
+        if (! is_string($capability)
+            || ! in_array($capability, [AiCapabilityPolicy::VIEW_MAINTENANCE, AiCapabilityPolicy::VIEW_PURCHASE_HISTORY], true)
+            || ! is_string($sourceQuestion)
+            || trim($sourceQuestion) === ''
+            || $user === null) {
+            return null;
+        }
+        if (! $this->capabilityPolicy->allows($user, $capability)) {
+            return $this->periodClarification('That previous information is not available for your role.');
+        }
+
+        $sourceSupportsPeriod = $capability === AiCapabilityPolicy::VIEW_MAINTENANCE
+            ? preg_match('/\b(?:maintenance\s+costs?|recurring|repeat(?:ed|ing)?|frequently|which\s+(?:rooms?|buildings?|locations?)\b.*\b(?:most|maintenance|issues?|repairs?)|maintenance\s+issues?\s+by\s+(?:room|building)|repair\s+or\s+replace|replace\s+or\s+repair)\b/iu', $sourceQuestion) === 1
+            : preg_match('/\b(?:stock[\s-]?out|movement)\s+(?:trend|trends|history)|\btrend(?:s)?\s+in\s+(?:stock[\s-]?out|inventory movement)/iu', $sourceQuestion) === 1;
+        if (! $sourceSupportsPeriod) {
+            return $this->periodClarification('Please name a maintenance or stock-movement report that supports a date range.');
+        }
+
+        $itemName = $context['item_name'] ?? $lastResolved['item_name'] ?? null;
+        $inventoryId = $context['inventory_id'] ?? $lastResolved['inventory_id'] ?? null;
+        if (($lastResolved['inventory_id'] ?? null) !== null && $context === null) {
+            return $this->periodClarification('That earlier item is no longer available in the current inventory context. Which item should I check?');
+        }
+
+        $baseQuestion = preg_replace(
+            '/\s*(?:(?:in|for|over|during)\s+)?(?:the\s+)?last\s+(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+months?\b/iu',
+            '',
+            $sourceQuestion,
+        ) ?? $sourceQuestion;
+        $baseQuestion = preg_replace('/\s*from\s+\d{4}-\d{2}-\d{2}\s+to\s+\d{4}-\d{2}-\d{2}\b/iu', '', $baseQuestion) ?? $baseQuestion;
+        $baseQuestion = trim($baseQuestion, " \t\n\r\0\x0B.,;:");
+        if ($baseQuestion === '') {
+            return null;
+        }
+
+        return [
+            'original_question' => $baseQuestion.' in '.$matches[1],
+            'normalized_question' => $normalized,
+            'canonical_question_key' => hash('sha256', $normalized),
+            'classification_confidence' => 'application_validated',
+            'intent' => 'factual',
+            'capability' => $capability,
+            'item_name' => is_string($itemName) ? $itemName : null,
+            'inventory_id' => is_int($inventoryId) ? $inventoryId : null,
+            'serial_number' => $context['serial_number'] ?? $lastResolved['serial_number'] ?? null,
+            'location_query' => $context['location_query'] ?? $lastResolved['location_query'] ?? null,
+            'category_id' => $context['category_id'] ?? $lastResolved['category_id'] ?? null,
+            'unit' => $context['unit'] ?? $lastResolved['unit'] ?? null,
+            'query' => $lastResolved['query'] ?? null,
+            'filters' => $lastResolved['filters'] ?? [],
+            'response_type' => 'list',
+            'needs_external_explanation' => false,
+            'needs_clarification' => false,
+            'follow_up' => true,
+            'starts_new_topic' => false,
+            'topic_action' => 'continue_topic',
+            'request_type' => 'factual',
+            'entity_candidate' => is_string($itemName) ? $itemName : null,
+            'entity_candidate_status' => is_string($itemName) ? 'resolved' : 'missing',
+            'ambiguous' => false,
+            'vague' => false,
+        ];
+    }
+
+    /**
+     * Ask for a supported new question without reusing stale context.
+     *
+     * @return array<string, mixed>
+     */
+    private function periodClarification(string $message): array
+    {
+        return [
+            'intent' => 'clarification',
+            'capability' => null,
+            'needs_clarification' => true,
+            'clarification_question' => $message,
+            'topic_action' => 'unclear',
         ];
     }
 }

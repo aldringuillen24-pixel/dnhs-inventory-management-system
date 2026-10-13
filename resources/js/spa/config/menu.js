@@ -49,7 +49,7 @@ export const ROLE_MENUS = {
     'Property Custodian': [
         { icon: 'dashboard', name: 'Dashboard', to: '/dashboard' },
         { icon: 'inventory', name: 'Inventory', to: '/inventory' },
-        { icon: 'transactions', name: 'Transaction', to: '/transactions' },
+        { icon: 'transactions', name: 'Transaction', to: '/transactions', badge: 'transaction' },
         { icon: 'reports', name: 'Reports', to: '/reports' },
         { icon: 'forecast', name: 'Demand Forecast', to: '/reports/forecast' },
         { icon: 'user-profile', name: 'Profile', to: '/profile' },

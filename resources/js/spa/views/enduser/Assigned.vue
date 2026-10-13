@@ -19,6 +19,40 @@
     </div>
 
     <div v-else class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="relative w-full sm:max-w-xs">
+          <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          </svg>
+          <input
+            v-model="filterSearch"
+            type="search"
+            placeholder="Search item…"
+            aria-label="Filter assigned items"
+            class="w-full rounded-md border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:py-2 min-[480px]:text-sm [&::-webkit-search-cancel-button]:hidden"
+          />
+        </div>
+        <select
+          v-model="filterStatus"
+          aria-label="Filter assigned items by status"
+          class="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:py-2 min-[480px]:text-sm"
+        >
+          <option value="">All Statuses</option>
+          <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
+        </select>
+        <a
+          :href="exportAssignedHref"
+          class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5 min-[480px]:py-2 min-[480px]:text-sm"
+        >
+          <svg class="h-4 w-4 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          </svg>
+          Export PDF
+        </a>
+        <span class="ml-auto text-xs text-gray-500 dark:text-gray-400">
+          Showing {{ filteredRows.length }} of {{ rows.length }}
+        </span>
+      </div>
       <div class="overflow-x-auto">
         <table class="w-full min-w-[56rem] text-left text-xs">
           <thead class="sticky top-0 z-10 bg-white dark:bg-gray-900">
@@ -304,8 +338,8 @@
               </template>
             </template>
             </template>
-            <tr v-if="!loading && !rows.length">
-              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">No assigned or requested items.</td>
+            <tr v-if="!loading && !filteredRows.length">
+              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">{{ rows.length ? 'No items match the current filters.' : 'No assigned or requested items.' }}</td>
             </tr>
           </tbody>
         </table>
@@ -446,6 +480,36 @@ const expanded = ref(new Set());
 
 const rows = ref([]);
 const endUsers = ref([]);
+const filterSearch = ref('');
+const filterStatus = ref('');
+
+const statusOptions = computed(() => [...new Set(
+  rows.value.map((row) => row.status).filter(Boolean),
+)].sort());
+
+function assignedMatches(row) {
+  if (filterStatus.value && row.status !== filterStatus.value) {
+    return false;
+  }
+  const query = filterSearch.value.toLowerCase().trim();
+  if (!query) {
+    return true;
+  }
+  return [row.item_name, row.type]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(query));
+}
+
+const filteredRows = computed(() => rows.value.filter(assignedMatches));
+
+const exportAssignedHref = computed(() => {
+  const params = new URLSearchParams({
+    status: filterStatus.value,
+    search: filterSearch.value.trim(),
+  });
+
+  return `/end-user/assigned-items/export-pdf?${params.toString()}`;
+});
 const returnConfirm = ref(null);
 const returnQuantity = ref(1);
 const reportTarget = ref(null);
@@ -567,7 +631,7 @@ function assignedGroupKey(row) {
 
 const groupedRows = computed(() => {
   const groups = [];
-  rows.value.forEach((row, index) => {
+  filteredRows.value.forEach((row, index) => {
     const key = assignedGroupKey(row);
     const current = groups[groups.length - 1];
     if (current && current.baseKey === key) {

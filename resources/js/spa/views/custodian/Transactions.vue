@@ -105,9 +105,17 @@
                 </button>
               </div>
 
-              <span class="text-xs text-gray-500 dark:text-gray-400">
-                {{ filteredIncoming.length + filteredAssignments.length }} of {{ incoming.length + assignments.length }} shown
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ filteredIncoming.length + filteredAssignments.length }} of {{ incoming.length + assignments.length }} shown
+                </span>
+                <a :href="exportPdfHref" class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export PDF
+                </a>
+              </div>
             </div>
 
             <!-- Incoming Requests -->
@@ -324,9 +332,17 @@
                 </button>
               </div>
 
-              <span class="text-xs text-gray-500 dark:text-gray-400">
-                {{ filteredTransfers.length }} of {{ transfers.length }} shown
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ filteredTransfers.length }} of {{ transfers.length }} shown
+                </span>
+                <a :href="exportPdfHref" class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export PDF
+                </a>
+              </div>
             </div>
 
             <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
@@ -431,9 +447,17 @@
                 </button>
               </div>
 
-              <span class="text-xs text-gray-500 dark:text-gray-400">
-                {{ filteredReturns.length }} of {{ returns.length }} shown
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ filteredReturns.length }} of {{ returns.length }} shown
+                </span>
+                <a :href="exportPdfHref" class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export PDF
+                </a>
+              </div>
             </div>
 
             <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
@@ -552,9 +576,17 @@
                 </button>
               </div>
 
-              <span class="text-xs text-gray-500 dark:text-gray-400">
-                {{ filteredHistory.length }} recorded entries
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ filteredHistory.length }} recorded entries
+                </span>
+                <a :href="exportPdfHref" class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export PDF
+                </a>
+              </div>
             </div>
 
             <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
@@ -689,9 +721,17 @@
                 </button>
               </div>
 
-              <span class="text-xs text-gray-500 dark:text-gray-400">
-                {{ filteredLedger.length }} of {{ ledger.length }} shown
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ filteredLedger.length }} of {{ ledger.length }} shown
+                </span>
+                <a :href="exportPdfHref" class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export PDF
+                </a>
+              </div>
             </div>
 
             <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
@@ -941,6 +981,31 @@ const tabs = computed(() => [
   { key: 'history', label: 'History', count: history.value.length },
   { key: 'ledger', label: 'Audit Ledger', count: ledger.value.length },
 ]);
+
+// Per-tab filtered PDF export: same search (and History dates) as the screen table.
+const exportPdfHref = computed(() => {
+  const params = new URLSearchParams({ tab: activeTab.value });
+  const searchByTab = {
+    requests: requestsSearch.value,
+    transfers: transfersSearch.value,
+    returns: returnsSearch.value,
+    history: historySearch.value,
+    ledger: ledgerSearch.value,
+  };
+  const query = String(searchByTab[activeTab.value] ?? '').trim();
+  if (query) {
+    params.set('search', query);
+  }
+  if (activeTab.value === 'history') {
+    if (historyDateFrom.value) {
+      params.set('date_from', String(historyDateFrom.value).slice(0, 10));
+    }
+    if (historyDateTo.value) {
+      params.set('date_to', String(historyDateTo.value).slice(0, 10));
+    }
+  }
+  return `/property-custodian/transactions/export-pdf?${params.toString()}`;
+});
 
 function tabCountBadgeClass(key, isActive) {
   if (isActive) {
@@ -1295,6 +1360,8 @@ function applyTransactionsPayload(data) {
   metrics.value = {
     totalAssignedCount: data.totalAssignedCount,
     pendingRequestsCount: data.pendingRequestsCount,
+    pendingTransfersCount: data.pendingTransfersCount,
+    pendingReturnsCount: data.pendingReturnsCount,
     totalTransactionsCount: data.totalTransactionsCount,
     overdueReturnsCount: data.overdueReturnsCount,
   };

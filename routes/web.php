@@ -104,6 +104,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::get('/inventory', fn () => redirect('/spa/inventory'))->name('inventory');
     Route::get('/inventory/export', [PropertyCustodianController::class, 'exportInventory'])->name('inventory.export');
+    Route::get('/inventory/export-pdf', [PropertyCustodianController::class, 'exportInventoryPdf'])->name('inventory.export-pdf');
 
     Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
 
@@ -112,6 +113,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::delete('/inventory/{inventory}', [PropertyCustodianController::class, 'destroyInventory'])->name('inventory.destroy');
 
     Route::get('/transactions', fn () => redirect('/spa/transactions'))->name('transactions');
+    Route::get('/transactions/export-pdf', [PropertyCustodianController::class, 'exportTransactionsPdf'])->name('transactions.export-pdf');
 
     Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assignItem'); 
     Route::post('/transactions/{transactionId}/manual-return', [PropertyCustodianController::class, 'returnManualIssue'])->name('transactions.manual-return');
@@ -178,8 +180,10 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
     Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
     Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
     Route::delete('/requests/{id}', [EndUserController::class, 'cancelRequest'])->name('requests.cancel');
+    Route::get('/requests/export-pdf', [EndUserController::class, 'exportRequestsPdf'])->name('requests.export-pdf');
 
     Route::get('/assigned-items', fn () => redirect('/spa/end-user/assigned'))->name('my-assigned-items');
+    Route::get('/assigned-items/export-pdf', [EndUserController::class, 'exportAssignedItemsPdf'])->name('assigned-items.export-pdf');
     Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('assigned-items.transfer');
     Route::post('/transfer/{id}/cancel', [EndUserController::class, 'cancelTransfer'])->name('transfer.cancel');
     Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');
@@ -257,6 +261,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::get('/dashboard', [PropertyCustodianController::class, 'dashboard'])->name('dashboard');
         Route::get('/inventory', [PropertyCustodianController::class, 'inventory'])->name('inventory');
         Route::get('/inventory/export', [PropertyCustodianController::class, 'exportInventory'])->name('inventory.export');
+    Route::get('/inventory/export-pdf', [PropertyCustodianController::class, 'exportInventoryPdf'])->name('inventory.export-pdf');
         Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
         Route::post('/inventory/stock-in/import', [PropertyCustodianController::class, 'stockInImport'])->name('inventory.stock-in.import');
         Route::get('/inventory/qr/lookup', [PropertyCustodianController::class, 'qrLookup'])->name('inventory.qr.lookup');
@@ -273,6 +278,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/maintenance/{id}/decline', [PropertyCustodianController::class, 'declineMaintenanceReport'])->name('maintenance.decline');
         Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
         Route::get('/transactions', [PropertyCustodianController::class, 'transactions'])->name('transactions');
+        Route::get('/transactions/export-pdf', [PropertyCustodianController::class, 'exportTransactionsPdf'])->name('transactions.export-pdf');
         Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assign');
         Route::post('/transactions/{transactionId}/manual-return', [PropertyCustodianController::class, 'returnManualIssue'])->name('transactions.manual-return');
         Route::post('/requests/{id}/approve', [PropertyCustodianController::class, 'approveRequest'])->name('requests.approve');
@@ -312,7 +318,9 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
         Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
         Route::delete('/requests/{id}', [EndUserController::class, 'cancelRequest'])->name('requests.cancel');
+    Route::get('/requests/export-pdf', [EndUserController::class, 'exportRequestsPdf'])->name('requests.export-pdf');
         Route::get('/assigned-items', [EndUserController::class, 'myAssignedItems'])->name('assigned-items');
+        Route::get('/assigned-items/export-pdf', [EndUserController::class, 'exportAssignedItemsPdf'])->name('assigned-items.export-pdf');
         Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('transfer');
         Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');
         Route::post('/inventory/{itemId}/cancel-return', [EndUserController::class, 'cancelReturnRequest'])->name('inventory.cancel-return');
@@ -351,6 +359,11 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/settings', [AdminSettingsController::class, 'update'])->name('settings.update');
         Route::post('/settings/clear-cache', [AdminSettingsController::class, 'clearCache'])->name('settings.clear-cache');
         Route::post('/settings/ping-ai', [AdminSettingsController::class, 'pingAi'])->name('settings.ping-ai');
+        Route::get('/settings/keys', [AdminSettingsController::class, 'keys'])->name('settings.keys.index');
+        Route::post('/settings/keys', [AdminSettingsController::class, 'storeKey'])->name('settings.keys.store');
+        Route::patch('/settings/keys/{key}', [AdminSettingsController::class, 'updateKey'])->name('settings.keys.update');
+        Route::delete('/settings/keys/{key}', [AdminSettingsController::class, 'destroyKey'])->name('settings.keys.destroy');
+        Route::post('/settings/keys/{key}/ping', [AdminSettingsController::class, 'pingKey'])->name('settings.keys.ping');
     });
 });
 

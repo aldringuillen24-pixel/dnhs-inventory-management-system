@@ -832,3 +832,91 @@ test('stock-in import creates valid rows and reports per-row errors', function (
         ->and(Inventory::where('item_name', 'Bond Paper')->value('quantity'))->toBe(5)
         ->and(Inventory::where('serial_number', 'SN-001')->exists())->toBeTrue();
 });
+
+test('inventory exportPdf returns filtered groups as a pdf and rejects non-custodians', function () {
+    $consumables = Category::firstOrCreate(
+        ['category_name' => 'Consumables'],
+        ['requires_serial_number' => false]
+    );
+    $furniture = Category::firstOrCreate(
+        ['category_name' => 'Furniture'],
+        ['requires_serial_number' => false]
+    );
+
+    Inventory::create([
+        'category_id' => $consumables->category_id,
+        'unit' => 'ream',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Bond Paper',
+        'quantity' => 10,
+        'unit_cost' => 250,
+        'date_acquired' => '2026-10-01',
+    ]);
+    Inventory::create([
+        'category_id' => $furniture->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Office Chair',
+        'quantity' => 4,
+        'unit_cost' => 1800,
+        'date_acquired' => '2026-10-01',
+    ]);
+
+    $response = $this->actingAs($this->propertyCustodian)->get(route('propertyCustodian.inventory.export-pdf', [
+        'workspace' => 'all',
+        'search' => 'bond',
+        'category_id' => $consumables->category_id,
+    ]));
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/pdf');
+    expect($response->headers->get('Content-Disposition'))->toContain('dnhs_inventory_all_');
+
+    $html = view('pdfs.inventory-export', [
+        'groups' => collect([[
+            'item_name' => 'Bond Paper',
+            'ics_no' => null,
+            'category' => 'Consumables',
+            'quantity' => 10,
+            'unit_cost' => 250.0,
+            'total_cost' => 2500.0,
+            'status' => 'Available',
+        ]]),
+        'totalQuantity' => 10,
+        'totalValue' => 2500.0,
+        'filterSummary' => 'Workspace: all; Search: "bond"',
+        'generatedAt' => now()->format('F j, Y g:i A'),
+        'preparedBy' => 'Property Custodian',
+    ])->render();
+
+    expect($html)->toContain('Bond Paper')->and($html)->not->toContain('Office Chair');
+
+    $emptyHtml = view('pdfs.inventory-export', [
+        'groups' => collect(),
+        'totalQuantity' => 0,
+        'totalValue' => 0.0,
+        'filterSummary' => 'Workspace: all',
+        'generatedAt' => now()->format('F j, Y g:i A'),
+        'preparedBy' => 'Property Custodian',
+    ])->render();
+
+    expect($emptyHtml)->toContain('No records match the current filters.');
+
+    $this->actingAs($this->propertyCustodian)->get(route('propertyCustodian.inventory.export-pdf', [
+        'workspace' => 'all',
+        'search' => 'zzz-no-match',
+        'category_id' => '',
+    ]))->assertOk();
+
+    $endUserRole = Role::create(['role_name' => 'End User']);
+    $endUser = User::create([
+        'role_id' => $endUserRole->role_id,
+        'first_name' => 'End',
+        'last_name' => 'User',
+        'username' => 'end-user',
+        'email' => 'enduser@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+
+    $this->actingAs($endUser)->get(route('propertyCustodian.inventory.export-pdf'))->assertForbidden();
+});
