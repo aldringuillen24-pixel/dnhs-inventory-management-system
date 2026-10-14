@@ -9,6 +9,7 @@ use App\Support\SampleForecastData;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -50,38 +51,56 @@ class TrainDemandForecast extends Command
         }
 
         $csvPath = $disk->path('forecast/real-stock-out-data.csv');
-        $forecastPath = $disk->path('forecast/forecast.json');
-        $modelPath = $disk->path('models/demand-model.joblib');
 
         try {
             $disk->makeDirectory('forecast');
-            $disk->makeDirectory('models');
             $this->writeLiveTrainingStatus($disk, 'running');
             $this->exportApprovedStockOuts($csvPath);
 
-            $process = new Process([
-                config('forecast.python_binary'),
-                base_path('ml/forecast_demand.py'),
-                '--input', $csvPath,
-                '--minimum-history', (string) max(1, (int) config('forecast.minimum_history', 3)),
-                '--output', $forecastPath,
-                '--model-output', $modelPath,
-            ], base_path());
-            $process->setTimeout(120);
-            $process->run();
-
-            if (! $process->isSuccessful()) {
-                throw new \RuntimeException(trim($process->getErrorOutput()) ?: trim($process->getOutput()) ?: 'Python training process failed.');
+            $apiUrl = rtrim((string) config('forecast.api_url'), '/');
+            $apiToken = (string) config('forecast.api_token');
+            if ($apiUrl === '' || $apiToken === '') {
+                throw new \RuntimeException('Forecast API URL and token must be configured.');
+            }
+            if (parse_url($apiUrl, PHP_URL_SCHEME) !== 'https' && ! app()->environment(['local', 'testing'])) {
+                throw new \RuntimeException('Forecast API URL must use HTTPS outside local and testing environments.');
             }
 
-            // The file is still written for local work and for the export used
-            // by the training CSV, but the database copy is what any other
-            // instance (a Render cron job, or the web service after a redeploy)
-            // will actually read.
+            $csv = fopen($csvPath, 'rb');
+            if ($csv === false) {
+                throw new \RuntimeException("Unable to read forecast export: {$csvPath}");
+            }
+
+            try {
+                $response = Http::connectTimeout(10)
+                    ->timeout(120)
+                    ->withToken($apiToken)
+                    ->attach('file', $csv, basename($csvPath))
+                    ->post($apiUrl.'/forecast', [
+                        'minimum_history' => max(1, (int) config('forecast.minimum_history', 3)),
+                    ]);
+            } finally {
+                fclose($csv);
+            }
+
+            $response->throw();
+            $forecast = $response->json();
+            if (! is_array($forecast)
+                || ($forecast['schema_version'] ?? null) !== 2
+                || ($forecast['source_type'] ?? null) !== ForecastPayload::SOURCE_LIVE
+                || ($forecast['model_version'] ?? null) !== 'demand-linear-regression-v2'
+                || ! is_string($forecast['generated_at'] ?? null)
+                || ! is_array($forecast['forecasts'] ?? null)
+                || ! array_is_list($forecast['forecasts'])
+                || ! is_array($forecast['insufficient_history'] ?? null)
+                || ! array_is_list($forecast['insufficient_history'])) {
+                throw new \UnexpectedValueException('Forecast API returned an invalid forecast document.');
+            }
+
             $this->storedForecastService->persistTraining(
                 ForecastPayload::SOURCE_LIVE,
                 'success',
-                $disk->get('forecast/forecast.json'),
+                json_encode($forecast, JSON_THROW_ON_ERROR),
             );
 
             $this->writeLiveTrainingStatus($disk, 'success');

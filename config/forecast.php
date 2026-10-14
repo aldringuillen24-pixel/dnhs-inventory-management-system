@@ -1,9 +1,10 @@
 <?php
 
 return [
+    'api_url' => env('FORECAST_API_URL'),
+    'api_token' => env('FORECAST_API_TOKEN'),
     /*
-     * Override this when the server uses a virtual environment, for example:
-     * FORECAST_PYTHON_BINARY=C:\\path\\to\\venv\\Scripts\\python.exe
+     * Used only by the isolated sample/demo trainer.
      */
     'python_binary' => env('FORECAST_PYTHON_BINARY', 'python'),
     'minimum_history' => (int) env('FORECAST_MINIMUM_HISTORY', 3),

@@ -5,6 +5,19 @@
 
 services:
   - type: web
+    name: dnhs-demand-forecast
+    runtime: python
+    rootDir: ./ml
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    plan: free
+    region: singapore
+    envVars:
+      - key: ML_API_TOKEN
+        generateValue: true
+
+  - type: web
     name: dnhs-inventory
     runtime: docker
     dockerfilePath: ./Dockerfile
@@ -46,6 +59,10 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.1-flash-lite
+      - key: FORECAST_API_URL
+        sync: false # Set to the dnhs-demand-forecast service URL.
+      - key: FORECAST_API_TOKEN
+        sync: false # Set to the same value generated for ML_API_TOKEN.
       - key: FORECAST_PYTHON_BINARY
         value: python3
       - key: FORECAST_DEMO_MODE
@@ -95,6 +112,10 @@ services:
         value: database
       - key: FILESYSTEM_DISK
         value: local
+      - key: FORECAST_API_URL
+        sync: false
+      - key: FORECAST_API_TOKEN
+        sync: false
       - key: FORECAST_PYTHON_BINARY
         value: python3
       - key: FORECAST_DEMO_MODE

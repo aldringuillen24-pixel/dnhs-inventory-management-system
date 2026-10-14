@@ -8,12 +8,13 @@ use App\Models\User;
 use App\Services\StoredDemandForecastService;
 use Illuminate\Console\Command;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
-test('training exports stock-outs to forecast storage and logs Python failures', function () {
+test('training exports stock-outs and logs forecast API failures', function () {
     Storage::fake('forecast');
 
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
@@ -90,7 +91,11 @@ test('training exports stock-outs to forecast storage and logs Python failures',
     ]);
     $durableMovement->forceFill(['created_at' => $stockOutDate, 'updated_at' => $stockOutDate])->save();
 
-    config(['forecast.python_binary' => base_path('missing-forecast-python')]);
+    config([
+        'forecast.api_url' => 'https://forecast.example.test',
+        'forecast.api_token' => 'forecast-test-token',
+    ]);
+    Http::fake(['*' => Http::response(['detail' => 'Service unavailable'], 503)]);
     $expectedCsvPath = Storage::disk('forecast')->path('forecast/real-stock-out-data.csv');
     Log::shouldReceive('error')
         ->once()
@@ -103,6 +108,12 @@ test('training exports stock-outs to forecast storage and logs Python failures',
     $this->artisan('forecast:train')
         ->expectsOutput('Demand forecast training failed. Check the Laravel log for details.')
         ->assertExitCode(Command::FAILURE);
+
+    Http::assertSent(fn ($request): bool =>
+        $request->url() === 'https://forecast.example.test/forecast'
+        && $request->hasHeader('Authorization', 'Bearer '.config('forecast.api_token'))
+        && $request->method() === 'POST'
+    );
 
     $csv = Storage::disk('forecast')->get('forecast/real-stock-out-data.csv');
     $rows = array_map(
@@ -125,6 +136,33 @@ test('training exports stock-outs to forecast storage and logs Python failures',
         ->and(count($rows))->toBe(3)
         ->and(json_decode(Storage::disk('forecast')->get('forecast/training-status.json'), true)['status'])->toBe('failed')
         ->and(app(StoredDemandForecastService::class)->read($user)['status'])->toBe('failed');
+});
+
+test('training persists the forecast JSON returned by the API', function () {
+    Storage::fake('forecast');
+    config([
+        'forecast.api_url' => 'https://forecast.example.test',
+        'forecast.api_token' => 'forecast-test-token',
+    ]);
+    Http::fake(['*' => Http::response([
+        'schema_version' => 2,
+        'source_type' => 'live',
+        'model_version' => 'demand-linear-regression-v2',
+        'generated_at' => now()->toIso8601String(),
+        'forecasts' => [],
+        'insufficient_history' => [],
+    ])]);
+
+    $this->artisan('forecast:train')
+        ->expectsOutput('Demand forecast trained and saved.')
+        ->assertExitCode(Command::SUCCESS);
+
+    $this->assertDatabaseHas('forecast_payloads', [
+        'source_type' => 'live',
+        'training_status' => 'success',
+    ]);
+    expect(json_decode(Storage::disk('forecast')->get('forecast/training-status.json'), true)['status'])
+        ->toBe('success');
 });
 
 test('sample training uses isolated demo paths and never overwrites live artifacts', function () {
