@@ -144,8 +144,8 @@
         <!-- Toolbar: Search + Category + Stats + Bulk Actions -->
         <div class="flex shrink-0 flex-col gap-2.5 border-b border-gray-100 p-2.5 dark:border-white/5 min-[480px]:gap-3 min-[480px]:p-4 sm:flex-row sm:items-center">
           <!-- Search Input -->
-          <div class="relative w-full sm:max-w-xs">
-            <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400 min-[480px]:left-3 min-[480px]:h-4 min-[480px]:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div class="relative w-full sm:max-w-[17rem]">
+            <svg             class="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
             </svg>
             <input
@@ -153,7 +153,7 @@
               type="search"
               placeholder="Search item, category, assignee, ICS no…"
               aria-label="Search inventory"
-              class="w-full rounded-md border border-gray-200 bg-gray-50/60 py-1.5 pl-8 pr-8 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100 dark:focus:border-emerald-400 dark:focus:bg-gray-800 min-[480px]:py-2 min-[480px]:pl-9 min-[480px]:text-sm [&::-webkit-search-cancel-button]:hidden"
+              class="w-full rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-1.5 pl-7 pr-7 text-[11px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100 dark:focus:border-emerald-400 dark:focus:bg-gray-800 [&::-webkit-search-cancel-button]:hidden"
             />
             <button
               v-if="search"
@@ -168,11 +168,11 @@
           </div>
 
           <!-- Category Select -->
-          <div class="w-full sm:max-w-xs">
+          <div class="w-full sm:max-w-[17rem]">
             <select
               v-model="categoryFilter"
               aria-label="Filter inventory by category"
-              class="w-full rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-1.5 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100 dark:focus:border-emerald-400 min-[480px]:px-3 min-[480px]:py-2 min-[480px]:text-sm"
+              class="w-full rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-1.5 text-[11px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100 dark:focus:border-emerald-400"
             >
               <option value="">All Categories ({{ categories.length }})</option>
               <option v-for="category in categories" :key="category.category_id" :value="category.category_id">
@@ -184,9 +184,9 @@
           <!-- Export PDF -->
           <a
             :href="exportPdfHref"
-            class="shrink-0 inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-200 dark:hover:bg-gray-700/60 min-[480px]:px-3 min-[480px]:py-2 min-[480px]:text-sm sm:w-auto"
+            class="shrink-0 inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-50 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-200 dark:hover:bg-gray-700/60 sm:w-auto"
           >
-            <svg class="h-4 w-4 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <svg class="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
             </svg>
             Export PDF

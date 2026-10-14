@@ -1389,35 +1389,35 @@ class PropertyCustodianController extends Controller
         $search = strtolower($filters['search'] ?? '');
         $categoryId = $filters['category_id'] ?? null;
 
-        $query = Inventory::query()->with(['category', 'assignedTo']);
-
-        if ($workspace === 'all') {
-            $query->where('status', '!=', 'disposed');
-        } elseif ($workspace === 'assigned') {
-            $query->whereIn('status', Inventory::CUSTODY_STATUSES);
-        } else {
-            $query->where('status', $workspace);
-        }
-
+        $query = Inventory::query()->with('category');
         if ($categoryId) {
             $query->where('category_id', $categoryId);
         }
 
-        if ($search !== '') {
-            $query->where(function ($scope) use ($search): void {
-                $scope->where('item_name', 'like', "%{$search}%")
-                    ->orWhere('ics_no', 'like', "%{$search}%")
-                    ->orWhere('description', 'like', "%{$search}%")
-                    ->orWhereHas('category', fn ($category) => $category->where('category_name', 'like', "%{$search}%"))
-                    ->orWhereHas('assignedTo', fn ($user) => $user
-                        ->where('first_name', 'like', "%{$search}%")
-                        ->orWhere('last_name', 'like', "%{$search}%")
-                        ->orWhere('username', 'like', "%{$search}%"));
-            });
-        }
+        $inventoryItems = $query->orderBy('item_name')->get();
+        $assignmentsByItem = Transaction::query()
+            ->with('user:id,first_name,last_name,username')
+            ->where('status', 'assigned')
+            ->whereIn('item_id', $inventoryItems->pluck('item_id'))
+            ->get()
+            ->groupBy('item_id');
 
-        // Same group key as the listing: (name, category, unit, status, ics_no).
-        $groups = $query->orderBy('item_name')->get()
+        $inventoryItems = $inventoryItems->filter(function (Inventory $item) use ($workspace, $assignmentsByItem): bool {
+            $hasAssignments = $assignmentsByItem->has($item->item_id);
+
+            if ($workspace === 'all') {
+                return $item->status !== 'disposed';
+            }
+            if ($workspace === 'assigned') {
+                return $item->status === 'assigned'
+                    || ($item->status === 'under_inspection' && $hasAssignments)
+                    || ($item->status === 'available' && $hasAssignments);
+            }
+
+            return $item->status === $workspace;
+        })->values();
+
+        $groups = $inventoryItems
             ->groupBy(fn (Inventory $item): string => implode('|', [
                 (string) $item->item_name,
                 (string) $item->category_id,
@@ -1425,15 +1425,81 @@ class PropertyCustodianController extends Controller
                 (string) ($item->status ?? ''),
                 (string) ($item->ics_no ?? ''),
             ]))
-            ->map(fn ($items) => [
-                'item_name' => $items->first()->item_name,
-                'ics_no' => $items->first()->ics_no,
-                'category' => $items->first()->category?->category_name ?? 'Uncategorized',
-                'quantity' => (int) $items->sum('quantity'),
-                'unit_cost' => (float) $items->avg('unit_cost'),
-                'total_cost' => (float) $items->sum(fn (Inventory $item): float => (int) $item->quantity * (float) $item->unit_cost),
-                'status' => ucwords(str_replace('_', ' ', (string) $items->first()->status)),
-            ])
+            ->map(function ($items) use ($assignmentsByItem) {
+                $itemAssignments = $items
+                    ->flatMap(fn (Inventory $item) => $assignmentsByItem->get($item->item_id, collect()));
+                $assignees = $itemAssignments
+                    ->groupBy(fn (Transaction $transaction): string => $transaction->user?->full_name
+                        ?? $transaction->user?->username
+                        ?? $transaction->manual_recipient_name
+                        ?? 'Recorded assignee')
+                    ->keys()
+                    ->implode(', ');
+                $assigneeNames = $itemAssignments
+                    ->map(fn (Transaction $transaction): string => $transaction->user?->full_name
+                        ?? $transaction->user?->username
+                        ?? $transaction->manual_recipient_name
+                        ?? 'Recorded assignee')
+                    ->unique()
+                    ->implode(', ');
+
+                $displayQuantity = (int) $items->sum(function (Inventory $item) use ($assignmentsByItem): int {
+                    $itemAssignments = $assignmentsByItem->get($item->item_id, collect());
+                    $assignedQuantity = (int) $itemAssignments->sum('quantity');
+
+                    return $item->status === 'available'
+                        ? $assignedQuantity
+                        : (($item->status === 'assigned' || $item->status === 'under_inspection') && $itemAssignments->isNotEmpty()
+                            ? $assignedQuantity
+                            : (int) $item->quantity);
+                });
+                $costQuantity = (int) $items->sum(function (Inventory $item) use ($assignmentsByItem): int {
+                    $itemAssignments = $assignmentsByItem->get($item->item_id, collect());
+                    $assignedQuantity = (int) $itemAssignments->sum('quantity');
+
+                    return in_array($item->status, ['assigned', 'under_inspection', 'under_repair'], true)
+                        ? ($itemAssignments->isNotEmpty() ? $assignedQuantity : (int) $item->quantity)
+                        : (int) $item->quantity;
+                });
+                $totalCost = (float) $items->sum(function (Inventory $item) use ($assignmentsByItem): float {
+                    $itemAssignments = $assignmentsByItem->get($item->item_id, collect());
+                    $assignedQuantity = (int) $itemAssignments->sum('quantity');
+                    $quantity = in_array($item->status, ['assigned', 'under_inspection', 'under_repair'], true)
+                        ? ($itemAssignments->isNotEmpty() ? $assignedQuantity : (int) $item->quantity)
+                        : (int) $item->quantity;
+
+                    return $quantity * (float) $item->unit_cost;
+                });
+
+                return [
+                    'item_name' => $items->first()->item_name,
+                    'ics_no' => $items->first()->ics_no,
+                    'category' => $items->first()->category?->category_name ?? 'Uncategorized',
+                    'description' => $items->max('description') ?? '',
+                    'unit' => $items->first()->unit,
+                    'quantity' => $displayQuantity,
+                    'unit_cost' => $costQuantity > 0 ? $totalCost / $costQuantity : (float) $items->avg('unit_cost'),
+                    'total_cost' => $totalCost,
+                    'status' => $items->first()->status === 'available' && $displayQuantity > 0
+                        ? 'Assigned'
+                        : ucwords(str_replace('_', ' ', (string) $items->first()->status)),
+                    'assignee' => $assignees,
+                    'assignee_names' => $assigneeNames,
+                ];
+            })
+            ->filter(function (array $group) use ($search): bool {
+                if ($search === '') {
+                    return true;
+                }
+
+                return str_contains(mb_strtolower(implode(' ', [
+                    $group['item_name'],
+                    $group['category'],
+                    $group['ics_no'] ?? '',
+                    $group['description'],
+                    $group['assignee_names'],
+                ])), $search);
+            })
             ->sortBy('item_name')
             ->values();
 
@@ -1446,11 +1512,12 @@ class PropertyCustodianController extends Controller
             'totalQuantity' => $groups->sum('quantity'),
             'totalValue' => $groups->sum('total_cost'),
             'filterSummary' => $filterSummary,
+            'workspace' => $workspace,
             'generatedAt' => now()->format('F j, Y g:i A'),
             'preparedBy' => trim($request->user()->first_name . ' ' . $request->user()->last_name)
                 ?: $request->user()->username,
         ]);
-        $pdf->setPaper('a4', 'landscape');
+        $pdf->setPaper('a4', 'portrait');
 
         return $pdf->download("dnhs_inventory_{$workspace}_" . now()->format('Y-m-d_His') . '.pdf');
     }
