@@ -50,3 +50,58 @@ services:
         value: python3
       - key: FORECAST_DEMO_MODE
         value: "false"
+      - key: FORECAST_MINIMUM_HISTORY
+        value: "3"
+      - key: FORECAST_LEAD_TIME_MONTHS
+        value: "1"
+      - key: FORECAST_SAFETY_STOCK_RATE
+        value: "0.25"
+
+  - type: cron
+    name: dnhs-forecast-train
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    schedule: "0 2 * * *"
+    command: "php artisan forecast:train --no-interaction"
+    envVars:
+      - key: APP_NAME
+        value: DNHS Inventory
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        sync: false
+        required: true
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_DATABASE
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: SESSION_DRIVER
+        value: database
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: FILESYSTEM_DISK
+        value: local
+      - key: FORECAST_PYTHON_BINARY
+        value: python3
+      - key: FORECAST_DEMO_MODE
+        value: "false"
+      - key: FORECAST_MINIMUM_HISTORY
+        value: "3"
+      - key: FORECAST_LEAD_TIME_MONTHS
+        value: "1"
+      - key: FORECAST_SAFETY_STOCK_RATE
+        value: "0.25"
