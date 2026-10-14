@@ -81,7 +81,7 @@ services:
     plan: free
     region: singapore
     schedule: "0 2 * * *"
-    command: "php artisan forecast:train --no-interaction"
+    startCommand: "php artisan forecast:train --no-interaction"
     envVars:
       - key: APP_NAME
         value: DNHS Inventory
