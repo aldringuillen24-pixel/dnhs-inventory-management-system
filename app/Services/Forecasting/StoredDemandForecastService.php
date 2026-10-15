@@ -1,11 +1,12 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Forecasting;
 
 use App\Models\AssignmentRequest;
 use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\User;
+use App\Services\AiCapabilityPolicy;
 use App\Support\RequestableItemMatcher;
 use App\Support\SampleForecastData;
 use Illuminate\Support\Carbon;
@@ -16,10 +17,6 @@ use Throwable;
 
 class StoredDemandForecastService
 {
-    private const FORECAST_PATH = 'forecast/forecast.json';
-
-    private const TRAINING_STATUS_PATH = 'forecast/training-status.json';
-
     public function readDemo(User $user): array
     {
         if (! app(AiCapabilityPolicy::class)->allows($user, AiCapabilityPolicy::VIEW_DEMAND_FORECAST)) {
@@ -42,28 +39,93 @@ class StoredDemandForecastService
             return $this->demoResult('error');
         }
 
-        $rows = collect([...$payload['forecasts'], ...$payload['insufficient_history']])
-            ->map(fn (array $item): array => [
-                'inventory_id' => $item['inventory_id'],
-                'item_name' => $item['item_name'],
-                'category_id' => $item['category_id'],
-                'category' => $item['category'],
-                'unit' => $item['unit'],
-                'forecast_month' => $item['forecast_month'],
-                'history_window' => $item['history_window'],
-                'monthly_usage' => $item['monthly_usage'],
-                'unknown_months' => $item['unknown_months'],
-                'months_used' => $item['months_used'],
-                'historical_months_used' => $item['verified_months_used'],
-                'required_months' => $item['required_months'],
-                'model_version' => $item['model_version'],
-                'confidence' => $item['confidence'],
-                'forecast_demand' => $item['predicted_quantity'] ?? null,
-                'status' => $item['status'],
-                'source_type' => 'demo',
-            ])
+        $forecastItems = [...$payload['forecasts'], ...$payload['insufficient_history']];
+        $inventory = Inventory::query()
+            ->withoutGlobalScope(SampleForecastData::SCOPE)
+            ->with('category:category_id,category_name')
+            ->get();
+        $pendingRequests = AssignmentRequest::query()
+            ->whereIn('status', ['waiting for approval', 'waiting for transfer approval'])
+            ->whereNotNull('item_id')
+            ->get(['item_id', 'quantity'])
+            ->groupBy('item_id')
+            ->map(fn ($requests): int => (int) $requests->sum('quantity'));
+        $unmetRequests = AssignmentRequest::query()
+            ->where('status', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT)
+            ->whereNotNull('requested_item_name')
+            ->whereNotNull('requested_category_id')
+            ->get(['requested_item_name', 'requested_category_id', 'requested_unit', 'quantity', 'user_id']);
+
+        $rows = collect($forecastItems)
+            ->map(function (array $item) use ($inventory, $pendingRequests, $unmetRequests): array {
+                $matches = $inventory->filter(fn (Inventory $candidate): bool =>
+                    $candidate->category
+                    && mb_strtolower(trim((string) $candidate->category->category_name)) === mb_strtolower(trim($item['category']))
+                    && RequestableItemMatcher::nameMatches($item['item_name'], (string) $candidate->item_name)
+                    && RequestableItemMatcher::unitMatches($item['unit'], $candidate->unit)
+                );
+                $isMatched = $matches->isNotEmpty();
+                $inventoryIds = $matches->pluck('item_id')->map(fn ($id): int => (int) $id)->all();
+                $availableStock = $isMatched
+                    ? (int) $matches->filter(fn (Inventory $candidate): bool => $candidate->status === 'available')
+                        ->sum(fn (Inventory $candidate): int => max(0, (int) $candidate->quantity))
+                    : null;
+                $pendingDemand = $isMatched
+                    ? (int) $matches->sum(fn (Inventory $candidate): int => $pendingRequests->get($candidate->item_id, 0))
+                    : null;
+                $unmet = $isMatched
+                    ? $unmetRequests->filter(fn (AssignmentRequest $request): bool =>
+                        (int) $request->requested_category_id === (int) $matches->first()->category_id
+                        && RequestableItemMatcher::nameMatches($item['item_name'], (string) $request->requested_item_name)
+                        && RequestableItemMatcher::unitMatches($item['unit'], $request->requested_unit)
+                    )
+                    : collect();
+                $unmetDemand = (int) $unmet->sum('quantity');
+                $unmetRequesters = $unmet->pluck('user_id')->filter()->unique()->count();
+                $isSuccessful = $item['status'] === 'success';
+                $forecastDemand = $item['predicted_quantity'] ?? null;
+                $safetyStock = $isSuccessful ? (int) ceil($forecastDemand * (float) config('forecast.safety_stock_rate', 0.25)) : null;
+                $suggested = $isSuccessful && $isMatched
+                    ? max(0, $forecastDemand + $safetyStock - $availableStock - $pendingDemand + $unmetDemand)
+                    : null;
+                $priority = $suggested === null ? 'Normal' : $this->priority($availableStock, $pendingDemand, $forecastDemand, $suggested);
+
+                return [
+                    'inventory_id' => $item['inventory_id'],
+                    'item_name' => $item['item_name'],
+                    'category_id' => $item['category_id'],
+                    'category' => $item['category'],
+                    'unit' => $item['unit'],
+                    'forecast_month' => $item['forecast_month'],
+                    'history_window' => $item['history_window'],
+                    'monthly_usage' => $item['monthly_usage'],
+                    'unknown_months' => $item['unknown_months'],
+                    'months_used' => $item['months_used'],
+                    'historical_months_used' => $item['verified_months_used'],
+                    'required_months' => $item['required_months'],
+                    'model_version' => $item['model_version'],
+                    'confidence' => $item['confidence'],
+                    'forecast_demand' => $forecastDemand,
+                    'inventory_match' => $isMatched ? 'matched' : 'unmatched',
+                    'matched_inventory_ids' => $inventoryIds,
+                    'available_stock' => $availableStock,
+                    'pending_demand' => $pendingDemand,
+                    'pending_requests' => $pendingDemand,
+                    'unmet_demand' => $unmetDemand,
+                    'unmet_requesters' => $unmetRequesters,
+                    'safety_stock' => $isMatched ? $safetyStock : null,
+                    'suggested_procurement' => $suggested,
+                    'needs_procurement' => $suggested !== null && $suggested > 0,
+                    'priority' => $priority,
+                    'priority_rank' => $this->priorityRank($priority),
+                    'status' => $item['status'],
+                    'source_type' => 'demo',
+                ];
+            })
             ->sortBy([['inventory_id', 'asc'], ['category_id', 'asc']])
             ->values();
+        $successfulRows = $rows->where('status', 'success');
+        $matchedRows = $rows->where('inventory_match', 'matched');
 
         return [
             'status' => $payload['forecasts'] === [] ? 'insufficient_data' : 'success',
@@ -77,6 +139,10 @@ class StoredDemandForecastService
             'summary' => [
                 'items_forecasted' => count($payload['forecasts']),
                 'items_insufficient_history' => count($payload['insufficient_history']),
+                'items_matched_to_inventory' => $matchedRows->count(),
+                'items_without_inventory_match' => $rows->where('inventory_match', 'unmatched')->count(),
+                'items_needing_procurement' => $matchedRows->where('needs_procurement', true)->count(),
+                'suggested_units_to_procure' => (int) $matchedRows->sum('suggested_procurement'),
             ],
         ];
     }
@@ -277,6 +343,8 @@ class StoredDemandForecastService
         }
 
         $forecastItems = [...$payload['forecasts'], ...$payload['insufficient_history']];
+        $forecastInventoryIds = collect($forecastItems)->pluck('inventory_id')->all();
+        $forecastCategoryIds = collect($forecastItems)->pluck('category_id')->all();
         // Sample forecast rows are hidden from every other part of the app, but
         // this is the one screen they exist for. Without this opt-out every row
         // would look like an orphaned item and the whole forecast would be
@@ -284,7 +352,9 @@ class StoredDemandForecastService
         $inventory = Inventory::query()
             ->withoutGlobalScope(SampleForecastData::SCOPE)
             ->with('category:category_id,category_name')
-            ->whereIn('item_id', collect($forecastItems)->pluck('inventory_id')->all())
+            ->where(fn ($query) => $query
+                ->whereIn('item_id', $forecastInventoryIds)
+                ->orWhereIn('category_id', $forecastCategoryIds))
             ->get()
             ->keyBy('item_id');
         $pendingDemand = AssignmentRequest::query()
@@ -314,38 +384,52 @@ class StoredDemandForecastService
             ->values();
 
         foreach ($orderedForecastItems as $item) {
-            $record = $inventory->get($item['inventory_id']);
-            if (! $record || (int) $record->category_id !== $item['category_id']) {
+            $matchedIds = $item['matched_inventory_ids'] ?? [(int) $item['inventory_id']];
+            $matchingInventory = $inventory->only($matchedIds)
+                ->filter(fn (Inventory $record): bool =>
+                    (int) $record->category_id === (int) $item['category_id']
+                    && RequestableItemMatcher::nameMatches($item['item_name'], (string) $record->item_name)
+                    && RequestableItemMatcher::unitMatches($item['unit'], $record->unit)
+                )
+                ->values();
+            if ($matchingInventory->isEmpty()) {
+                $matchingInventory = $inventory->filter(fn (Inventory $record): bool =>
+                    (int) $record->category_id === (int) $item['category_id']
+                    && RequestableItemMatcher::nameMatches($item['item_name'], (string) $record->item_name)
+                    && RequestableItemMatcher::unitMatches($item['unit'], $record->unit)
+                )->values();
+            }
+
+            if ($matchingInventory->isEmpty()) {
                 $orphaned[] = (int) $item['inventory_id'];
+                $rows->push($this->demandOnlyForecastRow($item));
 
                 continue;
             }
+            $record = $matchingInventory->first();
 
-            // Unmet demand is keyed by the inventory id it resolved to, so this
-            // lookup can only ever match one row. The previous group-key guard
-            // had to walk rows in id order to avoid double-counting serialized
-            // item types; resolving first makes that unnecessary.
-            $unmet = $unmetDemand->get((int) $record->item_id);
+            $unmet = $matchingInventory
+                ->map(fn (Inventory $candidate) => $unmetDemand->get((int) $candidate->item_id))
+                ->filter()
+                ->first();
 
             $rows->push($this->validatedForecastRow(
                 $item,
                 $record,
-                (int) ($pendingDemand->get($record->item_id) ?? 0),
+                (int) $matchingInventory->sum(fn (Inventory $candidate): int => (int) ($pendingDemand->get($candidate->item_id) ?? 0)),
                 $unmet,
+                $matchingInventory,
             ));
         }
 
         if ($orphaned !== []) {
-            Log::info('Stored demand forecast skipped rows with no matching inventory item.', [
-                'orphaned_inventory_ids' => $orphaned,
-                'kept_rows' => $rows->count(),
+            Log::info('Stored demand forecast retained unmatched demand-only rows.', [
+                'unmatched_forecast_ids' => $orphaned,
+                'demand_rows' => count($orphaned),
                 'forecast_month' => $payload['forecasts'][0]['forecast_month'] ?? null,
             ]);
         }
 
-        // Every row was orphaned, so there is nothing left to present. This is
-        // distinct from a corrupt document: the file is fine, the inventory it
-        // was trained against is simply gone.
         if ($rows->isEmpty()) {
             return $this->errorResult();
         }
@@ -372,63 +456,23 @@ class StoredDemandForecastService
     /**
      * Locates the trained forecast document and its training state.
      *
-     * The database is preferred because a Render Cron Job that trains runs in a
-     * different container from the web service, and container filesystems are
-     * ephemeral. The local file is still consulted as a fallback so existing
-     * installs and the test suite keep working unchanged.
-     *
-     * @return array{payload: string, training_status: string, source: string}|null
+     * @return array{payload: string, training_status: string}|null
      */
     private function resolveLiveDocument(): ?array
     {
         $record = ForecastPayload::query()->where('source_type', ForecastPayload::SOURCE_LIVE)->first();
 
-        if ($record !== null) {
-            // A row exists but may hold no document yet: a run that is in
-            // progress or failed before writing output. The training status is
-            // what matters there, and read() refuses to serve it.
-            if (! is_string($record->payload) || trim($record->payload) === '') {
-                return [
-                    'payload' => '{}',
-                    'training_status' => (string) $record->training_status,
-                    'source' => 'database',
-                ];
-            }
-
-            return [
-                'payload' => (string) $record->payload,
-                'training_status' => (string) $record->training_status,
-                'source' => 'database',
-            ];
+        if ($record === null) {
+            return null;
         }
 
-        $disk = Storage::disk('forecast');
-        $status = 'success';
-
-        if ($disk->exists(self::TRAINING_STATUS_PATH)) {
-            $decoded = json_decode($disk->get(self::TRAINING_STATUS_PATH), true, 512, JSON_THROW_ON_ERROR);
-
-            if (! is_array($decoded) || ! in_array($decoded['status'] ?? null, ['running', 'success', 'failed'], true)) {
-                throw new \UnexpectedValueException('Live forecast training state is invalid.');
-            }
-
-            $status = (string) $decoded['status'];
-        }
-
-        if (! $disk->exists(self::FORECAST_PATH)) {
-            // No stored document at all. If a run is mid-flight or failed, that
-            // is the state to report, not "missing".
-            return $status === 'success' ? null : [
-                'payload' => '{}',
-                'training_status' => $status,
-                'source' => 'filesystem',
-            ];
-        }
-
+        // A row may hold no document yet if a run is in progress or failed
+        // before writing output. The database training status remains authoritative.
         return [
-            'payload' => $disk->get(self::FORECAST_PATH),
-            'training_status' => $status,
-            'source' => 'filesystem',
+            'payload' => is_string($record->payload) && trim($record->payload) !== ''
+                ? (string) $record->payload
+                : '{}',
+            'training_status' => (string) $record->training_status,
         ];
     }
 
@@ -495,7 +539,7 @@ class StoredDemandForecastService
         ];
         if (! is_array($item)
             || array_diff($commonKeys, array_keys($item)) !== []
-            || array_diff(array_keys($item), [...$commonKeys, 'predicted_quantity', 'validation']) !== []
+            || array_diff(array_keys($item), [...$commonKeys, 'predicted_quantity', 'validation', 'matched_inventory_ids']) !== []
             || ! is_int($item['inventory_id']) || $item['inventory_id'] < 1
             || ! is_int($item['category_id']) || $item['category_id'] < 1
             || ! is_string($item['item_name']) || trim($item['item_name']) === ''
@@ -504,6 +548,13 @@ class StoredDemandForecastService
             || $item['model_version'] !== 'demand-linear-regression-v2'
             || ! in_array($item['confidence'], ['Low', 'Medium', 'High'], true)) {
             throw new \UnexpectedValueException('Live forecast contains invalid item identity or metadata.');
+        }
+        if (array_key_exists('matched_inventory_ids', $item)
+            && (! is_array($item['matched_inventory_ids'])
+                || ! array_is_list($item['matched_inventory_ids'])
+                || count(array_unique($item['matched_inventory_ids'])) !== count($item['matched_inventory_ids'])
+                || array_filter($item['matched_inventory_ids'], fn ($id): bool => ! is_int($id) || $id < 1) !== [])) {
+            throw new \UnexpectedValueException('Live forecast contains invalid matched inventory IDs.');
         }
 
         $identity = $item['inventory_id'].':'.$item['category_id'];
@@ -648,12 +699,68 @@ class StoredDemandForecastService
      *                                            the same name+category+unit group
      *                                            already claimed it.
      */
-    private function validatedForecastRow(array $item, Inventory $inventory, int $pendingDemand, ?array $unmet = null): array
+    private function demandOnlyForecastRow(array $item): array
     {
         $isSuccessful = $item['status'] === 'success';
         $forecastDemand = $isSuccessful ? $item['predicted_quantity'] : null;
-        $availableStock = $inventory->status === 'available' ? max(0, (int) $inventory->quantity) : 0;
-        $safetyStock = $isSuccessful ? (int) ceil($forecastDemand * (float) config('forecast.safety_stock_rate', 0.25)) : null;
+        $suggested = $forecastDemand;
+        $priority = $isSuccessful
+            ? $this->priority(0, 0, $forecastDemand, $suggested)
+            : 'Normal';
+
+        return [
+            'inventory_id' => (int) $item['inventory_id'],
+            'item_name' => $item['item_name'],
+            'category_id' => (int) $item['category_id'],
+            'category' => $item['category'],
+            'unit' => $item['unit'],
+            'forecast_month' => $item['forecast_month'],
+            'history_window' => $item['history_window'],
+            'monthly_usage_values' => $item['monthly_usage'],
+            'unknown_months' => $item['unknown_months'],
+            'historical_months_used' => $item['verified_months_used'],
+            'required_months' => $item['required_months'],
+            'model_validation' => $item['validation'] ?? null,
+            'forecast_demand' => $forecastDemand,
+            'inventory_match' => 'unmatched',
+            'matched_inventory_ids' => [],
+            'available_stock' => null,
+            'pending_demand' => null,
+            'pending_requests' => null,
+            'unmet_demand' => 0,
+            'unmet_requesters' => 0,
+            'safety_stock' => null,
+            'suggested_procurement' => $suggested,
+            'needs_procurement' => $suggested !== null && $suggested > 0,
+            'priority' => $priority,
+            'priority_rank' => $this->priorityRank($priority),
+            'confidence' => $item['confidence'],
+            'calculation_basis' => $isSuccessful
+                ? 'Estimated suggested quantity equals forecast demand; no inventory stock or pending requests could be checked.'
+                : 'No procurement estimate: verified history is below the configured minimum.',
+            'advisory_status' => 'Demand prediction only; no inventory match',
+            'explanation' => $isSuccessful
+                ? 'The suggested quantity equals predicted demand because no matching inventory item exists to verify stock or pending requests. Confirm availability before ordering.'
+                : 'Predicted demand is unavailable because there is not enough verified history.',
+            'status' => $item['status'],
+            'source_type' => ForecastPayload::SOURCE_LIVE,
+        ];
+    }
+
+    private function validatedForecastRow(
+        array $item,
+        Inventory $inventory,
+        int $pendingDemand,
+        ?array $unmet = null,
+        ?Collection $matchingInventory = null,
+    ): array
+    {
+        $isSuccessful = $item['status'] === 'success';
+        $forecastDemand = $isSuccessful ? $item['predicted_quantity'] : null;
+        $matchingInventory ??= collect([$inventory]);
+        $availableStock = (int) $matchingInventory
+            ->filter(fn (Inventory $candidate): bool => $candidate->status === 'available')
+            ->sum(fn (Inventory $candidate): int => max(0, (int) $candidate->quantity));
         // Unmet demand is a POSITIVE term. It could not be folded into
         // pendingDemand, which subtracts: these are requests that could NOT be
         // satisfied, so they increase what should be bought rather than reduce
@@ -661,7 +768,7 @@ class StoredDemandForecastService
         $unmetDemand = $unmet['total_quantity'] ?? 0;
         $unmetRequesters = $unmet['requester_count'] ?? 0;
         $suggested = $isSuccessful
-            ? max(0, $forecastDemand + $safetyStock - $availableStock - $pendingDemand + $unmetDemand)
+            ? max(0, $forecastDemand - $availableStock - $pendingDemand + $unmetDemand)
             : null;
         $priority = $isSuccessful ? $this->priority($availableStock, $pendingDemand, $forecastDemand, $suggested) : 'Normal';
 
@@ -679,12 +786,14 @@ class StoredDemandForecastService
             'required_months' => $item['required_months'],
             'model_validation' => $item['validation'] ?? null,
             'forecast_demand' => $forecastDemand,
+            'inventory_match' => 'matched',
+            'matched_inventory_ids' => $matchingInventory->pluck('item_id')->map(fn ($id): int => (int) $id)->all(),
             'available_stock' => $availableStock,
             'pending_demand' => $pendingDemand,
             'pending_requests' => $pendingDemand,
             'unmet_demand' => $unmetDemand,
             'unmet_requesters' => $unmetRequesters,
-            'safety_stock' => $safetyStock,
+            'safety_stock' => null,
             'suggested_procurement' => $suggested,
             'needs_procurement' => $isSuccessful && $suggested > 0,
             'priority' => $priority,
@@ -692,16 +801,16 @@ class StoredDemandForecastService
             'confidence' => $item['confidence'],
             // "pending demand" is kept in this string deliberately: tests assert on it.
             'calculation_basis' => $isSuccessful
-                ? 'max(0, forecast demand + safety stock - available stock - pending demand + unmet demand)'
+                ? 'max(0, forecast demand - available stock - pending demand + unmet demand)'
                 : 'No procurement calculation: verified history is below the configured minimum.',
             'advisory_status' => ! $isSuccessful ? 'Insufficient history; no estimate' : ($suggested > 0 ? 'Review recommended' : 'No procurement gap identified'),
             'explanation' => ! $isSuccessful
                 ? 'More verified completed demand history is required before an ML forecast can be used.'
                 : ($suggested > 0
                     ? ($unmetDemand > 0
-                        ? 'Forecast demand and safety stock exceed stock plus pending demand, and staff requested this item while it was unavailable.'
-                        : 'Forecast demand and safety stock exceed stock plus pending demand.')
-                    : 'Available stock and pending demand cover forecast demand and safety stock.'),
+                        ? 'Forecast demand exceeds available stock plus pending demand, and staff requested this item while it was unavailable.'
+                        : 'Forecast demand exceeds available stock plus pending demand.')
+                    : 'Available stock and pending demand cover forecast demand.'),
             'status' => $item['status'],
             'source_type' => 'live',
         ];

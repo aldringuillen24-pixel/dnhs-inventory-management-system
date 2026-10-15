@@ -5,9 +5,9 @@ namespace App\Services\Forecast;
 use App\Models\User;
 use App\Services\AiCapabilityPolicy;
 use App\Services\Conversation\ConversationContextManager;
-use App\Services\ForecastExplanationService;
+use App\Services\Forecasting\ForecastExplanationService;
 use App\Services\ProcurementQuestionMatcher;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -459,16 +459,15 @@ class ForecastChatHandoff
             $lines[] = 'Showing the '.count($shown).' highest priority of '.$total.' items.';
         }
 
-        // Narrowed to the decision columns. The removed ones (available stock,
-        // pending demand, confidence, advisory status) are still shown on the
-        // Demand Forecast page and explained by AI Decision Support.
-        $lines[] = '| Item | Predicted demand | Safety stock | Suggested quantity | Priority |';
+        // Narrowed to the decision columns. Pending demand, confidence, and
+        // advisory status remain on the Demand Forecast page and in AI support.
+        $lines[] = '| Item | Predicted demand | Available stock | Suggested quantity | Priority |';
         $lines[] = '|---|---:|---:|---:|---|';
 
         foreach ($shown as $row) {
             $lines[] = '| '.$row['item_name'].' (ID '.$row['inventory_id'].') | '
                 .($row['forecast_demand'] ?? 'N/A').' '.($row['unit'] ?? '')
-                .' | '.($row['safety_stock'] ?? 'N/A').' '.($row['unit'] ?? '')
+                .' | '.($row['available_stock'] ?? 'N/A').' '.($row['unit'] ?? '')
                 .' | '.($row['suggested_procurement'] ?? 'N/A').' '.($row['unit'] ?? '')
                 .' | '.($row['priority'] ?? '—').' |';
         }

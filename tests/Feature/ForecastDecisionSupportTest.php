@@ -8,7 +8,7 @@ use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\ForecastDecisionSupportService;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -28,16 +28,6 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     Storage::fake('forecast');
 
-    foreach ([
-        'forecast/forecast.json',
-        'forecast/training-status.json',
-    ] as $file) {
-        $source = storage_path('app/'.$file);
-        if (is_file($source)) {
-            Storage::disk('forecast')->put($file, file_get_contents($source));
-        }
-    }
-
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
     $this->custodian = User::firstOrCreate(
         ['username' => 'decision-custodian'],
@@ -51,49 +41,7 @@ beforeEach(function () {
         ],
     );
 
-    // The stored forecast is validated against live inventory rows: every item
-    // it names must exist with a matching id, category and name. Category ids
-    // differ between the production database and this isolated one, so remap
-    // them by name; predictions, history and confidence stay exactly as trained.
-    $forecast = json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true);
-    $rows = array_merge($forecast['forecasts'] ?? [], $forecast['insufficient_history'] ?? []);
-
-    foreach ($rows as $index => $row) {
-        $category = Category::firstOrCreate(
-            ['category_name' => $row['category']],
-            ['requires_serial_number' => false],
-        );
-
-        $rows[$index]['category_id'] = (int) $category->category_id;
-
-        // Inventory::$fillable omits the item_id primary key, so the row is
-        // written through forceFill.
-        $item = Inventory::firstWhere('item_id', $row['inventory_id']) ?? new Inventory;
-
-        $item->forceFill([
-            'item_id' => $row['inventory_id'],
-            'item_name' => $row['item_name'],
-            'category_id' => $category->category_id,
-            'unit' => $row['unit'] ?? 'piece',
-            'user_id' => $this->custodian->id,
-            'quantity' => 1,
-            'unit_cost' => 100,
-            'status' => 'available',
-            'date_acquired' => '2026-06-01',
-        ])->save();
-    }
-
-    $forecast['forecasts'] = array_values(array_filter(
-        $rows,
-        fn (array $row): bool => ($row['status'] ?? '') === 'success',
-    ));
-    $forecast['insufficient_history'] = array_values(array_filter(
-        $rows,
-        fn (array $row): bool => ($row['status'] ?? '') !== 'success',
-    ));
-
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode($forecast));
-
+    seedLiveForecastTestData($this->custodian);
     $this->forecastRows = app(StoredDemandForecastService::class)->read($this->custodian)['rows'];
 });
 
@@ -180,7 +128,6 @@ test('the unmet-requests prompt answers with no unmet requests recorded', functi
 test('the unmet-requests prompt works with no trained forecast available', function () {
     // Unmet demand is live operational state, not model output, so this prompt
     // must not inherit the forecast refusal the other four prompts keep.
-    Storage::disk('forecast')->delete('forecast/forecast.json');
     ForecastPayload::query()->delete();
 
     $payload = decisionSupportPost($this, ForecastDecisionSupportService::PROMPT_UNMET_REQUESTS)
@@ -245,9 +192,9 @@ test('the local answer restates only values the forecast calculated', function (
     $approved = collect($payload['items'])
         ->flatMap(fn (array $item): array => [
             $item['forecast_demand'],
-            $item['safety_stock'],
             $item['available_stock'],
             $item['pending_demand'],
+            $item['unmet_demand'],
             $item['suggested_procurement'],
         ])
         ->filter(fn (mixed $value): bool => is_int($value) || is_float($value))
@@ -314,15 +261,15 @@ test('recommending procurement is allowed, but invented prices are not', functio
         'items' => [[
             'item_name' => 'Bond Paper',
             'forecast_demand' => 36,
-            'safety_stock' => 9,
             'available_stock' => 5,
             'pending_demand' => 0,
-            'suggested_procurement' => 40,
+            'unmet_demand' => 0,
+            'suggested_procurement' => 31,
         ]],
     ];
 
-    $accepted = 'Purchase Bond Paper first: demand 36 plus buffer 9 minus stock 5 gives a suggested 40. Urgent.';
-    $acceptedWithListSize = 'Here are the top 10 priorities. Bond Paper leads with demand 36 and a suggested 40.';
+    $accepted = 'Purchase Bond Paper first: demand 36 minus stock 5 and pending 0, plus unmet demand 0, gives a suggested 31. Urgent.';
+    $acceptedWithListSize = 'Here are the top 10 priorities. Bond Paper leads with demand 36 and a suggested 31.';
     $rejectedAsCost = 'Purchase Bond Paper first; budget around 4000 for this.';
     $rejectedAsAction = 'I have placed the order for Bond Paper and stock is updated.';
 
@@ -433,7 +380,9 @@ test('exporting the list does not change any inventory or forecast record', func
     $quantities = collect($this->forecastRows)
         ->mapWithKeys(fn (array $row): array => [$row['inventory_id'] => $row['available_stock']]);
 
-    $forecastBefore = Storage::disk('forecast')->get('forecast/forecast.json');
+    $forecastBefore = ForecastPayload::query()
+        ->where('source_type', ForecastPayload::SOURCE_LIVE)
+        ->value('payload');
 
     $this->actingAs($this->custodian)
         ->post(route('api.custodian.reports.forecast.procurement-list-pdf'), [
@@ -447,7 +396,9 @@ test('exporting the list does not change any inventory or forecast record', func
         expect($quantities->get($row['inventory_id']))->toBe($row['available_stock']);
     }
 
-    expect(Storage::disk('forecast')->get('forecast/forecast.json'))->toBe($forecastBefore);
+    expect(ForecastPayload::query()
+        ->where('source_type', ForecastPayload::SOURCE_LIVE)
+        ->value('payload'))->toBe($forecastBefore);
 });
 
 test('the PDF export is refused for a role without procurement capability', function () {
@@ -593,10 +544,10 @@ test('the grounding check approves server-computed cycle counts', function () {
         'items' => [[
             'item_name' => 'Bond Paper',
             'forecast_demand' => 36,
-            'safety_stock' => 9,
             'available_stock' => 5,
             'pending_demand' => 0,
-            'suggested_procurement' => 40,
+            'unmet_demand' => 0,
+            'suggested_procurement' => 31,
         ]],
     ];
 
@@ -628,10 +579,10 @@ test('a next-steps reply may reference counts without naming an item', function 
         'items' => [[
             'item_name' => 'Bond Paper',
             'forecast_demand' => 36,
-            'safety_stock' => 9,
             'available_stock' => 5,
             'pending_demand' => 0,
-            'suggested_procurement' => 40,
+            'unmet_demand' => 0,
+            'suggested_procurement' => 31,
         ]],
     ];
 

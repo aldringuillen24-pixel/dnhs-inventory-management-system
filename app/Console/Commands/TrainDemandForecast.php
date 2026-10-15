@@ -2,9 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Category;
 use App\Models\ForecastPayload;
+use App\Models\Inventory;
 use App\Models\StockMovement;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\StoredDemandForecastService;
+use App\Support\RequestableItemMatcher;
 use App\Support\SampleForecastData;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -17,11 +20,19 @@ use Symfony\Component\Process\Process;
 
 class TrainDemandForecast extends Command
 {
-    protected $signature = 'forecast:train {--sample : Train from the isolated ml/demo_stock_out_data.csv}';
+    protected $signature = 'forecast:train
+        {--sample : Train from the isolated ml/demo_stock_out_data.csv}
+        {--test-dataset : Train the live forecast from the local dummy dataset (local/testing only)}';
 
     protected $description = 'Export eligible completed demand and train the production ML forecast.';
 
     private const LIVE_TRAINING_STATUS_PATH = 'forecast/training-status.json';
+
+    private const CSV_COLUMNS = [
+        'inventory_id', 'item_name', 'category_id', 'category', 'unit', 'quantity_issued',
+        'stock_out_date', 'history_start_month', 'history_end_month', 'history_complete',
+        'movement_type', 'status',
+    ];
 
     public function __construct(
         protected StoredDemandForecastService $storedForecastService,
@@ -44,16 +55,29 @@ class TrainDemandForecast extends Command
 
     public function handle(): int
     {
-        $disk = Storage::disk('forecast');
+        if ($this->option('sample') && $this->option('test-dataset')) {
+            $this->error('The sample and test-dataset options cannot be used together.');
 
+            return self::FAILURE;
+        }
+        $disk = Storage::disk('forecast');
         if ($this->option('sample')) {
             return $this->trainDemoForecast($disk);
         }
+        if ($this->option('test-dataset') && ! app()->environment(['local', 'testing'])) {
+            $this->error('The dummy dataset option is available only in local and testing environments.');
 
-        $csvPath = $disk->path('forecast/real-stock-out-data.csv');
+            return self::FAILURE;
+        }
+        if ($this->option('test-dataset')) {
+            return $this->trainTestDataset($disk);
+        }
+
+        $csvPath = $disk->path('datasets/real-stock-out-data.csv');
 
         try {
             $disk->makeDirectory('forecast');
+            $disk->makeDirectory('datasets');
             $this->writeLiveTrainingStatus($disk, 'running');
             $this->exportApprovedStockOuts($csvPath);
 
@@ -118,6 +142,133 @@ class TrainDemandForecast extends Command
 
             return self::FAILURE;
         }
+    }
+
+    private function trainTestDataset($disk): int
+    {
+        $csvPath = (string) config('forecast.test_dataset_path');
+        $trainerPath = base_path('ml/forecast_demand.py');
+        $outputPath = tempnam(sys_get_temp_dir(), 'dnhs-forecast-json-');
+        $modelPath = tempnam(sys_get_temp_dir(), 'dnhs-forecast-model-');
+
+        try {
+            if ($outputPath === false || $modelPath === false) {
+                throw new \RuntimeException('Unable to create temporary forecast training outputs.');
+            }
+            if (! is_readable($csvPath) || ! is_readable($trainerPath)) {
+                throw new \RuntimeException('Test forecast dataset or trainer is missing or unreadable.');
+            }
+
+            $process = new Process([
+                config('forecast.python_binary'),
+                $trainerPath,
+                '--input', $csvPath,
+                '--output', $outputPath,
+                '--model-output', $modelPath,
+                '--minimum-history', (string) max(1, (int) config('forecast.minimum_history', 3)),
+            ], base_path());
+            $process->setTimeout(120);
+            $process->run();
+
+            if (! $process->isSuccessful()) {
+                throw new \RuntimeException(trim($process->getErrorOutput()) ?: trim($process->getOutput()) ?: 'Dummy dataset training process failed.');
+            }
+
+            $forecast = json_decode(file_get_contents($outputPath), true, 512, JSON_THROW_ON_ERROR);
+            $forecast = $this->mapTestForecastInventory($forecast);
+            $this->storedForecastService->persistTraining(
+                ForecastPayload::SOURCE_LIVE,
+                'success',
+                json_encode($forecast, JSON_THROW_ON_ERROR),
+            );
+            $this->writeLiveTrainingStatus($disk, 'success');
+
+            $this->info('Test dataset forecast trained and saved as the live forecast.');
+
+            return self::SUCCESS;
+        } catch (\Throwable $exception) {
+            Log::error('Test dataset demand forecast training failed.', [
+                'exception' => $exception,
+                'csv_path' => $csvPath,
+            ]);
+            $this->error('Test dataset demand forecast training failed. The existing live forecast was left unchanged.');
+
+            return self::FAILURE;
+        } finally {
+            if (is_string($outputPath) && is_file($outputPath)) {
+                unlink($outputPath);
+            }
+            if (is_string($modelPath) && is_file($modelPath)) {
+                unlink($modelPath);
+            }
+        }
+    }
+
+    private function mapTestForecastInventory(mixed $forecast): array
+    {
+        if (! is_array($forecast)
+            || ($forecast['schema_version'] ?? null) !== 2
+            || ($forecast['source_type'] ?? null) !== ForecastPayload::SOURCE_LIVE
+            || ($forecast['model_version'] ?? null) !== 'demand-linear-regression-v2'
+            || ! is_string($forecast['generated_at'] ?? null)
+            || ! is_array($forecast['forecasts'] ?? null)
+            || ! array_is_list($forecast['forecasts'])
+            || ! is_array($forecast['insufficient_history'] ?? null)
+            || ! array_is_list($forecast['insufficient_history'])) {
+            throw new \UnexpectedValueException('Dummy dataset trainer returned an invalid forecast document.');
+        }
+
+        $inventory = Inventory::query()
+            ->withoutGlobalScope(SampleForecastData::SCOPE)
+            ->with('category')
+            ->get();
+        $categoryIdsByName = Category::query()
+            ->get()
+            ->keyBy(fn (Category $category): string => mb_strtolower(trim($category->category_name)));
+        $nextSyntheticId = ((int) Inventory::withoutGlobalScope(SampleForecastData::SCOPE)->max('item_id')) + 1;
+        $seen = [];
+
+        foreach (['forecasts', 'insufficient_history'] as $group) {
+            foreach ($forecast[$group] as &$item) {
+                if (! is_array($item)
+                    || ! is_string($item['item_name'] ?? null)
+                    || ! is_string($item['category'] ?? null)
+                    || ! is_string($item['unit'] ?? null)) {
+                    throw new \UnexpectedValueException('Dummy dataset trainer returned an invalid item identity.');
+                }
+
+                $matches = $inventory->filter(fn (Inventory $candidate): bool =>
+                    $candidate->category
+                    && mb_strtolower(trim((string) $candidate->category->category_name)) === mb_strtolower(trim($item['category']))
+                    && RequestableItemMatcher::nameMatches($item['item_name'], (string) $candidate->item_name)
+                    && RequestableItemMatcher::unitMatches($item['unit'], $candidate->unit)
+                )->values();
+
+                if ($matches->isNotEmpty()) {
+                    $primary = $matches->first();
+                    $item['inventory_id'] = (int) $primary->item_id;
+                    $item['category_id'] = (int) $primary->category_id;
+                    $item['matched_inventory_ids'] = $matches->pluck('item_id')
+                        ->map(fn ($id): int => (int) $id)
+                        ->all();
+                } else {
+                    $item['inventory_id'] = $nextSyntheticId++;
+                    $category = $categoryIdsByName->get(mb_strtolower(trim($item['category'])));
+                    if ($category) {
+                        $item['category_id'] = (int) $category->category_id;
+                    }
+                }
+
+                $identity = $item['inventory_id'].':'.$item['category_id'];
+                if (isset($seen[$identity])) {
+                    throw new \UnexpectedValueException('Dummy dataset contains multiple forecasts that map to the same inventory item.');
+                }
+                $seen[$identity] = true;
+            }
+            unset($item);
+        }
+
+        return $forecast;
     }
 
     private function trainDemoForecast($disk): int
@@ -187,11 +338,7 @@ class TrainDemandForecast extends Command
         }
 
         try {
-            fputcsv($handle, [
-                'inventory_id', 'item_name', 'category_id', 'category', 'unit', 'quantity_issued',
-                'stock_out_date', 'history_start_month', 'history_end_month', 'history_complete',
-                'movement_type', 'status',
-            ]);
+            fputcsv($handle, self::CSV_COLUMNS);
 
             $this->eligibleDemandMovements($completedMonth)
                 // The scope has to be dropped here too, not only in the

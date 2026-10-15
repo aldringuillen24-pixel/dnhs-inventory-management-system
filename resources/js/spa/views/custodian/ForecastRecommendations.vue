@@ -235,9 +235,9 @@
                 <th class="px-4 py-3">Item</th>
                 <th class="px-3 py-3">Category</th>
                 <th class="px-3 py-3 text-right" title="Expected usage next month from verified stock-out history">Predicted demand</th>
-                <th class="px-3 py-3 text-right" :title="`Buffer added on top of predicted demand (${safetyStockRateLabel})`">Safety stock</th>
+                <th class="px-3 py-3 text-right" title="Current quantity recorded as available in inventory">Available stock</th>
                 <th class="px-3 py-3 text-right" title="Quantity staff requested while the item was unavailable">Unmet demand</th>
-                <th class="px-3 py-3 text-right" title="Predicted demand + safety stock, minus available stock and pending demand, plus unmet demand">Suggested quantity</th>
+                <th class="px-3 py-3 text-right" title="Predicted demand, minus available stock and pending demand, plus unmet demand">Suggested quantity</th>
                 <th class="px-3 py-3" title="How urgent the gap is, based on available stock against predicted demand">Priority</th>
               </tr>
             </thead>
@@ -280,10 +280,16 @@
               <template v-else>
               <template v-for="row in rows" :key="row.inventory_id">
                 <tr class="align-top transition-colors hover:bg-emerald-50/30 dark:hover:bg-emerald-950/10">
-                  <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">{{ row.item_name }}</td>
+                  <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                    {{ row.item_name }}
+                    <span
+                      v-if="row.inventory_match === 'unmatched'"
+                      class="mt-1 block text-[10px] font-normal text-amber-700 dark:text-amber-300"
+                    >Demand only · no inventory match</span>
+                  </td>
                   <td class="px-3 py-3 text-gray-600 dark:text-gray-300">{{ row.category }}</td>
                   <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.forecast_demand ?? 'N/A' }} {{ row.unit }}</td>
-                  <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.safety_stock ?? 'N/A' }} {{ row.unit }}</td>
+                  <td class="px-3 py-3 text-right tabular-nums text-gray-700 dark:text-gray-200">{{ row.available_stock ?? 'N/A' }} {{ row.unit }}</td>
                   <!-- Only shown when staff actually requested this item while
                        it was unavailable. A zero here would suggest every item
                        has unmet demand, which is not the case. -->
@@ -296,8 +302,15 @@
                     </template>
                     <span v-else class="text-gray-300 dark:text-gray-600">—</span>
                   </td>
-                  <td class="px-3 py-3 text-right font-semibold tabular-nums text-gray-900 dark:text-white">{{ row.suggested_procurement ?? 'N/A' }} {{ row.unit }}</td>
-                  <td class="px-3 py-3"><span class="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium" :class="priorityClass(row.priority)">{{ row.priority }}</span></td>
+                  <td class="px-3 py-3 text-right font-semibold tabular-nums text-gray-900 dark:text-white">
+                    {{ row.suggested_procurement ?? 'N/A' }} {{ row.unit }}
+                    <span v-if="row.inventory_match === 'unmatched' && row.suggested_procurement !== null" class="block text-[10px] font-normal text-amber-700 dark:text-amber-300">
+                      Estimate · no stock data
+                    </span>
+                  </td>
+                  <td class="px-3 py-3">
+                    <span class="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium" :class="priorityClass(row.priority)">{{ row.priority }}</span>
+                  </td>
                 </tr>
               </template>
               <tr v-if="!rows.length">
@@ -454,10 +467,11 @@ const insufficientHistoryCount = computed(() => (forecastResult.value?.rows ?? [
 // Item identity only, so the chat can recognise "why is <item> urgent?" and
 // send it to the single-item explanation endpoint.
 const forecastItemIdentity = computed(() => (forecastResult.value?.rows ?? []).map((row) => ({
+  inventory_match: row?.inventory_match,
   inventory_id: row?.inventory_id,
   item_name: row?.item_name,
   priority: row?.priority,
-})));
+})).filter((row) => row.inventory_match !== 'unmatched'));
 
 const forecastPeriod = computed(() => forecastResult.value?.forecast_period || 'Not available');
 
@@ -516,23 +530,6 @@ function format(value) {
   return Number(value ?? 0).toLocaleString();
 }
 
-// Derived from the rows the forecast actually returned, rather than a hardcoded
-// percentage, so the legend keeps describing the real buffer if the backend's
-// safety_stock_rate is ever changed. Rounded because the server ceils the value,
-// which can push a row a percent or two above the configured rate.
-const safetyStockRateLabel = computed(() => {
-  const measured = (forecastResult.value?.rows ?? []).reduce((rate, row) => {
-    const demand = Number(row?.forecast_demand);
-    const safety = Number(row?.safety_stock);
-
-    if (demand > 0 && safety > 0) return Math.max(rate, safety / demand);
-
-    return rate;
-  }, 0);
-
-  return `${Math.round((measured || 0.25) * 100)}%`;
-});
-
 async function load() {
   // The very first visit has no table to preserve, so it shows the full page
   // skeleton. Every later request (filter, sort, page, reload) refreshes only
@@ -544,7 +541,7 @@ async function load() {
   }
   error.value = '';
   try {
-    const params = { page: page.value };
+    const params = { page: page.value, source: 'live' };
     if (filters.value.search) params.search = filters.value.search;
     if (filters.value.category) params.category = filters.value.category;
     if (filters.value.priority) params.priority = filters.value.priority;

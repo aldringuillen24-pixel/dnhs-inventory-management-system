@@ -53,6 +53,31 @@ def month_offset(start_month: str, month: str) -> int:
     return (year - start_year) * 12 + index - start_index
 
 
+def predict_monthly_demand(
+    monthly_usage: dict[str, int | float], forecast_months: int
+) -> list[dict[str, int | float | str]]:
+    """Fit the production linear trend and extrapolate it for the requested horizon."""
+    if not monthly_usage:
+        raise ValueError("Monthly usage history is empty")
+
+    months = sorted(monthly_usage)
+    start_month = months[0]
+    offsets = [[month_offset(start_month, month)] for month in months]
+    quantities = [float(monthly_usage[month]) for month in months]
+    model = LinearRegression().fit(offsets, quantities)
+
+    predictions = []
+    last_month = months[-1]
+    last_offset = month_offset(start_month, last_month)
+    for step in range(1, forecast_months + 1):
+        prediction = max(0.0, float(model.predict([[last_offset + step]])[0]))
+        predictions.append({
+            "month": next_month(last_month, step),
+            "predicted_demand": prediction,
+        })
+    return predictions
+
+
 def parse_export(path: str | Path) -> dict[tuple[int, int], dict[str, Any]]:
     """Aggregate eligible events without merging inventory identities or gaps."""
     csv_path = Path(path)

@@ -2,13 +2,12 @@
 
 namespace Tests\Feature;
 
-use App\Models\Category;
 use App\Models\ForecastAiRecommendation;
-use App\Models\Inventory;
+use App\Models\ForecastPayload;
 use App\Models\Role;
 use App\Models\User;
-use App\Services\ForecastAiRecommendationService;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\ForecastAiRecommendationService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -33,17 +32,6 @@ beforeEach(function () {
     Http::preventStrayRequests();
     Storage::fake('forecast');
 
-    foreach ([
-        'forecast/forecast.json',
-        'forecast/training-status.json',
-    ] as $file) {
-        $source = storage_path('app/'.$file);
-
-        if (is_file($source)) {
-            Storage::disk('forecast')->put($file, file_get_contents($source));
-        }
-    }
-
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
     $this->custodian = User::firstOrCreate(
         ['username' => 'recommendations-custodian'],
@@ -57,48 +45,7 @@ beforeEach(function () {
         ],
     );
 
-    // The stored forecast is validated against live inventory rows: every item
-    // it names must exist with a matching id, category and name. Category ids
-    // differ between the production database and this isolated one, so remap
-    // them by name; predictions, history and confidence stay exactly as trained.
-    $forecast = json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true);
-    $rows = array_merge($forecast['forecasts'] ?? [], $forecast['insufficient_history'] ?? []);
-
-    foreach ($rows as $index => $row) {
-        $category = Category::firstOrCreate(
-            ['category_name' => $row['category']],
-            ['requires_serial_number' => false],
-        );
-
-        $rows[$index]['category_id'] = (int) $category->category_id;
-
-        // Inventory::$fillable omits the item_id primary key, so the row is
-        // written through forceFill.
-        $item = Inventory::firstWhere('item_id', $row['inventory_id']) ?? new Inventory;
-
-        $item->forceFill([
-            'item_id' => $row['inventory_id'],
-            'item_name' => $row['item_name'],
-            'category_id' => $category->category_id,
-            'unit' => $row['unit'] ?? 'piece',
-            'user_id' => $this->custodian->id,
-            'quantity' => 1,
-            'unit_cost' => 100,
-            'status' => 'available',
-            'date_acquired' => '2026-06-01',
-        ])->save();
-    }
-
-    $forecast['forecasts'] = array_values(array_filter(
-        $rows,
-        fn (array $row): bool => ($row['status'] ?? '') === 'success',
-    ));
-    $forecast['insufficient_history'] = array_values(array_filter(
-        $rows,
-        fn (array $row): bool => ($row['status'] ?? '') !== 'success',
-    ));
-
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode($forecast));
+    seedLiveForecastTestData($this->custodian);
 
     $this->forecastRows = app(StoredDemandForecastService::class)->read($this->custodian)['rows'];
     $this->provider = ['briefs' => [], 'chunks' => []];
@@ -255,7 +202,11 @@ function spikeRowInPayload(array $payload, int $inventoryId, array $usage, array
     $payload['forecasts'] = array_map($rewrite, $payload['forecasts'] ?? []);
     $payload['insufficient_history'] = array_map($rewrite, $payload['insufficient_history'] ?? []);
 
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode($payload));
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($payload, JSON_THROW_ON_ERROR),
+    );
 
     return $payload;
 }
@@ -356,7 +307,7 @@ test('a usage spike moves a row out of buy now into verify first', function () {
 
     // Control: flat history, High confidence, a real gap. Must sit in Buy now.
     [$payload, $id] = spikeCandidate(
-        json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true),
+        recommendationLiveForecast(),
         $flat,
     );
 
@@ -400,7 +351,7 @@ test('too little verified history is reported as unknown rather than as a spike'
     // still a valid estimate, but below the spike floor of six, so the honest
     // answer is "cannot tell" rather than a verdict.
     [$payload, $id] = spikeCandidate(
-        json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true),
+        recommendationLiveForecast(),
         ['2026-07' => 1, '2026-08' => 1, '2026-09' => 50],
     );
 
@@ -417,7 +368,7 @@ test('a month the model reported as unknown is not read as zero usage', function
     // last one is a real spike; had the unknown month been read as zero the
     // baseline itself would be wrong.
     [$payload, $id] = spikeCandidate(
-        json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true),
+        recommendationLiveForecast(),
         [
             '2026-05' => 10, '2026-06' => 10, '2026-07' => 10,
             '2026-08' => 10, '2026-09' => 10, '2026-10' => 100,
@@ -437,7 +388,7 @@ test('a month the model reported as unknown is not read as zero usage', function
 test('a flat history is never reported as a spike', function () {
     // The control case for the test above: same month count, no jump.
     [$payload, $id] = spikeCandidate(
-        json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true),
+        recommendationLiveForecast(),
         [
             '2026-04' => 10, '2026-05' => 10, '2026-06' => 10,
             '2026-07' => 10, '2026-08' => 10, '2026-09' => 10,
@@ -455,7 +406,7 @@ test('a flat history is never reported as a spike', function () {
 
 test('the fallback sentence explains the spike without a provider', function () {
     spikeCandidate(
-        json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true),
+        recommendationLiveForecast(),
         [
             '2026-04' => 10, '2026-05' => 10, '2026-06' => 10,
             '2026-07' => 10, '2026-08' => 10, '2026-09' => 60,
@@ -477,7 +428,7 @@ test('the fallback sentence explains the spike without a provider', function () 
 
 test('spike figures are sent to the provider as approved facts', function () {
     [$payload, $id] = spikeCandidate(
-        json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true),
+        recommendationLiveForecast(),
         [
             '2026-04' => 10, '2026-05' => 10, '2026-06' => 10,
             '2026-07' => 10, '2026-08' => 10, '2026-09' => 60,
@@ -506,7 +457,7 @@ test('spike figures are sent to the provider as approved facts', function () {
 
 test('a provider sentence quoting the approved ratio is not rejected', function () {
     [$payload, $id] = spikeCandidate(
-        json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true),
+        recommendationLiveForecast(),
         [
             '2026-04' => 10, '2026-05' => 10, '2026-06' => 10,
             '2026-07' => 10, '2026-08' => 10, '2026-09' => 60,
@@ -741,9 +692,13 @@ test('a retrained forecast is not served the previous cycle advice', function ()
     // new cycle and must be written from scratch. Kept recent on purpose: a
     // stamp past forecast.maximum_age_hours is rejected as stale, which would
     // test staleness rather than the cache key.
-    $forecast = json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true);
+    $forecast = recommendationLiveForecast();
     $forecast['generated_at'] = now()->subHour()->toIso8601String();
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode($forecast));
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($forecast, JSON_THROW_ON_ERROR),
+    );
 
     $this->forecastRows = app(StoredDemandForecastService::class)->read($this->custodian)['rows'];
     $second = recommend()->assertOk()->json();
@@ -859,6 +814,7 @@ test('recommendations require authentication', function () {
 });
 
 test('no trained forecast is refused rather than answered from another source', function () {
+    ForecastPayload::query()->delete();
     Storage::disk('forecast')->put('forecast/forecast.json', json_encode([
         'schema_version' => 2,
         'source_type' => 'live',
@@ -874,3 +830,12 @@ test('no trained forecast is refused rather than answered from another source', 
 
     expect($this->provider['briefs'])->toBe([])->and($this->provider['chunks'])->toBe([]);
 });
+
+function recommendationLiveForecast(): array
+{
+    $payload = ForecastPayload::query()
+        ->where('source_type', ForecastPayload::SOURCE_LIVE)
+        ->value('payload');
+
+    return json_decode((string) $payload, true, 512, JSON_THROW_ON_ERROR);
+}

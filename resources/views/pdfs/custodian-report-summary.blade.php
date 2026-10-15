@@ -2,294 +2,199 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Property Custodian Reports - Dian-ay National High School</title>
+    <title>Property Custodian Reports</title>
     <style>
         @page {
-            margin: 28px 32px 32px 32px;
+            size: A4 portrait;
+            margin: 18mm 15mm 18mm 15mm;
         }
+
         body {
-            font-family: DejaVu Sans, sans-serif;
-            font-size: 9.5px;
-            color: #1f2937;
-            line-height: 1.4;
+            margin: 0;
+            color: #000;
+            font-family: "Times New Roman", Times, serif;
+            font-size: 12pt;
+            line-height: 1.35;
         }
 
-        /* Institutional Header */
-        .header-table {
-            width: 100%;
-            border-collapse: collapse;
-            border-bottom: 2.5px solid #0f766e;
-            padding-bottom: 10px;
-            margin-bottom: 14px;
-        }
-        .header-table td {
-            text-align: center;
-            border: none;
-            padding: 0;
-        }
-        .republic {
-            font-size: 8px;
-            text-transform: uppercase;
-            letter-spacing: 1.2px;
-            color: #4b5563;
-        }
-        .deped {
-            font-size: 9.5px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-            color: #111827;
-            margin-top: 1px;
-        }
-        .region {
-            font-size: 8px;
-            color: #4b5563;
-            letter-spacing: 0.6px;
-        }
-        .school-name {
-            font-size: 13.5px;
-            font-weight: bold;
-            color: #0f766e;
-            letter-spacing: 0.6px;
-            margin-top: 3px;
-        }
-        .system-tag {
-            font-size: 8px;
-            color: #6b7280;
-            letter-spacing: 0.4px;
-            margin-top: 2px;
+        * {
+            box-sizing: border-box;
         }
 
-        /* Metadata Banner */
-        .meta-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #f0fdfa;
-            border: 1px solid #99f6e4;
-            padding: 8px 10px;
-            margin-bottom: 12px;
-        }
-        .meta-table td {
-            border: none;
-            vertical-align: top;
-        }
-        .report-title {
-            font-size: 11.5px;
-            font-weight: bold;
-            color: #115e59;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .report-date {
-            font-size: 8.5px;
-            color: #4b5563;
-            margin-top: 2px;
-        }
-        .doc-tag {
-            font-size: 8.5px;
-            color: #0f766e;
-            text-align: right;
+        .report-meta {
+            margin-bottom: 12pt;
         }
 
-        /* Cards: one bordered block per section that never splits pages */
-        .card {
-            border: 1px solid #d1d5db;
-            margin-bottom: 10px;
-            page-break-inside: avoid;
-        }
-        .card-title {
-            background: #f9fafb;
-            border-bottom: 1px solid #d1d5db;
-            padding: 5px 8px;
-            font-size: 9px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #111827;
-        }
-        .card-title .sub {
-            font-weight: normal;
-            text-transform: none;
-            letter-spacing: 0;
-            color: #6b7280;
-        }
-        .card table.grid {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .card table.grid th {
-            background: #0f766e;
-            color: #ffffff;
-            font-size: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 5px 6px;
-            text-align: left;
-            border: 1px solid #0b5f58;
-        }
-        .card table.grid td {
-            border: 1px solid #d1d5db;
-            padding: 4px 6px;
-            font-size: 8.5px;
-            vertical-align: top;
-        }
-        .card table.grid td.num {
-            text-align: right;
-            white-space: nowrap;
-        }
-        .card table.grid tr.alt td {
-            background: #f9fafb;
-        }
-        .card .empty {
-            padding: 10px 8px;
-            text-align: center;
-            color: #6b7280;
-            font-style: italic;
-            font-size: 8.5px;
-        }
-        .basis {
-            font-size: 8px;
-            color: #4b5563;
+        .report-meta div {
+            margin-bottom: 2pt;
         }
 
-        /* Metric tiles */
+        .report-meta strong {
+            font-weight: bold;
+        }
+
         table.metrics {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 10px;
+            margin-bottom: 12pt;
             page-break-inside: avoid;
         }
+
         table.metrics td {
-            border: 1px solid #99f6e4;
-            background: #f0fdfa;
-            padding: 7px 9px;
             width: 25%;
+            border: 1px solid #000;
+            padding: 6pt 8pt;
             vertical-align: top;
         }
+
         .metric-label {
-            font-size: 7.5px;
+            font-size: 10pt;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #0f766e;
+            font-weight: bold;
         }
+
         .metric-value {
-            font-size: 13px;
+            margin-top: 4pt;
+            font-size: 16pt;
             font-weight: bold;
-            color: #111827;
-            margin-top: 1px;
         }
+
         .metric-sub {
-            font-size: 7.5px;
-            color: #6b7280;
+            margin-top: 3pt;
+            font-size: 9pt;
         }
 
-        /* Tone pills */
-        .pill {
-            display: inline-block;
-            padding: 1px 4px;
-            border-radius: 2px;
-            font-size: 7.5px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-            color: #ffffff;
-        }
-        .pill-expired { background: #b91c1c; }
-        .pill-approaching { background: #b45309; }
-        .pill-healthy { background: #047857; }
-
-        /* Forecast bridge */
-        .bridge {
-            border: 1px solid #99f6e4;
-            background: #f0fdfa;
-            padding: 8px 10px;
-            margin-bottom: 10px;
+        .card {
+            border: 1px solid #000;
+            margin-bottom: 10pt;
             page-break-inside: avoid;
         }
-        .bridge .bridge-title {
-            font-size: 9px;
+
+        .card-title {
+            padding: 6pt 8pt;
+            border-bottom: 1px solid #000;
+            font-size: 14pt;
             font-weight: bold;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #115e59;
-        }
-        .bridge .bridge-text {
-            font-size: 8.5px;
-            color: #1f2937;
-            margin-top: 2px;
         }
 
-        /* Disclaimer */
+        .card-title .sub {
+            font-size: 9pt;
+            font-weight: normal;
+            text-transform: none;
+        }
+
+        .grid {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .grid th,
+        .grid td {
+            border: 1px solid #000;
+            padding: 4pt 5pt;
+            vertical-align: top;
+            overflow-wrap: break-word;
+        }
+
+        .grid th {
+            font-size: 11pt;
+            font-weight: bold;
+            text-align: left;
+            text-transform: uppercase;
+            letter-spacing: 0.5pt;
+        }
+
+        .grid td.num {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .grid td.empty {
+            padding: 10pt 8pt;
+            text-align: center;
+            font-style: italic;
+        }
+
+        .pill {
+            display: inline-block;
+            border: 1px solid #000;
+            padding: 1pt 4pt;
+            font-size: 9pt;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .bridge {
+            border: 1px solid #000;
+            padding: 8pt 10pt;
+            margin-bottom: 10pt;
+            page-break-inside: avoid;
+        }
+
+        .bridge-title {
+            font-size: 14pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 4pt;
+        }
+
+        .bridge-text {
+            font-size: 12pt;
+        }
+
         .disclaimer {
-            margin-top: 10px;
-            border-left: 2.5px solid #b45309;
-            background: #fffbeb;
-            padding: 6px 9px;
-            font-size: 8px;
-            color: #78350f;
+            margin-top: 8pt;
+            padding: 6pt 8pt;
+            border-left: 2px solid #000;
+            font-size: 10pt;
         }
 
-        /* Signature Blocks */
         .signatures {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 26px;
+            margin-top: 22pt;
         }
+
         .signatures td {
-            border: none;
             width: 50%;
             vertical-align: bottom;
+            padding: 0 12pt 0 0;
         }
+
+        .signatures td:last-child {
+            padding-right: 0;
+            padding-left: 12pt;
+        }
+
         .sign-line {
-            border-bottom: 1px solid #111827;
-            height: 30px;
+            border-bottom: 1px solid #000;
+            height: 30pt;
         }
+
         .sign-role {
-            font-size: 8.5px;
+            margin-top: 4pt;
+            font-size: 12pt;
             font-weight: bold;
-            color: #111827;
             text-transform: uppercase;
-            letter-spacing: 0.4px;
-            margin-top: 2px;
         }
+
         .sign-meta {
-            font-size: 7.5px;
-            color: #6b7280;
+            margin-top: 2pt;
+            font-size: 10pt;
         }
     </style>
 </head>
 <body>
-    {{-- Institutional Letterhead --}}
-    <table class="header-table">
-        <tr>
-            <td>
-                <div class="republic">Republic of the Philippines</div>
-                <div class="deped">Department of Education</div>
-                <div class="region">Negros Island Region (NIR)</div>
-                <div class="school-name">DIAN-AY NATIONAL HIGH SCHOOL</div>
-                <div class="system-tag">Property &amp; Inventory Management System (IMS)</div>
-            </td>
-        </tr>
-    </table>
+    <div class="report-meta">
+        <div><strong>Property Custodian Reports</strong></div>
+        <div>Period: {{ $periodLabel }}</div>
+        <div>Generated: {{ $generatedAt }}</div>
+        <div>Document Code: DNHS-IMS-REPT-{{ now()->format('Ymd') }}</div>
+        <div>Prepared by: {{ $preparedBy }}</div>
+    </div>
 
-    {{-- Metadata Banner --}}
-    <table class="meta-table">
-        <tr>
-            <td style="width: 62%;">
-                <div class="report-title">Property Custodian Reports</div>
-                <div class="report-date">
-                    Period: <strong>{{ $periodLabel }}</strong>
-                    &nbsp;|&nbsp; Generated: {{ $generatedAt }}
-                </div>
-            </td>
-            <td style="width: 38%;" class="doc-tag">
-                <div><strong>Document Code:</strong> DNHS-IMS-REPT-{{ now()->format('Ymd') }}</div>
-                <div><strong>Prepared by:</strong> {{ $preparedBy }}</div>
-            </td>
-        </tr>
-    </table>
-
-    {{-- Metric Tiles --}}
     <table class="metrics">
         <tr>
             <td>
@@ -315,7 +220,6 @@
         </tr>
     </table>
 
-    {{-- Movement Trend --}}
     <div class="card">
         <div class="card-title">Stock Movement Trend <span class="sub">{{ $periodLabel }}</span></div>
         <table class="grid">
@@ -328,9 +232,9 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($movementData as $index => $day)
-                    <tr class="{{ $index % 2 === 1 ? 'alt' : '' }}">
-                        <td>{{ $day['label'] ?? '—' }}</td>
+                @forelse ($movementData as $day)
+                    <tr>
+                        <td>{{ $day['label'] ?? '?' }}</td>
                         <td class="num">{{ number_format($day['stock_in'] ?? 0) }}</td>
                         <td class="num">{{ number_format($day['stock_out'] ?? 0) }}</td>
                         <td class="num">{{ number_format($day['disposals'] ?? 0) }}</td>
@@ -342,7 +246,6 @@
         </table>
     </div>
 
-    {{-- Category + Status --}}
     <div class="card">
         <div class="card-title">Stock by Category <span class="sub">Units and capital per category</span></div>
         <table class="grid">
@@ -354,8 +257,8 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($categoryData as $index => $row)
-                    <tr class="{{ $index % 2 === 1 ? 'alt' : '' }}">
+                @forelse ($categoryData as $row)
+                    <tr>
                         <td>{{ $row['label'] ?? 'Uncategorized' }}</td>
                         <td class="num">{{ number_format($row['quantity'] ?? 0) }}</td>
                         <td class="num">PHP {{ number_format((float) ($row['value'] ?? 0), 2) }}</td>
@@ -377,9 +280,9 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($statusData as $index => $row)
-                    <tr class="{{ $index % 2 === 1 ? 'alt' : '' }}">
-                        <td>{{ $row['label'] ?? '—' }}</td>
+                @forelse ($statusData as $row)
+                    <tr>
+                        <td>{{ $row['label'] ?? '?' }}</td>
                         <td class="num">{{ number_format($row['quantity'] ?? 0) }}</td>
                     </tr>
                 @empty
@@ -389,7 +292,6 @@
         </table>
     </div>
 
-    {{-- Low Stock --}}
     <div class="card">
         <div class="card-title">Low Stock Groups <span class="sub">3 units or fewer available</span></div>
         <table class="grid">
@@ -401,9 +303,9 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($lowStockData as $index => $row)
-                    <tr class="{{ $index % 2 === 1 ? 'alt' : '' }}">
-                        <td>{{ $row['item_name'] ?? '—' }}</td>
+                @forelse ($lowStockData as $row)
+                    <tr>
+                        <td>{{ $row['item_name'] ?? '?' }}</td>
                         <td>{{ $row['category'] ?? 'General' }}</td>
                         <td class="num"><strong>{{ number_format($row['quantity'] ?? 0) }} {{ $row['unit'] ?? 'units' }}</strong></td>
                     </tr>
@@ -414,7 +316,6 @@
         </table>
     </div>
 
-    {{-- Attention --}}
     <div class="card">
         <div class="card-title">Items Needing Attention <span class="sub">Maintenance, inspection, or disposal</span></div>
         <table class="grid">
@@ -426,10 +327,10 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($attentionData as $index => $row)
-                    <tr class="{{ $index % 2 === 1 ? 'alt' : '' }}">
-                        <td>{{ $row['item_name'] ?? '—' }}</td>
-                        <td>{{ $row['status'] ?? '—' }}</td>
+                @forelse ($attentionData as $row)
+                    <tr>
+                        <td>{{ $row['item_name'] ?? '?' }}</td>
+                        <td>{{ $row['status'] ?? '?' }}</td>
                         <td class="num">{{ number_format($row['quantity'] ?? 0) }}</td>
                     </tr>
                 @empty
@@ -439,7 +340,6 @@
         </table>
     </div>
 
-    {{-- Expiring Lifespan --}}
     <div class="card">
         <div class="card-title">Expiring Lifespan <span class="sub">Closest expected end dates first</span></div>
         <table class="grid">
@@ -451,12 +351,12 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($expiringData as $index => $row)
-                    <tr class="{{ $index % 2 === 1 ? 'alt' : '' }}">
-                        <td>{{ $row['item_name'] ?? '—' }}</td>
+                @forelse ($expiringData as $row)
+                    <tr>
+                        <td>{{ $row['item_name'] ?? '?' }}</td>
                         <td class="num">{{ number_format($row['quantity'] ?? 0) }}</td>
                         <td>
-                            <span class="pill pill-{{ $row['tone'] ?? 'healthy' }}">{{ ($row['tone'] ?? '') === 'expired' ? 'Expired' : \Carbon\Carbon::parse($row['expected_end_date'])->format('M d, Y') }}</span>
+                            <span class="pill">{{ ($row['tone'] ?? '') === 'expired' ? 'Expired' : \Carbon\Carbon::parse($row['expected_end_date'])->format('M d, Y') }}</span>
                         </td>
                     </tr>
                 @empty
@@ -466,7 +366,6 @@
         </table>
     </div>
 
-    {{-- Custody & Overdue --}}
     <div class="card">
         <div class="card-title">Custody &amp; Returns <span class="sub">Units held per person; {{ $overdueCount }} overdue</span></div>
         <table class="grid">
@@ -477,9 +376,9 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($holderData as $index => $row)
-                    <tr class="{{ $index % 2 === 1 ? 'alt' : '' }}">
-                        <td>{{ $row['holder_name'] ?? '—' }}</td>
+                @forelse ($holderData as $row)
+                    <tr>
+                        <td>{{ $row['holder_name'] ?? '?' }}</td>
                         <td class="num">{{ number_format($row['quantity'] ?? 0) }}</td>
                     </tr>
                 @empty
@@ -487,7 +386,7 @@
                 @endforelse
             </tbody>
         </table>
-        <table class="grid" style="margin-top: 6px;">
+        <table class="grid" style="margin-top: 6pt;">
             <thead>
                 <tr>
                     <th style="width: 35%;">Overdue Item</th>
@@ -496,10 +395,10 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($overdueData as $index => $row)
-                    <tr class="{{ $index % 2 === 1 ? 'alt' : '' }}">
-                        <td>{{ $row['item_name'] ?? '—' }}</td>
-                        <td>{{ $row['holder_name'] ?? '—' }}</td>
+                @forelse ($overdueData as $row)
+                    <tr>
+                        <td>{{ $row['item_name'] ?? '?' }}</td>
+                        <td>{{ $row['holder_name'] ?? '?' }}</td>
                         <td>{{ \Carbon\Carbon::parse($row['expected_return_date'])->format('M d, Y') }}</td>
                     </tr>
                 @empty
@@ -509,7 +408,6 @@
         </table>
     </div>
 
-    {{-- Forecast Bridge --}}
     <div class="bridge">
         <div class="bridge-title">Demand Forecast</div>
         <div class="bridge-text">
@@ -522,20 +420,17 @@
     </div>
 
     <div class="disclaimer">
-        <strong>Note:</strong> This report reflects recorded inventory at generation time and is
-        advisory only. Figures must be verified against current stock levels before any procurement,
-        disposal, or audit action. Forecasts referenced here do not create orders.
+        <strong>Note:</strong> This report reflects recorded inventory at generation time and is advisory only. Figures must be verified against current stock levels before any procurement, disposal, or audit action. Forecasts referenced here do not create orders.
     </div>
 
-    {{-- Signature Blocks --}}
     <table class="signatures">
         <tr>
-            <td style="padding-right: 24px;">
+            <td>
                 <div class="sign-line"></div>
                 <div class="sign-role">Property Custodian</div>
-                <div class="sign-meta">Prepared by &nbsp;&middot;&nbsp; {{ $preparedBy }}</div>
+                <div class="sign-meta">Prepared by {{ $preparedBy }}</div>
             </td>
-            <td style="padding-left: 24px;">
+            <td>
                 <div class="sign-line"></div>
                 <div class="sign-role">School Head</div>
                 <div class="sign-meta">Reviewed and approved</div>

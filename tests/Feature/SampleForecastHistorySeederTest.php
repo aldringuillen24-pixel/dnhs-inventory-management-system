@@ -7,7 +7,7 @@ use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\StockMovement;
 use App\Models\User;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use App\Support\SampleForecastData;
 use Database\Seeders\SampleForecastHistorySeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -88,7 +88,7 @@ function exportLiveForecastCsv(): array
 
     Artisan::call('forecast:train');
 
-    $path = Storage::disk('forecast')->path('forecast/real-stock-out-data.csv');
+    $path = Storage::disk('forecast')->path('datasets/real-stock-out-data.csv');
     expect(is_readable($path))->toBeTrue("Expected export at {$path}");
 
     $handle = fopen($path, 'r');

@@ -153,7 +153,6 @@ trait GroundsForecastReply
         $approved = collect(is_array($items) ? $items : [])
             ->flatMap(fn (array $item): array => [
                 $item['forecast_demand'] ?? null,
-                $item['safety_stock'] ?? null,
                 $item['available_stock'] ?? null,
                 $item['pending_demand'] ?? null,
                 $item['unmet_demand'] ?? null,
@@ -344,9 +343,8 @@ trait GroundsForecastReply
         // Unmet demand is shown in the figure line even at zero, so the formula
         // the custodian reads matches the formula that was actually applied.
         $figures = sprintf(
-            '%s + %s - %s - %s + %s',
+            '%s - %s - %s + %s',
             $item['forecast_demand'],
-            $item['safety_stock'],
             $item['available_stock'],
             $item['pending_demand'],
             $item['unmet_demand'] ?? 0

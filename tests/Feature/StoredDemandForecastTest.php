@@ -2,11 +2,12 @@
 
 use App\Models\Category;
 use App\Models\AssignmentRequest;
+use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\StockMovement;
 use App\Models\User;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -133,15 +134,76 @@ function liveForecastRowsForGroup(iterable $inventory, int $demand): array
 
 function putStoredLiveForecast(array $forecasts, array $insufficientHistory = []): void
 {
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode([
-        'schema_version' => 2,
-        'source_type' => 'live',
-        'model_version' => 'demand-linear-regression-v2',
-        'generated_at' => now()->utc()->format('Y-m-d\\TH:i:s\\Z'),
-        'forecasts' => $forecasts,
-        'insufficient_history' => $insufficientHistory,
-    ], JSON_THROW_ON_ERROR));
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode([
+            'schema_version' => 2,
+            'source_type' => 'live',
+            'model_version' => 'demand-linear-regression-v2',
+            'generated_at' => now()->utc()->format('Y-m-d\\TH:i:s\\Z'),
+            'forecasts' => $forecasts,
+            'insufficient_history' => $insufficientHistory,
+        ], JSON_THROW_ON_ERROR),
+    );
 }
+
+test('live forecast keeps unmatched demand rows and adjusts matched inventory stock', function () {
+    Storage::fake('forecast');
+    $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
+    $user = User::factory()->create(['role_id' => $role->role_id]);
+    $category = Category::firstOrCreate(
+        ['category_name' => 'Consumables'],
+        ['requires_serial_number' => false],
+    );
+    $first = Inventory::create([
+        'category_id' => $category->category_id,
+        'user_id' => $user->id,
+        'item_name' => 'Bond Paper (A4)',
+        'unit' => 'reams',
+        'quantity' => 2,
+        'unit_cost' => 1,
+        'date_acquired' => '2026-01-01',
+        'status' => 'available',
+    ]);
+    $second = Inventory::create([
+        'category_id' => $category->category_id,
+        'user_id' => $user->id,
+        'item_name' => 'Bond Paper (A4)',
+        'unit' => 'reams',
+        'quantity' => 3,
+        'unit_cost' => 1,
+        'date_acquired' => '2026-01-01',
+        'status' => 'available',
+    ]);
+
+    $matched = liveForecastRow($first, 10);
+    $matched['matched_inventory_ids'] = [(int) $first->item_id, (int) $second->item_id];
+    $unmatched = $matched;
+    $unmatched['inventory_id'] = 999999;
+    unset($unmatched['matched_inventory_ids']);
+    $unmatched['item_name'] = 'Unlisted Dummy Supply';
+    $unmatched['unit'] = 'boxes';
+    $unmatched['predicted_quantity'] = 7;
+    putStoredLiveForecast([$matched, $unmatched]);
+
+    $result = app(StoredDemandForecastService::class)->read($user);
+    $rows = collect($result['rows'])->keyBy('item_name');
+
+    expect($result['source_type'])->toBe('live')
+        ->and($result['status'])->toBe('success')
+        ->and($rows['Bond Paper (A4)']['inventory_match'])->toBe('matched')
+        ->and($rows['Bond Paper (A4)']['matched_inventory_ids'])->toBe([(int) $first->item_id, (int) $second->item_id])
+        ->and($rows['Bond Paper (A4)']['available_stock'])->toBe(5)
+        ->and($rows['Bond Paper (A4)']['safety_stock'])->toBeNull()
+        ->and($rows['Bond Paper (A4)']['suggested_procurement'])->toBe(5)
+        ->and($rows['Unlisted Dummy Supply']['inventory_match'])->toBe('unmatched')
+        ->and($rows['Unlisted Dummy Supply']['forecast_demand'])->toBe(7)
+        ->and($rows['Unlisted Dummy Supply']['suggested_procurement'])->toBe(7)
+        ->and($rows['Unlisted Dummy Supply']['needs_procurement'])->toBeTrue()
+        ->and($rows['Unlisted Dummy Supply']['priority'])->toBe('Urgent')
+        ->and($rows['Unlisted Dummy Supply']['calculation_basis'])->toContain('no inventory stock');
+});
 
 test('the demand forecast page data reads the generated forecast JSON', function () {
     Storage::fake('forecast');
@@ -167,7 +229,7 @@ test('the demand forecast page data reads the generated forecast JSON', function
         ->and($result['rows'][0]['forecast_demand'])->toBe(20)
         ->and($result['rows'][0]['available_stock'])->toBe(12)
         ->and($result['rows'][0]['unit'])->toBe('reams')
-        ->and($result['rows'][0]['suggested_procurement'])->toBe(13)
+        ->and($result['rows'][0]['suggested_procurement'])->toBe(8)
         ->and($result['rows'][0]['calculation_basis'])->toContain('pending demand');
 
     $this->actingAs($user)
@@ -176,7 +238,7 @@ test('the demand forecast page data reads the generated forecast JSON', function
         ->assertJsonPath('title', 'Property Custodian Reports')
         ->assertJsonPath('liveForecastResult.rows.0.forecast_demand', 20)
         ->assertJsonPath('liveForecastResult.rows.0.available_stock', 12)
-        ->assertJsonPath('liveForecastResult.rows.0.suggested_procurement', 13);
+        ->assertJsonPath('liveForecastResult.rows.0.suggested_procurement', 8);
 });
 
 test('unmet staff demand raises the suggested procurement quantity', function () {
@@ -198,8 +260,8 @@ test('unmet staff demand raises the suggested procurement quantity', function ()
 
     putStoredLiveForecast([liveForecastRow($inventory, 20)]);
 
-    // Without unmet demand this row reads 13 (20 + 5 - 12 - 0).
-    expect(app(StoredDemandForecastService::class)->read($custodian)['rows'][0]['suggested_procurement'])->toBe(13);
+    // Without unmet demand this row reads 8 (20 - 12 - 0).
+    expect(app(StoredDemandForecastService::class)->read($custodian)['rows'][0]['suggested_procurement'])->toBe(8);
 
     AssignmentRequest::create([
         'requested_item_name' => 'Bond Paper',
@@ -214,12 +276,13 @@ test('unmet staff demand raises the suggested procurement quantity', function ()
 
     $row = app(StoredDemandForecastService::class)->read($custodian)['rows'][0];
 
-    // Unmet demand is a POSITIVE term: 20 + 5 - 12 - 0 + 7.
+    // Unmet demand is a POSITIVE term: 20 - 12 - 0 + 7.
     expect($row['unmet_demand'])->toBe(7)
         ->and($row['unmet_requesters'])->toBe(1)
-        ->and($row['suggested_procurement'])->toBe(20)
+        ->and($row['suggested_procurement'])->toBe(15)
         ->and($row['needs_procurement'])->toBeTrue()
-        ->and($row['calculation_basis'])->toContain('pending demand', 'unmet demand');
+        ->and($row['calculation_basis'])->toContain('pending demand', 'unmet demand')
+        ->and($row['calculation_basis'])->not->toContain('safety stock');
 });
 
 test('unmet demand is claimed by exactly one row when several share a name category and unit', function () {
@@ -307,7 +370,7 @@ test('an unmet request that is not waiting for procurement does not change the f
     $row = app(StoredDemandForecastService::class)->read($custodian)['rows'][0];
 
     expect($row['unmet_demand'])->toBe(0)
-        ->and($row['suggested_procurement'])->toBe(13);
+        ->and($row['suggested_procurement'])->toBe(8);
 });
 
 test('live reader rejects stale output and duplicate stable identities', function () {
@@ -321,9 +384,14 @@ test('live reader rejects stale output and duplicate stable identities', functio
     ]);
     $row = liveForecastRow($inventory, 8);
     putStoredLiveForecast([$row]);
-    $payload = json_decode(Storage::disk('forecast')->get('forecast/forecast.json'), true, 512, JSON_THROW_ON_ERROR);
+    $storedPayload = ForecastPayload::query()->where('source_type', ForecastPayload::SOURCE_LIVE)->firstOrFail();
+    $payload = json_decode($storedPayload->payload, true, 512, JSON_THROW_ON_ERROR);
     $payload['generated_at'] = now()->subDays(9)->utc()->format('Y-m-d\\TH:i:s\\Z');
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode($payload, JSON_THROW_ON_ERROR));
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($payload, JSON_THROW_ON_ERROR),
+    );
 
     $service = app(StoredDemandForecastService::class);
     expect($service->read($user)['status'])->toBe('stale')
@@ -400,7 +468,7 @@ test('live chat ranks Laravel recommendations and reports use the identical rows
     // pending demand, confidence and advisory status moved to the Demand
     // Forecast page and AI Decision Support, so they are no longer asserted here.
     expect($chat->json('reply'))
-        ->toContain('Advisory forecast priorities', 'Predicted demand', 'Safety stock', 'Suggested quantity', 'Urgent Notebook', '20 boxes', '5 boxes', '21 boxes', 'Urgent')
+        ->toContain('Advisory forecast priorities', 'Predicted demand', 'Available stock', 'Suggested quantity', 'Urgent Notebook', '20 boxes', '0 boxes', '16 boxes', 'Urgent')
         ->toContain('Reserve Binder');
 
     // A long list must not flood the chat panel: only a capped summary is
@@ -438,13 +506,13 @@ test('live chat ranks Laravel recommendations and reports use the identical rows
         ->assertJsonFragment([
             'item_name' => 'Urgent Notebook',
             'forecast_demand' => 20,
-            'suggested_procurement' => 21,
+            'suggested_procurement' => 16,
         ]);
 
     $this->getJson(route('api.custodian.reports.forecast.recommendations'))
         ->assertOk()
         ->assertJsonFragment(['item_name' => 'Urgent Notebook'])
-        ->assertJsonFragment(['suggested_procurement' => 21]);
+        ->assertJsonFragment(['suggested_procurement' => 16]);
 
     $this->get('/spa/reports/forecast')->assertOk();
 
@@ -466,7 +534,7 @@ test('forecast chat asks for exact identity and period instead of guessing', fun
     Storage::fake('forecast');
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
     $user = User::factory()->create(['role_id' => $role->role_id]);
-    $firstCategory = Category::create(['category_name' => 'Furniture', 'requires_serial_number' => false]);
+    $firstCategory = Category::firstOrCreate(['category_name' => 'Furniture'], ['requires_serial_number' => false]);
     $secondCategory = Category::create(['category_name' => 'Other Equipment', 'requires_serial_number' => false]);
     $first = Inventory::create([
         'category_id' => $firstCategory->category_id, 'user_id' => $user->id, 'item_name' => 'Teacher Desk',
@@ -580,9 +648,10 @@ test('demo forecast follow-ups select one item and refuse unsupported urgency or
         ->assertJsonPath('reply', fn (string $reply): bool => str_contains($reply, 'Teacher Desk') && str_contains($reply, 'cannot establish whether procurement is needed') && ! str_contains($reply, 'Inventory ID 2001:'));
 });
 
-test('demo result validates stable identities and never joins or reads live inventory', function () {
+test('demo results match available inventory when possible and retain unmatched demand rows', function () {
     Storage::fake('forecast');
     $payload = storedDemoForecastPayload();
+    $payload['forecasts'][0]['category'] = 'Furniture';
     putStoredDemoForecast($payload);
     Storage::disk('forecast')->put('forecast/forecast.json', json_encode([
         'forecasts' => [['item_name' => 'Live only item', 'predicted_quantity' => 999]],
@@ -590,6 +659,17 @@ test('demo result validates stable identities and never joins or reads live inve
     ]));
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
     $user = User::factory()->create(['role_id' => $role->role_id]);
+    $category = Category::where('category_name', 'Furniture')->firstOrFail();
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'user_id' => $user->id,
+        'item_name' => 'Teacher Desk',
+        'unit' => 'pieces',
+        'quantity' => 1,
+        'unit_cost' => 100,
+        'date_acquired' => '2026-01-01',
+        'status' => 'available',
+    ]);
     $inventoryQueries = 0;
     DB::listen(function ($query) use (&$inventoryQueries): void {
         if (str_contains(strtolower($query->sql), 'inventory')) {
@@ -599,17 +679,27 @@ test('demo result validates stable identities and never joins or reads live inve
 
     $result = app(StoredDemandForecastService::class)->readDemo($user);
     $inventoryQueriesAfterRead = $inventoryQueries;
-    $inventoryCount = DB::table('inventory')->count();
+    $rowsById = collect($result['rows'])->keyBy('inventory_id');
 
     expect($result['source_type'])->toBe('demo')
         ->and($result['model_version'])->toBe('demo-linear-regression-v1')
-        ->and($result['summary'])->toMatchArray(['items_forecasted' => 2, 'items_insufficient_history' => 1])
-        ->and(collect($result['rows'])->where('item_name', 'Teacher Desk')->pluck('inventory_id')->all())->toBe([1001, 2001])
-        ->and(collect($result['rows'])->where('item_name', 'Teacher Desk')->pluck('category_id')->all())->toBe([1, 8])
-        ->and($result['rows'][0]['forecast_demand'])->toBe(3)
-        ->and($result['rows'][2]['unknown_months'])->toBe(['2026-07', '2026-09'])
-        ->and($inventoryCount)->toBe(0)
-        ->and($inventoryQueriesAfterRead)->toBe(0);
+        ->and($result['summary'])->toMatchArray([
+            'items_forecasted' => 2,
+            'items_insufficient_history' => 1,
+            'items_matched_to_inventory' => 1,
+            'items_without_inventory_match' => 2,
+            'items_needing_procurement' => 1,
+            'suggested_units_to_procure' => 3,
+        ])
+        ->and($rowsById[1001]['forecast_demand'])->toBe(3)
+        ->and($rowsById[1001]['inventory_match'])->toBe('matched')
+        ->and($rowsById[1001]['available_stock'])->toBe(1)
+        ->and($rowsById[1001]['safety_stock'])->toBe(1)
+        ->and($rowsById[1001]['suggested_procurement'])->toBe(3)
+        ->and($rowsById[2001]['inventory_match'])->toBe('unmatched')
+        ->and($rowsById[2001]['suggested_procurement'])->toBeNull()
+        ->and($rowsById[4001]['unknown_months'])->toBe(['2026-07', '2026-09'])
+        ->and($inventoryQueriesAfterRead)->toBeGreaterThan(0);
 });
 
 test('demo reader reports missing and rejects malformed or live-labeled output', function () {
@@ -689,7 +779,8 @@ test('chat and reports show the same labeled demo result without live stock reco
         ->assertJsonFragment(['forecast_demand' => 5]);
 
     expect(collect($demoResponse->json('recommendations.data'))
-        ->every(fn (array $row): bool => ! array_key_exists('suggested_procurement', $row)))->toBeTrue();
+        ->every(fn (array $row): bool => $row['inventory_match'] === 'unmatched'
+            && $row['suggested_procurement'] === null))->toBeTrue();
 
     $this->get('/spa/reports/forecast')->assertOk();
 
@@ -806,7 +897,7 @@ test('detailed forecast page shows separate empty and error states', function ()
         ->assertJsonPath('recommendations.data', [])
         ->assertJsonPath('forecastResult.rows', []);
 
-    Storage::disk('forecast')->put('forecast/forecast.json', '{invalid json');
+    app(StoredDemandForecastService::class)->persistTraining(ForecastPayload::SOURCE_LIVE, 'success', '{invalid json');
 
     $this->getJson($apiUrl)
         ->assertOk()

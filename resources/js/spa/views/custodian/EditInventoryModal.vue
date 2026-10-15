@@ -66,7 +66,7 @@
 
             <div>
               <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="edit-quantity">
-                Quantity (1–100) <span class="text-rose-500">*</span>
+                Quantity <span class="text-rose-500">*</span>
               </label>
               <input
                 id="edit-quantity"
@@ -74,7 +74,6 @@
                 type="number"
                 required
                 min="1"
-                max="100"
                 class="block w-full rounded-md border border-gray-200 bg-white px-3.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
               />
               <FieldError :errors="errors" field="quantity" />
@@ -154,46 +153,6 @@
               <FieldError :errors="errors" field="ics_no" />
             </div>
 
-            <div>
-              <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="edit-building">
-                Building
-              </label>
-              <input
-                id="edit-building"
-                v-model="form.building"
-                type="text"
-                maxlength="255"
-                class="block w-full rounded-md border border-gray-200 bg-white px-3.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-              />
-              <FieldError :errors="errors" field="building" />
-            </div>
-
-            <div>
-              <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="edit-room">
-                Room
-              </label>
-              <input
-                id="edit-room"
-                v-model="form.room"
-                type="text"
-                maxlength="255"
-                class="block w-full rounded-md border border-gray-200 bg-white px-3.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-              />
-              <FieldError :errors="errors" field="room" />
-            </div>
-
-            <div class="sm:col-span-2">
-              <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="edit-description">
-                Description / Notes
-              </label>
-              <textarea
-                id="edit-description"
-                v-model="form.description"
-                rows="3"
-                class="block h-24 w-full resize-none rounded-md border border-gray-200 bg-white px-3.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-              />
-              <FieldError :errors="errors" field="description" />
-            </div>
           </div>
         </div>
 
@@ -287,9 +246,6 @@ const form = reactive({
   date_acquired: '',
   lifespan_years: null,
   ics_no: '',
-  building: '',
-  room: '',
-  description: '',
 });
 
 function dateOnly(value) {
@@ -313,9 +269,6 @@ async function fetchItem() {
     form.date_acquired = dateOnly(item.date_acquired);
     form.lifespan_years = item.lifespan_years ?? null;
     form.ics_no = item.ics_no ?? '';
-    form.building = item.building ?? '';
-    form.room = item.room ?? '';
-    form.description = item.description ?? '';
   } catch (requestError) {
     serialNumbers.value = [];
     toast.error('Error', requestError?.response?.data?.message ?? 'Could not load the item.');
@@ -339,10 +292,7 @@ async function submit() {
       unit_cost: Number(form.unit_cost),
       date_acquired: form.date_acquired,
       ...(form.lifespan_years ? { lifespan_years: Number(form.lifespan_years) } : {}),
-      description: form.description || null,
       ics_no: form.ics_no || null,
-      building: form.building || null,
-      room: form.room || null,
       ...(serialNumbers.value.length
         ? { serial_numbers: serialNumbers.value.map((serialNumber) => serialNumber.trim()) }
         : {}),

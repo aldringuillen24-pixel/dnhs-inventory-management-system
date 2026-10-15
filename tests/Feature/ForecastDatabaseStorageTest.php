@@ -6,7 +6,7 @@ use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\User;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 
@@ -17,9 +17,8 @@ use Illuminate\Support\Facades\Storage;
  * On Render the cron job that trains and the web service that serves are
  * separate containers with separate ephemeral filesystems, so a forecast.json
  * written by one is invisible to the other and destroyed by the next deploy.
- * These tests pin the behaviour that makes scheduled retraining possible, and
- * keep the local-file path working as a fallback so existing installs and the
- * wider suite are unaffected.
+ * These tests pin the behaviour that makes scheduled retraining possible and
+ * ensure production reads never depend on container-local forecast files.
  */
 
 uses(RefreshDatabase::class);
@@ -132,13 +131,11 @@ test('a trained forecast stored in the database is served with no file on disk',
         ->and($result['rows'][0]['item_name'])->toBe('Phase8 Bond Paper');
 });
 
-test('the local file still works when the database has no forecast', function () {
+test('a local forecast file is ignored when the database has no forecast', function () {
     Storage::fake('forecast');
 
     ($this->makeItem)(9001);
 
-    // The fallback must keep the existing file-based installs and fixtures
-    // working, so this path cannot simply be dropped.
     Storage::disk('forecast')->put(
         'forecast/forecast.json',
         phase8Document(now()->toIso8601String(), 9001, (int) $this->category->category_id),
@@ -152,8 +149,8 @@ test('the local file still works when the database has no forecast', function ()
 
     $result = app(StoredDemandForecastService::class)->read($this->custodian);
 
-    expect($result['status'])->toBe('success')
-        ->and($result['rows'][0]['item_name'])->toBe('Phase8 Bond Paper');
+    expect($result['status'])->toBe('missing')
+        ->and($result['rows'])->toBeEmpty();
 });
 
 test('a missing forecast reports missing rather than an empty success', function () {

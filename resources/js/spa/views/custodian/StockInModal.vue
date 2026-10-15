@@ -97,7 +97,7 @@
 
           <div>
             <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="stock-quantity">
-              Quantity (1–100) <span class="text-rose-500">*</span>
+              Quantity <span class="text-rose-500">*</span>
             </label>
             <input
               id="stock-quantity"
@@ -105,7 +105,6 @@
               type="number"
               required
               min="1"
-              max="100"
               @input="clearFieldError('quantity')"
               class="block w-full rounded-md border border-gray-200 bg-white px-2.5 py-2 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:px-3.5 min-[480px]:text-sm"
             />

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Services\Forecasting\StoredDemandForecastService;
 
 class DemandForecastService
 {

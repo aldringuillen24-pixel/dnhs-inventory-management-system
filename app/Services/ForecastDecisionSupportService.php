@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Services\Concerns\GroundsForecastReply;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
@@ -517,9 +518,9 @@ class ForecastDecisionSupportService
             'category' => $row['category'] ?? null,
             'unit' => $row['unit'] ?? null,
             'forecast_demand' => $row['forecast_demand'] ?? null,
-            'safety_stock' => $row['safety_stock'] ?? null,
             'available_stock' => $row['available_stock'] ?? null,
             'pending_demand' => $row['pending_demand'] ?? null,
+            'unmet_demand' => $row['unmet_demand'] ?? 0,
             'suggested_procurement' => $row['suggested_procurement'] ?? null,
             'priority' => $row['priority'] ?? null,
             'confidence' => $row['confidence'] ?? null,
@@ -649,7 +650,7 @@ class ForecastDecisionSupportService
                 ."The custodian was just shown a ranked list of items and asks: \"Why are these items on the list?\"\n\n"
                 ."The 'items' list is that ranking, in order. The 'selection_state' block counts what those items share.\n\n"
                 ."Rules:\n"
-                ."1. Explain in prose why these items were selected: every one of them has a procurement gap — forecast demand plus safety stock exceeds available stock plus pending demand — ordered most urgent first.\n"
+                ."1. Explain in prose why these items were selected: every one of them has a procurement gap — forecast demand exceeds available stock plus pending demand — ordered most urgent first.\n"
                 ."2. Every figure you write must already appear in selection_state or the items. Counts about THESE items come from selection_state; cycle_state describes the whole forecast and must not be used for claims about this list.\n"
                 ."3. Name the first-listed (highest-priority) item as the lead example, using its exact item_name.\n"
                 ."4. If the weak-history count in selection_state is not zero, say that many of the listed items rest on limited verified history and that usage should be confirmed before ordering. If it is zero, say the estimates rest on enough verified history instead.\n"
@@ -682,12 +683,12 @@ class ForecastDecisionSupportService
             ."verified before use. Do not produce a suggested quantity for it.\n"
             ."8. List the highest priority items first.\n"
             ."9. Layout exactly, with no markdown table (the chat column is narrow):\n"
-            ."   - First line, once: \"Buy = demand + buffer - stock - pending\"\n"
+            ."   - First line, once: \"Buy = demand - stock - pending + unmet\"\n"
             ."   - Then two lines per item, no blank line between items:\n"
             ."     **Item name** — N piece\n"
-            ."     Priority · Confidence confidence · X + Y - Z - W\n"
+            ."     Priority · Confidence confidence · X - Y - Z + W\n"
             ."   The second line repeats the four numbers in the formula order. Do not spell out "
-            ."'demand', 'buffer', 'stock' or 'pending' again, and do not repeat the formula per item.\n"
+            ."'demand', 'stock', 'pending' or 'unmet' again, and do not repeat the formula per item.\n"
             ."   List every item in the approved facts, in the order given, omitting none. A shorter list is a wrong answer.\n"
             ."10. Close with one line noting the forecast is advisory only.\n";
     }
@@ -704,7 +705,7 @@ class ForecastDecisionSupportService
 
         if (! is_array($items) || $items === []) {
             return match ($facts['prompt_type'] ?? self::PROMPT_PURCHASE_FIRST) {
-                self::PROMPT_DEFERRABLE => 'No item currently has stock and pending demand covering its forecast demand and safety stock, so nothing can be deferred from this forecast cycle.',
+                self::PROMPT_DEFERRABLE => 'No item currently has stock and pending demand covering its forecast demand, so nothing can be deferred from this forecast cycle.',
                 self::PROMPT_VERIFY_FIRST => 'Every forecast row rests on enough verified completed history to be usable. No row needs verification before ordering this cycle.',
                 self::PROMPT_WHY_THESE => 'There is no procurement gap in this forecast, so there is no list to explain.',
                 default => 'No item in this forecast has a procurement gap, so there is nothing to purchase first this cycle.',
@@ -714,7 +715,7 @@ class ForecastDecisionSupportService
         $period = is_string($facts['forecast_period'] ?? null) ? $facts['forecast_period'] : 'this cycle';
         $lines = [
             $facts['question'].' ('.$period.')',
-            'Buy = demand + buffer − stock − pending',
+            'Buy = demand − stock − pending + unmet',
         ];
 
         foreach ($items as $index => $item) {
@@ -753,7 +754,7 @@ class ForecastDecisionSupportService
 
         $lines = [
             "These {$total} items are on the list because each has a procurement gap for {$period}: "
-            .'forecast demand plus safety stock exceeds available stock plus pending demand.',
+            .'forecast demand exceeds available stock plus pending demand.',
         ];
 
         $mix = [];

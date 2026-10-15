@@ -1,10 +1,9 @@
 <?php
 namespace Tests\Feature;
 
-use App\Models\Category;
-use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 
@@ -23,19 +22,7 @@ beforeEach(function () {
         $this->markTestSkipped($reason);
     }
 
-    // Copy the artifacts produced by the real local `forecast:train` run so the
-    // endpoints serve genuine data rather than a hand-written fixture.
     Storage::fake('forecast');
-
-    foreach ([
-        'forecast/forecast.json',
-        'forecast/training-status.json',
-    ] as $file) {
-        $source = storage_path('app/'.$file);
-        if (is_file($source)) {
-            Storage::disk('forecast')->put($file, file_get_contents($source));
-        }
-    }
 
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
     $this->custodian = User::firstOrCreate(
@@ -50,56 +37,11 @@ beforeEach(function () {
         ],
     );
 
-    // The stored forecast is validated against live inventory rows: every item
-    // it names must exist with the same id, category and name. Recreate exactly
-    // those rows, with low stock, so procurement maths has real inputs.
-    $forecast = json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true);
-    $rows = array_merge($forecast['forecasts'] ?? [], $forecast['insufficient_history'] ?? []);
-
-    // StoredDemandForecastService requires each row's category_id to match the
-    // inventory row exactly. Category ids differ between the production
-    // database and this isolated test database, so remap them by name; the
-    // predicted quantities, history and priorities stay exactly as trained.
-    foreach ($rows as $index => $row) {
-        $category = Category::firstOrCreate(
-            ['category_name' => $row['category']],
-            ['requires_serial_number' => false],
-        );
-
-        $rows[$index]['category_id'] = (int) $category->category_id;
-
-        // Inventory::$fillable omits the item_id primary key, so the row is written
-        // through forceFill; mass assignment would silently drop the id and
-        // every forecast row would then fail identity validation.
-        $item = Inventory::firstWhere('item_id', $row['inventory_id']) ?? new Inventory;
-
-        $item->forceFill([
-            'item_id' => $row['inventory_id'],
-            'item_name' => $row['item_name'],
-            'category_id' => $category->category_id,
-            'unit' => $row['unit'] ?? 'piece',
-            'user_id' => $this->custodian->id,
-            'quantity' => 1,
-            'unit_cost' => 100,
-            'status' => 'available',
-            'date_acquired' => '2026-06-01',
-        ])->save();
-    }
-
-    $forecast['forecasts'] = array_values(array_filter(
-        $rows,
-        fn (array $row): bool => ($row['status'] ?? '') === 'success',
-    ));
-    $forecast['insufficient_history'] = array_values(array_filter(
-        $rows,
-        fn (array $row): bool => ($row['status'] ?? '') !== 'success',
-    ));
-
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode($forecast));
+    seedLiveForecastTestData($this->custodian);
 });
 
 test('the stored forecast is served as live, not stale or missing', function () {
-    $result = app(\App\Services\StoredDemandForecastService::class)->read($this->custodian);
+    $result = app(StoredDemandForecastService::class)->read($this->custodian);
 
     expect($result['status'])->toBe('success')
         ->and($result['rows'])->not->toBeEmpty()
@@ -135,7 +77,7 @@ test('the reports API serves live forecast rows to a custodian', function () {
 });
 
 test('the reports forecast explanation endpoint answers for a real forecast item', function () {
-    $rows = app(\App\Services\StoredDemandForecastService::class)
+    $rows = app(\App\Services\Forecasting\StoredDemandForecastService::class)
         ->read($this->custodian)['rows'];
     $item = $rows[array_key_first($rows)];
 
@@ -163,7 +105,7 @@ test('chat answers what to purchase first using live forecast items', function (
         ->and($reply)->not->toContain('stored ML forecast is stale')
         ->and($reply)->not->toContain('invalid or unavailable');
 
-    $names = collect(app(\App\Services\StoredDemandForecastService::class)
+    $names = collect(app(\App\Services\Forecasting\StoredDemandForecastService::class)
         ->read($this->custodian)['rows'])->pluck('item_name');
 
     expect($names->contains(fn (string $name): bool => str_contains($reply, $name)))

@@ -1,9 +1,11 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Forecasting;
 
 use App\Models\User;
+use App\Services\AiCapabilityPolicy;
 use App\Services\Concerns\GroundsForecastReply;
+use App\Services\GeminiApiService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -206,7 +208,6 @@ class ForecastExplanationService
             'unit' => $row['unit'] ?? null,
             'available_stock' => $row['available_stock'] ?? null,
             'forecast_demand' => $row['forecast_demand'] ?? null,
-            'safety_stock' => $row['safety_stock'] ?? null,
             'pending_demand' => $row['pending_demand'] ?? $row['pending_requests'] ?? null,
             'unmet_demand' => $row['unmet_demand'] ?? 0,
             'unmet_requesters' => $row['unmet_requesters'] ?? 0,
@@ -394,6 +395,6 @@ class ForecastExplanationService
             ? ", and unmet staff demand of {$unmet} {$payload['unit']}"
             : '';
 
-        return "{$payload['item_name']} has forecast demand of {$payload['forecast_demand']} {$payload['unit']}, safety stock of {$payload['safety_stock']} {$payload['unit']}, available stock of {$payload['available_stock']} {$payload['unit']}, pending demand of {$payload['pending_demand']} {$payload['unit']}{$unmetClause}. The suggested quantity is {$payload['suggested_procurement']} {$payload['unit']}; {$payload['advisory_status']}. This is advisory only.";
+        return "{$payload['item_name']} has forecast demand of {$payload['forecast_demand']} {$payload['unit']}, available stock of {$payload['available_stock']} {$payload['unit']}, pending demand of {$payload['pending_demand']} {$payload['unit']}{$unmetClause}. The suggested quantity is {$payload['suggested_procurement']} {$payload['unit']}; {$payload['advisory_status']}. This is advisory only.";
     }
 }

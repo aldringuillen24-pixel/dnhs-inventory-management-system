@@ -1,10 +1,12 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Forecasting;
 
 use App\Models\ForecastAiRecommendation;
 use App\Models\User;
+use App\Services\AiCapabilityPolicy;
 use App\Services\Concerns\GroundsForecastReply;
+use App\Services\GeminiApiService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
@@ -476,7 +478,6 @@ class ForecastAiRecommendationService
             'category' => $row['category'] ?? null,
             'unit' => $row['unit'] ?? null,
             'forecast_demand' => $row['forecast_demand'] ?? null,
-            'safety_stock' => $row['safety_stock'] ?? null,
             'available_stock' => $row['available_stock'] ?? null,
             'pending_demand' => $row['pending_demand'] ?? null,
             'unmet_demand' => (int) ($row['unmet_demand'] ?? 0),
@@ -527,7 +528,6 @@ class ForecastAiRecommendationService
             'item_name' => $row['item_name'] ?? null,
             'unit' => $row['unit'] ?? null,
             'forecast_demand' => $row['forecast_demand'] ?? null,
-            'safety_stock' => $row['safety_stock'] ?? null,
             'available_stock' => $row['available_stock'] ?? null,
             'pending_demand' => $row['pending_demand'] ?? null,
             'unmet_demand' => (int) ($row['unmet_demand'] ?? 0),

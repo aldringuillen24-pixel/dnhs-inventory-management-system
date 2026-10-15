@@ -1,12 +1,14 @@
 <?php
 
 use App\Models\Category;
+use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\StockMovement;
 use App\Models\Transaction;
 use App\Models\User;
-use App\Services\ForecastExplanationService;
+use App\Services\Forecasting\ForecastExplanationService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -67,7 +69,7 @@ function explanationForecastData(): array
         $months[] = $key;
         $usage[$key] = 55;
     }
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode([
+    $payload = json_encode([
         'schema_version' => 2,
         'source_type' => 'live',
         'model_version' => 'demand-linear-regression-v2',
@@ -92,7 +94,12 @@ function explanationForecastData(): array
             'validation' => ['status' => 'time_ordered_holdout', 'months_tested' => 1, 'mae' => 2],
         ]],
         'insufficient_history' => [],
-    ], JSON_THROW_ON_ERROR));
+    ], JSON_THROW_ON_ERROR);
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        $payload,
+    );
 
     return [$custodian, $inventory];
 }
@@ -107,7 +114,7 @@ test('property custodians can request an explanation for a real forecast row', f
     $payload = [];
     Http::fake(function ($request) use (&$payload) {
         $payload = $request->data();
-        return Http::response(geminiGenerateContentResponse('Bond Paper has forecast demand of 55 boxes, safety stock of 14 boxes, available stock of 20 boxes, and pending demand of 0 boxes; suggested quantity is 49 boxes. This is advisory only.'));
+        return Http::response(geminiGenerateContentResponse('Bond Paper has forecast demand of 55 boxes, available stock of 20 boxes, and pending demand of 0 boxes; suggested quantity is 35 boxes. This is advisory only.'));
     });
 
     $response = $this->actingAs($custodian)->post(route('propertyCustodian.reports.forecast.explanation'), [
@@ -115,8 +122,9 @@ test('property custodians can request an explanation for a real forecast row', f
     ]);
 
     $response->assertRedirect(route('propertyCustodian.reports'));
-    expect(session('forecastExplanation'))->toContain('Bond Paper', 'forecast demand of 55', 'pending demand of 0', 'suggested quantity is 49')
-        ->and($payload['systemInstruction']['parts'][0]['text'])->toContain('Bond Paper', 'forecast_demand', 'safety_stock', 'suggested_procurement', 'pending_demand')
+    expect(session('forecastExplanation'))->toContain('Bond Paper', 'forecast demand of 55', 'pending demand of 0', 'suggested quantity is 35')
+        ->and($payload['systemInstruction']['parts'][0]['text'])->toContain('Bond Paper', 'forecast_demand', 'available_stock', 'suggested_procurement', 'pending_demand')
+        ->and($payload['systemInstruction']['parts'][0]['text'])->not->toContain('safety_stock')
         ->and($payload['systemInstruction']['parts'][0]['text'])->not->toContain('unit_cost', 'transaction_id', 'user_id', 'monthly_usage_values', 'inventory_id');
 });
 
@@ -133,14 +141,19 @@ test('report explanation asks for inventory ID when forecast names are duplicate
         'date_acquired' => '2025-01-01',
         'status' => 'available',
     ]);
-    $payload = json_decode(Storage::disk('forecast')->get('forecast/forecast.json'), true, 512, JSON_THROW_ON_ERROR);
+    $storedPayload = ForecastPayload::query()->where('source_type', ForecastPayload::SOURCE_LIVE)->firstOrFail();
+    $payload = json_decode($storedPayload->payload, true, 512, JSON_THROW_ON_ERROR);
     $duplicate = $payload['forecasts'][0];
     $duplicate['inventory_id'] = (int) $second->item_id;
     $duplicate['category_id'] = (int) $second->category_id;
     $duplicate['category'] = $category->category_name;
     $duplicate['unit'] = $second->unit;
     $payload['forecasts'][] = $duplicate;
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode($payload, JSON_THROW_ON_ERROR));
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($payload, JSON_THROW_ON_ERROR),
+    );
 
     $this->actingAs($custodian)->post(route('propertyCustodian.reports.forecast.explanation'), [
         'item_name' => 'Bond Paper',
@@ -250,7 +263,7 @@ test('provider failure returns a local explanation from the same calculated fact
     ])->assertRedirect(route('propertyCustodian.reports'));
 
     expect(session('forecastExplanation'))
-        ->toContain('Bond Paper', '55 boxes', '14 boxes', '20 boxes', '49 boxes')
+        ->toContain('Bond Paper', '55 boxes', '20 boxes', '35 boxes')
         ->toContain('advisory only');
 });
 
@@ -258,7 +271,7 @@ test('provider output that changes a Laravel priority falls back to the local ex
     [$custodian] = explanationForecastData();
     config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
     Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response(
-        geminiGenerateContentResponse('Bond Paper has forecast demand 55 boxes and suggested quantity 49 boxes. Set its priority to Urgent.'),
+        geminiGenerateContentResponse('Bond Paper has forecast demand 55 boxes and suggested quantity 35 boxes. Set its priority to Urgent.'),
     )]);
 
     $this->actingAs($custodian)->post(route('propertyCustodian.reports.forecast.explanation'), [
@@ -266,19 +279,19 @@ test('provider output that changes a Laravel priority falls back to the local ex
     ])->assertRedirect(route('propertyCustodian.reports'));
 
     expect(session('forecastExplanation'))
-        ->toContain('Bond Paper', '55 boxes', '49 boxes', 'advisory only')
+        ->toContain('Bond Paper', '55 boxes', '35 boxes', 'advisory only')
         ->not->toContain('Urgent');
 });
 
 test('a plain-English explanation that recommends buying is accepted', function () {
     // The previous gate treated the word "buy" as a forbidden claim, which is
     // the one thing this layer exists to say. It also required the reply to
-    // restate all five quantities under their exact field labels, so any prose
+    // restate all quantities under their exact field labels, so any prose
     // the model added was what got it rejected.
     [$custodian] = explanationForecastData();
     config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
 
-    $written = 'Bond Paper runs down steadily, so buy 49 boxes for next month. This is advisory only.';
+    $written = 'Bond Paper runs down steadily, so buy 35 boxes for next month. This is advisory only.';
     Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response(
         geminiGenerateContentResponse($written),
     )]);
@@ -307,7 +320,7 @@ test('an explanation citing a figure the forecast never produced is rejected', f
     ])->assertRedirect(route('propertyCustodian.reports'));
 
     expect(session('forecastExplanation'))
-        ->toContain('Bond Paper', '55 boxes', '49 boxes', 'advisory only')
+        ->toContain('Bond Paper', '55 boxes', '35 boxes', 'advisory only')
         ->not->toContain('400');
 });
 
@@ -333,7 +346,7 @@ test('an explanation may explain how much history backs a figure', function () {
     [$custodian] = explanationForecastData();
     config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
 
-    $written = 'Bond Paper has 3 of 3 required months of history, so the estimate is reasonable. Buy 49 boxes.';
+    $written = 'Bond Paper has 3 of 3 required months of history, so the estimate is reasonable. Buy 35 boxes.';
     Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response(
         geminiGenerateContentResponse($written),
     )]);
@@ -379,15 +392,14 @@ function airFreshenerForecastRow(): array
         'unit' => 'piece',
         'available_stock' => 0,
         'forecast_demand' => 2,
-        'safety_stock' => 1,
         'pending_demand' => 0,
         'unmet_demand' => 0,
         'unmet_requesters' => 0,
-        'suggested_procurement' => 3,
+        'suggested_procurement' => 2,
         'needs_procurement' => true,
         'priority' => 'Urgent',
         'confidence' => 'Low',
-        'calculation_basis' => 'max(0, forecast demand + safety stock - available stock - pending demand + unmet demand)',
+        'calculation_basis' => 'max(0, forecast demand - available stock - pending demand + unmet demand)',
         'advisory_status' => 'Review recommended',
         'status' => 'success',
         'historical_months_used' => 4,
@@ -414,7 +426,7 @@ test('a reply may name the forecast month and restate the item name in another o
 
     $written = 'The 300ml Air Freshener is Urgent priority for the October 2026 forecast. '
         .'Its forecast demand is 2 pieces against 0 available, and it rests on 4 of 3 required months, so Low confidence applies. '
-        .'The suggested quantity is 3 pieces. This is advisory only.';
+        .'The suggested quantity is 2 pieces. This is advisory only.';
     Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response(
         geminiGenerateContentResponse($written),
     )]);
@@ -481,7 +493,7 @@ test('the single-item explanation reports a provider reply as used', function ()
     config()->set(['services.gemini.api_key' => 'test-key', 'services.gemini.model' => 'test/model']);
 
     Http::fake(['https://generativelanguage.googleapis.com/v1beta/models/*:generateContent' => Http::response(
-        geminiGenerateContentResponse('Bond Paper is drawn down steadily, so buy 49 boxes next month.'),
+        geminiGenerateContentResponse('Bond Paper is drawn down steadily, so buy 35 boxes next month.'),
     )]);
 
     $payload = $this->actingAs($custodian)->postJson(route('api.custodian.reports.forecast.explanation'), [
@@ -490,7 +502,7 @@ test('the single-item explanation reports a provider reply as used', function ()
 
     expect($payload['source'])->toBe('provider')
         ->and($payload['provider_status'])->toBe('ok')
-        ->and($payload['explanation'])->toBe('Bond Paper is drawn down steadily, so buy 49 boxes next month.');
+        ->and($payload['explanation'])->toBe('Bond Paper is drawn down steadily, so buy 35 boxes next month.');
 });
 
 test('explanation requests do not change calculated values or inventory records', function () {

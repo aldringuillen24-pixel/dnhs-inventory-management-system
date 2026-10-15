@@ -10,6 +10,8 @@ return [
     'minimum_history' => (int) env('FORECAST_MINIMUM_HISTORY', 3),
     'maximum_age_hours' => (int) env('FORECAST_MAXIMUM_AGE_HOURS', 168),
     'safety_stock_rate' => (float) env('FORECAST_SAFETY_STOCK_RATE', 0.25),
+    'lead_time_months' => (int) env('FORECAST_LEAD_TIME_MONTHS', 1),
+    'test_dataset_path' => storage_path('app/datasets/dummay-datasets.csv'),
     /*
      * Unusual consumption.
      *

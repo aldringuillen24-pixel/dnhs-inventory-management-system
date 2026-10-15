@@ -60,6 +60,109 @@ function geminiGenerateContentResponse(string $text): array
 }
 
 /**
+ * Creates a small live forecast fixture stored through the production database
+ * persistence path, with matching inventory records for read-time validation.
+ *
+ * @return array<string, mixed>
+ */
+function seedLiveForecastTestData(\App\Models\User $user): array
+{
+    $category = \App\Models\Category::firstOrCreate(
+        ['category_name' => 'Forecast Test Supplies'],
+        ['requires_serial_number' => false],
+    );
+    $end = \Illuminate\Support\Carbon::now()->startOfMonth()->subMonth();
+    $start = $end->copy()->subMonths(3);
+    $monthKeys = [];
+    $usage = [];
+
+    for ($month = $start->copy(); $month->lte($end); $month->addMonth()) {
+        $monthKey = $month->format('Y-m');
+        $monthKeys[] = $monthKey;
+        $usage[$monthKey] = 10;
+    }
+
+    $forecastSpecs = [];
+    foreach (range(1, 26) as $index) {
+        $forecastSpecs[] = [sprintf('Gap Item %02d', $index), 0, 60, 'Low', 'success'];
+    }
+    $forecastSpecs[] = ['Covered Item', 100, 8, 'Low', 'success'];
+    $forecastSpecs[] = ['Insufficient History Item', 0, null, 'Low', 'insufficient_history'];
+    $forecasts = [];
+    $insufficientHistory = [];
+
+    foreach ($forecastSpecs as [$name, $quantity, $demand, $confidence, $status]) {
+        $inventory = \App\Models\Inventory::create([
+            'category_id' => $category->category_id,
+            'user_id' => $user->id,
+            'item_name' => $name,
+            'unit' => 'pieces',
+            'quantity' => $quantity,
+            'unit_cost' => 10,
+            'date_acquired' => $start->toDateString(),
+            'status' => 'available',
+        ]);
+
+        $rowUsage = $usage;
+        $rowMonths = $monthKeys;
+        $windowStart = $start->format('Y-m');
+        $windowEnd = $end->format('Y-m');
+
+        if ($status === 'insufficient_history') {
+            $rowMonths = array_slice($monthKeys, 0, 2);
+            $rowUsage = array_intersect_key($usage, array_flip($rowMonths));
+            $windowEnd = $rowMonths[1];
+        }
+
+        $row = [
+            'inventory_id' => (int) $inventory->item_id,
+            'item_name' => $name,
+            'category_id' => (int) $category->category_id,
+            'category' => $category->category_name,
+            'unit' => 'pieces',
+            'forecast_month' => \Illuminate\Support\Carbon::createFromFormat('!Y-m', $windowEnd)->addMonth()->format('Y-m'),
+            'history_window' => [
+                'start_month' => $windowStart,
+                'end_month' => $windowEnd,
+                'completeness' => 'complete',
+            ],
+            'monthly_usage' => $rowUsage,
+            'unknown_months' => [],
+            'months_used' => $rowMonths,
+            'verified_months_used' => count($rowMonths),
+            'required_months' => 3,
+            'model_version' => 'demand-linear-regression-v2',
+            'confidence' => $confidence,
+            'status' => $status,
+        ];
+
+        if ($status === 'success') {
+            $row['predicted_quantity'] = $demand;
+            $row['validation'] = ['status' => 'time_ordered_holdout', 'months_tested' => 1, 'mae' => 1.0];
+            $forecasts[] = $row;
+        } else {
+            $insufficientHistory[] = $row;
+        }
+    }
+
+    $payload = [
+        'schema_version' => 2,
+        'source_type' => 'live',
+        'model_version' => 'demand-linear-regression-v2',
+        'generated_at' => now()->toIso8601String(),
+        'forecasts' => $forecasts,
+        'insufficient_history' => $insufficientHistory,
+    ];
+    app(\App\Services\Forecasting\StoredDemandForecastService::class)->persistTraining(
+        \App\Models\ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($payload, JSON_THROW_ON_ERROR),
+    );
+
+    return $payload;
+}
+
+/**
  * Whether a live-provider test must be skipped, and why.
  *
  * Tests that reach Gemini for real spend the project's request quota, which is

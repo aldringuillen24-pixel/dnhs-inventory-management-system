@@ -5,7 +5,7 @@ use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\StockMovement;
 use App\Models\User;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use Illuminate\Console\Command;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -96,7 +96,7 @@ test('training exports stock-outs and logs forecast API failures', function () {
         'forecast.api_token' => 'forecast-test-token',
     ]);
     Http::fake(['*' => Http::response(['detail' => 'Service unavailable'], 503)]);
-    $expectedCsvPath = Storage::disk('forecast')->path('forecast/real-stock-out-data.csv');
+    $expectedCsvPath = Storage::disk('forecast')->path('datasets/real-stock-out-data.csv');
     Log::shouldReceive('error')
         ->once()
         ->withArgs(fn (string $message, array $context): bool =>
@@ -115,7 +115,7 @@ test('training exports stock-outs and logs forecast API failures', function () {
         && $request->method() === 'POST'
     );
 
-    $csv = Storage::disk('forecast')->get('forecast/real-stock-out-data.csv');
+    $csv = Storage::disk('forecast')->get('datasets/real-stock-out-data.csv');
     $rows = array_map(
         fn (string $line): array => str_getcsv($line, escape: ''),
         preg_split('/\r\n|\r|\n/', trim($csv)),
@@ -189,6 +189,43 @@ test('sample training uses isolated demo paths and never overwrites live artifac
 
     expect(Storage::disk('forecast')->get('forecast/forecast.json'))->toBe('{"source":"live"}')
         ->and(Storage::disk('forecast')->get('models/demand-model.joblib'))->toBe('live-model')
-        ->and(Storage::disk('forecast')->exists('forecast/real-stock-out-data.csv'))->toBeFalse()
+        ->and(Storage::disk('forecast')->exists('datasets/real-stock-out-data.csv'))->toBeFalse()
+        ->and(Storage::disk('forecast')->exists(config('forecast.demo.output_path')))->toBeFalse();
+});
+
+test('test dataset training failure does not replace the current live forecast', function () {
+    Storage::fake('forecast');
+    $testDatasetPath = Storage::disk('forecast')->path('datasets/dummay-datasets.csv');
+    Storage::disk('forecast')->put('datasets/dummay-datasets.csv', 'inventory_id,item_name');
+    config([
+        'forecast.test_dataset_path' => $testDatasetPath,
+        'forecast.python_binary' => base_path('missing-forecast-python'),
+    ]);
+    Http::fake();
+    $existingPayload = '{"existing":"forecast"}';
+    app(StoredDemandForecastService::class)->persistTraining('live', 'success', $existingPayload);
+
+    $this->artisan('forecast:train', ['--test-dataset' => true])
+        ->expectsOutput('Test dataset demand forecast training failed. The existing live forecast was left unchanged.')
+        ->assertExitCode(Command::FAILURE);
+
+    Http::assertNothingSent();
+    expect(Inventory::query()->count())->toBe(0)
+        ->and(StockMovement::query()->count())->toBe(0)
+        ->and(Storage::disk('forecast')->exists(config('forecast.demo.output_path')))->toBeFalse()
+        ->and(Storage::disk('forecast')->exists('forecast/training-status.json'))->toBeFalse()
+        ->and(\App\Models\ForecastPayload::query()->where('source_type', 'live')->value('payload'))->toBe($existingPayload)
+        ->and(\App\Models\ForecastPayload::query()->where('source_type', 'live')->value('training_status'))->toBe('success');
+});
+
+test('dummy dataset training is rejected outside local and testing environments', function () {
+    Storage::fake('forecast');
+    $this->app->detectEnvironment(fn () => 'production');
+
+    $this->artisan('forecast:train', ['--test-dataset' => true])
+        ->expectsOutput('The dummy dataset option is available only in local and testing environments.')
+        ->assertExitCode(Command::FAILURE);
+
+    expect(Storage::disk('forecast')->exists('datasets/real-stock-out-data.csv'))->toBeFalse()
         ->and(Storage::disk('forecast')->exists(config('forecast.demo.output_path')))->toBeFalse();
 });

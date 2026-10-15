@@ -12,11 +12,11 @@ use App\Models\Inventory;
 use App\Models\InspectionRecord;
 use App\Models\MaintenanceRecord;
 use App\Models\StockMovement;
-use App\Services\ForecastAiRecommendationService;
+use App\Services\Forecasting\ForecastAiRecommendationService;
 use App\Services\ForecastDecisionSupportService;
-use App\Services\ForecastExplanationService;
+use App\Services\Forecasting\ForecastExplanationService;
 use App\Services\InventoryOperationService;
-use App\Services\StoredDemandForecastService;
+use App\Services\Forecasting\StoredDemandForecastService;
 use App\Support\RequestableItemMatcher;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
@@ -2550,7 +2550,7 @@ class PropertyCustodianController extends Controller
             'unit_cost' => ['required', 'numeric', 'min:0'],
             'date_acquired' => ['required', 'date', 'before_or_equal:today'],
             'lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
-            'quantity' => ['required', 'integer', 'min:1', 'max:100'],
+            'quantity' => ['required', 'integer', 'min:1'],
             'building' => ['nullable', 'string', 'max:255'],
             'room' => ['nullable', 'string', 'max:255'],
         ]);
@@ -2654,7 +2654,7 @@ class PropertyCustodianController extends Controller
                 'unit_cost' => ['required', 'numeric', 'min:0'],
                 'date_acquired' => ['required', 'date', 'before_or_equal:today'],
                 'lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
-                'quantity' => ['required', 'integer', 'min:1', 'max:100'],
+                'quantity' => ['required', 'integer', 'min:1'],
                 'ics_no' => ['nullable', 'string', 'max:255'],
                 'serial_numbers' => ['nullable', 'array'],
                 'serial_numbers.*' => ['nullable', 'string', 'max:255'],
@@ -2804,7 +2804,7 @@ class PropertyCustodianController extends Controller
             'unit_cost' => ['required', 'numeric', 'min:0'],
             'date_acquired' => ['required', 'date', 'before_or_equal:today'],
             'lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
-            'quantity' => ['required', 'integer', 'min:1', 'max:100'],
+            'quantity' => ['required', 'integer', 'min:1'],
             'building' => ['nullable', 'string', 'max:255'],
             'room' => ['nullable', 'string', 'max:255'],
         ]);

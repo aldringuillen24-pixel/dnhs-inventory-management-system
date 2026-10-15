@@ -1,11 +1,8 @@
 <?php
 namespace Tests\Feature;
 
-use App\Models\Category;
-use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\User;
-use App\Services\StoredDemandForecastService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 
@@ -27,13 +24,6 @@ beforeEach(function () {
 
     Storage::fake('forecast');
 
-    foreach (['forecast/forecast.json', 'forecast/training-status.json'] as $file) {
-        $source = storage_path('app/'.$file);
-        if (is_file($source)) {
-            Storage::disk('forecast')->put($file, file_get_contents($source));
-        }
-    }
-
     $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
     $this->custodian = User::firstOrCreate(
         ['username' => 'gemini-live-custodian'],
@@ -47,34 +37,7 @@ beforeEach(function () {
         ],
     );
 
-    $forecast = json_decode((string) Storage::disk('forecast')->get('forecast/forecast.json'), true);
-    $rows = array_merge($forecast['forecasts'] ?? [], $forecast['insufficient_history'] ?? []);
-
-    foreach ($rows as $index => $row) {
-        $category = Category::firstOrCreate(
-            ['category_name' => $row['category']],
-            ['requires_serial_number' => false],
-        );
-        $rows[$index]['category_id'] = (int) $category->category_id;
-
-        $item = Inventory::firstWhere('item_id', $row['inventory_id']) ?? new Inventory;
-        $item->forceFill([
-            'item_id' => $row['inventory_id'],
-            'item_name' => $row['item_name'],
-            'category_id' => $category->category_id,
-            'unit' => $row['unit'] ?? 'piece',
-            'user_id' => $this->custodian->id,
-            'quantity' => 1,
-            'unit_cost' => 100,
-            'status' => 'available',
-            'date_acquired' => '2026-06-01',
-        ])->save();
-    }
-
-    $forecast['forecasts'] = array_values(array_filter($rows, fn (array $r): bool => ($r['status'] ?? '') === 'success'));
-    $forecast['insufficient_history'] = array_values(array_filter($rows, fn (array $r): bool => ($r['status'] ?? '') !== 'success'));
-
-    Storage::disk('forecast')->put('forecast/forecast.json', json_encode($forecast));
+    seedLiveForecastTestData($this->custodian);
 });
 
 test('a live Gemini follow-up stays on the items it was given', function () {

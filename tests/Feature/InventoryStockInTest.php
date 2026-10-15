@@ -199,6 +199,38 @@ test('a non-serialized stock-in creates one inventory record with the entered qu
     ]);
 });
 
+test('stock-in and inventory edits accept quantities above one hundred', function () {
+    $category = Category::create([
+        'category_name' => 'Learning Resources',
+        'requires_serial_number' => false,
+    ]);
+
+    $this->actingAs($this->propertyCustodian)->post(route('propertyCustodian.inventory.stock-in'), [
+        'item_name' => 'Bulk Workbook',
+        'category_id' => $category->category_id,
+        'unit' => 'copy',
+        'unit_cost' => 120,
+        'date_acquired' => '2026-08-10',
+        'quantity' => 150,
+    ])->assertRedirect(route('propertyCustodian.inventory'));
+
+    $inventory = Inventory::where('item_name', 'Bulk Workbook')->sole();
+    expect((int) $inventory->quantity)->toBe(150);
+
+    $this->actingAs($this->propertyCustodian)
+        ->patch(route('propertyCustodian.inventory.update', $inventory), [
+            'item_name' => 'Bulk Workbook',
+            'category_id' => $category->category_id,
+            'unit' => 'copy',
+            'unit_cost' => 120,
+            'date_acquired' => '2026-08-10',
+            'quantity' => 250,
+        ])
+        ->assertRedirect(route('propertyCustodian.inventory'));
+
+    expect((int) $inventory->fresh()->quantity)->toBe(250);
+});
+
 test('stock-in copies the category lifespan default and calculates the expected end date', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
@@ -831,6 +863,34 @@ test('stock-in import creates valid rows and reports per-row errors', function (
     expect($response->json('errors'))->toHaveKey('2')
         ->and(Inventory::where('item_name', 'Bond Paper')->value('quantity'))->toBe(5)
         ->and(Inventory::where('serial_number', 'SN-001')->exists())->toBeTrue();
+});
+
+test('stock-in import accepts a quantity above one hundred', function () {
+    $category = Category::create([
+        'category_name' => 'Bulk Learning Resources',
+        'requires_serial_number' => false,
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->postJson(route('api.custodian.inventory.stock-in.import'), [
+            'rows' => [[
+                'item_name' => 'Bulk Imported Workbook',
+                'category_id' => $category->category_id,
+                'unit' => 'copy',
+                'quantity' => 150,
+                'unit_cost' => 120,
+                'date_acquired' => '2026-10-01',
+                'serial_numbers' => [],
+            ]],
+        ])
+        ->assertOk()
+        ->assertJsonPath('imported', 1)
+        ->assertJsonPath('failed', 0);
+
+    $this->assertDatabaseHas('inventory', [
+        'item_name' => 'Bulk Imported Workbook',
+        'quantity' => 150,
+    ]);
 });
 
 test('inventory exportPdf returns filtered groups as a pdf and rejects non-custodians', function () {
