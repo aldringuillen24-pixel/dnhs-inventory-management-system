@@ -333,7 +333,11 @@ class AiAssistantController extends Controller
         } else {
             $request->session()->forget($contextKey);
         }
-        $result['explanation'] = $this->aiService->explainComparison($request->user(), $result);
+        $insight = ($result['source'] ?? null) === 'historical'
+            ? $this->aiService->explainHistoricalComparison($user, $result)
+            : $this->aiService->explainComparison($user, $result);
+        $result['explanation'] = $insight['text'];
+        $result['explanation_source'] = $insight['source'];
 
         return response()->json([
             'success' => true,

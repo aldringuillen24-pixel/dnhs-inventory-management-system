@@ -7,6 +7,7 @@ use Carbon\CarbonImmutable;
 final readonly class InventoryComparisonData
 {
     public function __construct(
+        public string $source,
         public string $metric,
         public string $scope,
         public ?int $itemId,

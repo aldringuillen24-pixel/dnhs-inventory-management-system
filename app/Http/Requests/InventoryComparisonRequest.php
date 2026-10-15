@@ -16,11 +16,16 @@ class InventoryComparisonRequest extends FormRequest
 
     public function rules(): array
     {
+        $isHistorical = $this->input('source') === 'historical';
+
         return [
             'confirmed' => ['required', 'accepted'],
-            'metric' => ['required', 'string', 'in:stock_in_quantity,stock_out_quantity,request_count,request_quantity,assignment_count,assignment_quantity,transfer_count,transfer_quantity,maintenance_count,disposal_quantity'],
+            'source' => ['nullable', 'string', 'in:live,historical'],
+            'metric' => ['required', 'string', $isHistorical
+                ? 'in:monthly_usage'
+                : 'in:stock_in_quantity,stock_out_quantity,request_count,request_quantity,assignment_count,assignment_quantity,transfer_count,transfer_quantity,maintenance_count,disposal_quantity'],
             'scope' => ['required', 'string', 'in:all,item'],
-            'item_id' => ['nullable', 'integer', 'exists:inventory,item_id'],
+            'item_id' => ['nullable', 'integer', ...($isHistorical ? [] : ['exists:inventory,item_id'])],
             'item_name' => ['nullable', 'string', 'max:255'],
             'unit' => ['nullable', 'string', 'max:64'],
             'month_one' => ['required', 'date_format:Y-m'],
@@ -37,15 +42,24 @@ class InventoryComparisonRequest extends FormRequest
             ];
             $metric = $this->input('metric');
             $unit = $this->input('unit');
-            if (in_array($metric, $quantityMetrics, true) && $this->input('scope') === 'all'
+            $isQuantityMetric = in_array($metric, $quantityMetrics, true)
+                || ($this->input('source') === 'historical' && $metric === 'monthly_usage');
+            if ($isQuantityMetric && $this->input('scope') === 'all'
                 && (! is_string($unit) || trim($unit) === '')) {
                 $validator->errors()->add('unit', 'Choose one inventory unit for a quantity comparison across all inventory.');
             }
-            if ($unit !== null && ! in_array($metric, $quantityMetrics, true)) {
+            if ($unit !== null && ! $isQuantityMetric) {
                 $validator->errors()->add('unit', 'A unit can only be selected for a quantity comparison.');
             }
             if ($this->input('scope') === 'item' && ! $this->filled('item_id') && ! $this->filled('item_name')) {
                 $validator->errors()->add('item_name', 'Choose an inventory item.');
+            }
+            if ($this->input('source') === 'historical' && $metric !== 'monthly_usage') {
+                $validator->errors()->add('metric', 'Historical comparisons support monthly usage only.');
+            }
+            if ($this->input('source') === 'historical' && $this->input('scope') === 'all'
+                && (! is_string($unit) || trim($unit) === '')) {
+                $validator->errors()->add('unit', 'Choose an inventory unit for this monthly usage comparison.');
             }
             if ($this->input('scope') !== 'item' && $this->filled('item_id')) {
                 $validator->errors()->add('item_id', 'An inventory item can only be selected for item scope.');
@@ -69,6 +83,7 @@ class InventoryComparisonRequest extends FormRequest
         $validated = $this->validated();
 
         return new InventoryComparisonData(
+            source: $validated['source'] ?? 'live',
             metric: $validated['metric'],
             scope: $validated['scope'],
             itemId: isset($validated['item_id']) ? (int) $validated['item_id'] : null,

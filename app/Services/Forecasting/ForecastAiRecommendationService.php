@@ -25,8 +25,9 @@ use Illuminate\Support\Facades\Log;
  * a hundred, and an item the provider skipped or mangled falls back to a
  * templated sentence without discarding the rest of its chunk.
  *
- * The result is stored against the forecast's `generated_at` stamp, so a cycle
- * is written once and reused by every custodian until the model retrains.
+ * The result is stored against the forecast's `generated_at` stamp and a
+ * fingerprint of current recommendation facts, so a stock/request change
+ * cannot reuse action text from an earlier state of the same forecast.
  */
 class ForecastAiRecommendationService
 {
@@ -111,9 +112,9 @@ class ForecastAiRecommendationService
     /**
      * The stored advice for this cycle, rebuilt against the live forecast rows.
      *
-     * Only the provider's text is read back. Queue membership and every quantity
-     * are recomputed, so a row saved before an item was re-categorised or
-     * deleted cannot make the tab contradict the table beside it.
+     * Only the provider's text is read back, and only while the live facts
+     * match the facts used to produce it. Queue membership and quantities are
+     * still recomputed from the current forecast.
      *
      * @param  array<string, Collection>  $queues
      * @return array<string, mixed>|null
@@ -126,6 +127,13 @@ class ForecastAiRecommendationService
             ->first();
 
         if (! $record || ! is_array($record->queues)) {
+            return null;
+        }
+
+        $rows = collect($forecast['rows'] ?? []);
+        $storedBasis = $record->queues[0]['basis'] ?? null;
+
+        if (! is_string($storedBasis) || $storedBasis !== $this->recommendationBasis($rows)) {
             return null;
         }
 
@@ -194,6 +202,40 @@ class ForecastAiRecommendationService
         $rows = collect($forecast['rows'] ?? []);
 
         return $rows->count().'-'.(int) $rows->max(fn (array $row): int => (int) ($row['suggested_procurement'] ?? 0));
+    }
+
+    /**
+     * Cache written action text only while the live facts used to produce it
+     * remain unchanged. A forecast timestamp alone does not change when stock
+     * or request quantities are updated.
+     *
+     * @param  Collection<int, array<string, mixed>>  $rows
+     */
+    private function recommendationBasis(Collection $rows): string
+    {
+        $facts = $rows
+            ->map(fn (array $row): array => array_intersect_key($row, array_flip([
+                'inventory_id',
+                'item_name',
+                'category',
+                'unit',
+                'forecast_demand',
+                'available_stock',
+                'pending_demand',
+                'unmet_demand',
+                'suggested_procurement',
+                'priority',
+                'confidence',
+                'status',
+                'required_months',
+                'monthly_usage_values',
+                'unknown_months',
+            ])))
+            ->sortBy(fn (array $row): int => (int) ($row['inventory_id'] ?? 0))
+            ->values()
+            ->all();
+
+        return hash('sha256', json_encode($facts, JSON_THROW_ON_ERROR));
     }
 
     /**
@@ -397,7 +439,7 @@ class ForecastAiRecommendationService
             }
         }
 
-        $storedQueues = $this->storeShape($queues, $actions);
+        $storedQueues = $this->storeShape($queues, $actions, $rows);
         $generatedAt = now();
 
         ForecastAiRecommendation::query()->updateOrCreate(
@@ -982,13 +1024,15 @@ class ForecastAiRecommendationService
      * @param  array<int, string>  $actions
      * @return array<int, array<string, mixed>>
      */
-    private function storeShape(array $queues, array $actions): array
+    private function storeShape(array $queues, array $actions, Collection $rows): array
     {
         $stored = [];
+        $basis = $this->recommendationBasis($rows);
 
         foreach ($queues as $key => $queue) {
             $stored[] = [
                 'key' => $key,
+                'basis' => $basis,
                 'items' => $queue
                     ->map(fn (array $row): array => [
                         'inventory_id' => (int) ($row['inventory_id'] ?? 0),

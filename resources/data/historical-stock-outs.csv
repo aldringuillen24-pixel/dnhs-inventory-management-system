@@ -1,0 +1,45 @@
+inventory_id,item_name,category_id,category,unit,quantity_issued,stock_out_date,history_start_month,history_end_month,history_complete,movement_type,status
+9001,Bond Paper (A4),900,Consumables,reams,120,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9001,Bond Paper (A4),900,Consumables,reams,95,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9001,Bond Paper (A4),900,Consumables,reams,145,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9001,Bond Paper (A4),900,Consumables,reams,110,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9002,Bond Paper (Legal),900,Consumables,reams,70,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9002,Bond Paper (Legal),900,Consumables,reams,52,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9002,Bond Paper (Legal),900,Consumables,reams,85,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9002,Bond Paper (Legal),900,Consumables,reams,60,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9003,Chalk,900,Consumables,boxes,30,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9003,Chalk,900,Consumables,boxes,24,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9003,Chalk,900,Consumables,boxes,38,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9003,Chalk,900,Consumables,boxes,22,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9004,Whiteboard Marker,900,Consumables,pieces,45,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9004,Whiteboard Marker,900,Consumables,pieces,31,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9004,Whiteboard Marker,900,Consumables,pieces,52,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9004,Whiteboard Marker,900,Consumables,pieces,35,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9005,Permanent Marker,900,Consumables,pieces,18,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9005,Permanent Marker,900,Consumables,pieces,12,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9005,Permanent Marker,900,Consumables,pieces,20,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9005,Permanent Marker,900,Consumables,pieces,14,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9006,Printer Ink,900,Consumables,bottles,8,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9006,Printer Ink,900,Consumables,bottles,5,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9006,Printer Ink,900,Consumables,bottles,11,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9006,Printer Ink,900,Consumables,bottles,6,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9007,Staple Wire,900,Consumables,boxes,15,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9007,Staple Wire,900,Consumables,boxes,10,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9007,Staple Wire,900,Consumables,boxes,18,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9007,Staple Wire,900,Consumables,boxes,12,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9008,Ballpoint Pen,900,Consumables,pieces,100,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9008,Ballpoint Pen,900,Consumables,pieces,75,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9008,Ballpoint Pen,900,Consumables,pieces,125,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9008,Ballpoint Pen,900,Consumables,pieces,90,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9009,Masking Tape,900,Consumables,rolls,12,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9009,Masking Tape,900,Consumables,rolls,8,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9009,Masking Tape,900,Consumables,rolls,15,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9009,Masking Tape,900,Consumables,rolls,9,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9010,Index Cards,900,Consumables,packs,20,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9010,Index Cards,900,Consumables,packs,12,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9010,Index Cards,900,Consumables,packs,26,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9010,Index Cards,900,Consumables,packs,16,2026-09-30,2026-06,2026-09,true,stock_out,approved
+9011,Liquid Hand Soap,900,Consumables,liters,25,2026-06-30,2026-06,2026-09,true,stock_out,approved
+9011,Liquid Hand Soap,900,Consumables,liters,20,2026-07-31,2026-06,2026-09,true,stock_out,approved
+9011,Liquid Hand Soap,900,Consumables,liters,32,2026-08-31,2026-06,2026-09,true,stock_out,approved
+9011,Liquid Hand Soap,900,Consumables,liters,24,2026-09-30,2026-06,2026-09,true,stock_out,approved

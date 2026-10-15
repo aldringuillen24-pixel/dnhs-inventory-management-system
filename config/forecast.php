@@ -12,6 +12,7 @@ return [
     'safety_stock_rate' => (float) env('FORECAST_SAFETY_STOCK_RATE', 0.25),
     'lead_time_months' => (int) env('FORECAST_LEAD_TIME_MONTHS', 1),
     'test_dataset_path' => storage_path('app/datasets/dummay-datasets.csv'),
+    'historical_usage_path' => resource_path('data/historical-stock-outs.csv'),
     /*
      * Unusual consumption.
      *

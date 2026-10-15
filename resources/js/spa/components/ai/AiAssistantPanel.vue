@@ -144,12 +144,22 @@
               <p v-if="message.role === 'user' && message.time" class="mt-1 text-right text-[10px] opacity-60">{{ message.time }}</p>
 
               <form v-if="message.comparisonForm && !message.comparisonForm.completed" class="mt-3 space-y-3 border-t border-gray-200 pt-3 dark:border-white/10" @submit.prevent="submitComparison(message)">
+                <label class="block space-y-1 text-xs font-semibold">
+                  Data source
+                  <select v-model="message.comparisonForm.source" required class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800" @change="onComparisonSourceChange(message.comparisonForm)">
+                    <option value="live">Live inventory activity</option>
+                    <option value="historical">Historical usage data (June–September)</option>
+                  </select>
+                </label>
+                <p v-if="message.comparisonForm.source === 'historical'" class="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-800 dark:bg-blue-500/10 dark:text-blue-200">
+                  Compare recorded monthly usage from the historical June–September dataset.
+                </p>
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label class="block space-y-1 text-xs font-semibold">
                     Metric
                     <select v-model="message.comparisonForm.metric" required class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800" @change="onComparisonMetricChange(message.comparisonForm)">
                       <option value="">Choose a metric</option>
-                      <option v-for="metric in message.comparisonForm.metrics ?? []" :key="metric.value" :value="metric.value">{{ metric.label }}</option>
+                      <option v-for="metric in (message.comparisonForm.source === 'historical' ? message.comparisonForm.historical_metrics : message.comparisonForm.metrics) ?? []" :key="metric.value" :value="metric.value">{{ metric.label }}</option>
                     </select>
                   </label>
                   <label class="block space-y-1 text-xs font-semibold">
@@ -161,14 +171,21 @@
                     </select>
                   </label>
                 </div>
-                <label v-if="message.comparisonForm.scope === 'item' && (message.comparisonForm.item_options ?? []).length" class="block space-y-1 text-xs font-semibold">
+                <label v-if="message.comparisonForm.source === 'historical' && message.comparisonForm.scope === 'item'" class="block space-y-1 text-xs font-semibold">
+                  Historical inventory item
+                  <select v-model="message.comparisonForm.item_id" required class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800">
+                    <option value="">Choose an item</option>
+                    <option v-for="item in message.comparisonForm.historical_items ?? []" :key="item.value" :value="item.value">{{ item.label }}</option>
+                  </select>
+                </label>
+                <label v-else-if="message.comparisonForm.source !== 'historical' && message.comparisonForm.scope === 'item' && (message.comparisonForm.item_options ?? []).length" class="block space-y-1 text-xs font-semibold">
                   Matching inventory records
                   <select v-model="message.comparisonForm.item_id" required class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800">
                     <option value="">Choose the exact record</option>
                     <option v-for="item in message.comparisonForm.item_options" :key="item.value" :value="item.value">{{ item.label }}</option>
                   </select>
                 </label>
-                <label v-if="message.comparisonForm.scope === 'item' && !(message.comparisonForm.item_options ?? []).length" class="block space-y-1 text-xs font-semibold">
+                <label v-else-if="message.comparisonForm.source !== 'historical' && message.comparisonForm.scope === 'item' && !(message.comparisonForm.item_options ?? []).length" class="block space-y-1 text-xs font-semibold">
                   Exact item name
                   <input v-model="message.comparisonForm.item_name" required maxlength="255" class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800" @input="message.comparisonForm.item_id = null" />
                 </label>
@@ -176,18 +193,18 @@
                   Inventory unit
                   <input v-model="message.comparisonForm.unit" :list="`ai-comparison-units-${index}`" required maxlength="64" autocomplete="off" class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800" />
                   <datalist :id="`ai-comparison-units-${index}`">
-                    <option v-for="unit in message.comparisonForm.units ?? []" :key="unit" :value="unit"></option>
+                    <option v-for="unit in (message.comparisonForm.source === 'historical' ? message.comparisonForm.historical_units : message.comparisonForm.units) ?? []" :key="unit" :value="unit"></option>
                   </datalist>
                 </label>
                 <p v-if="message.comparisonForm.scope === 'item' && comparisonMetricNeedsUnit(message.comparisonForm) && message.comparisonForm.item_unit" class="border-l-2 border-brand-500 pl-2 text-xs font-normal opacity-80">Unit: {{ message.comparisonForm.item_unit }}</p>
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label class="block space-y-1 text-xs font-semibold">
                     First month
-                    <input v-model="message.comparisonForm.month_one" type="month" :max="maxMonth" required class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800" />
+                    <input v-model="message.comparisonForm.month_one" type="month" :min="message.comparisonForm.source === 'historical' ? message.comparisonForm.historical_months?.[0] : undefined" :max="message.comparisonForm.source === 'historical' ? message.comparisonForm.historical_months?.at(-1) : maxMonth" required class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800" />
                   </label>
                   <label class="block space-y-1 text-xs font-semibold">
                     Second month
-                    <input v-model="message.comparisonForm.month_two" type="month" :max="maxMonth" required class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800" />
+                    <input v-model="message.comparisonForm.month_two" type="month" :min="message.comparisonForm.source === 'historical' ? message.comparisonForm.historical_months?.[0] : undefined" :max="message.comparisonForm.source === 'historical' ? message.comparisonForm.historical_months?.at(-1) : maxMonth" required class="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm font-normal dark:border-gray-700 dark:bg-gray-800" />
                   </label>
                 </div>
                 <p v-if="message.comparisonForm.error" role="alert" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-500/10 dark:text-red-300">{{ message.comparisonForm.error }}</p>
@@ -198,6 +215,7 @@
               </form>
 
               <div v-if="message.comparisonResult" role="status" class="mt-3 w-full border-t border-gray-200 pt-3 dark:border-white/10">
+                <p v-if="message.comparisonResult.data_notice" class="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-500/10 dark:text-amber-200">{{ message.comparisonResult.data_notice }}</p>
                 <p class="text-xs font-semibold">{{ message.comparisonResult.metric_label }}: {{ message.comparisonResult.scope_label }}</p>
                 <div :id="`ai-comparison-chart-${index}`" class="mt-2 min-h-[240px]"></div>
                 <table class="mt-2 w-full border-collapse text-left text-xs">
@@ -222,7 +240,9 @@
                   </tbody>
                 </table>
                 <div class="mt-3 border-l-2 border-brand-500 pl-3">
-                  <p class="text-[10px] font-semibold uppercase opacity-70">AI insight</p>
+                  <p class="text-[10px] font-semibold uppercase opacity-70">
+                    {{ message.comparisonResult.explanation_source === 'ai' ? 'AI-generated explanation' : 'Calculated explanation (AI unavailable)' }}
+                  </p>
                   <p class="mt-1 whitespace-pre-line text-sm leading-relaxed">{{ message.comparisonResult.explanation }}</p>
                 </div>
               </div>
@@ -592,6 +612,10 @@ function comparisonPercentageStatus(row) {
 }
 
 function comparisonMetricNeedsUnit(form) {
+  if (form.source === 'historical') {
+    return form.metric === 'monthly_usage';
+  }
+
   const quantityMetrics = form.quantity_metrics ?? [
     'stock_in_quantity',
     'stock_out_quantity',
@@ -606,6 +630,19 @@ function comparisonMetricNeedsUnit(form) {
 function onComparisonMetricChange(form) {
   if (!comparisonMetricNeedsUnit(form)) {
     form.unit = null;
+  }
+}
+
+function onComparisonSourceChange(form) {
+  form.metric = form.source === 'historical' ? 'monthly_usage' : '';
+  form.scope = '';
+  form.item_id = null;
+  form.item_name = null;
+  form.unit = null;
+
+  if (form.source === 'historical' && (form.historical_months ?? []).length > 1) {
+    form.month_one = form.historical_months[0];
+    form.month_two = form.historical_months[form.historical_months.length - 1];
   }
 }
 
@@ -708,6 +745,7 @@ async function submitComparison(message) {
   try {
     const { data: payload } = await api.post('/ai/comparison', {
       confirmed: true,
+      source: message.comparisonForm.source ?? 'live',
       metric: message.comparisonForm.metric,
       scope: message.comparisonForm.scope,
       item_id: message.comparisonForm.item_id,

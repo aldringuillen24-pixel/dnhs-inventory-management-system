@@ -70,7 +70,6 @@ const props = defineProps({
 const tabTables = {
   requests: [
     { title: 'Incoming Requests Awaiting Custodian Approval', minWidth: 'min-w-[64rem]', columns: ['person', 'item', 'category', 'qty', 'stock', 'date', 'action'] },
-    { title: 'Assignments Awaiting End-User Acceptance', minWidth: 'min-w-[48rem]', columns: ['person', 'item', 'qty', 'date', 'status'] },
   ],
   transfers: [
     { minWidth: 'min-w-[56rem]', columns: ['flow', 'item', 'qty', 'date', 'action'] },

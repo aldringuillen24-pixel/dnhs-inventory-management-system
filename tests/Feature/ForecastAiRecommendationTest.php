@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\ForecastAiRecommendation;
 use App\Models\ForecastPayload;
+use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Forecasting\ForecastAiRecommendationService;
@@ -22,8 +23,8 @@ use Illuminate\Support\Facades\Storage;
  *     and nothing may silently vanish.
  *  2. Quantities come from the forecast, never from the provider. Only the
  *     sentences are written by a model, and each is validated on its own row.
- *  3. A cycle is written once. The cache is keyed on the forecast's generation
- *     stamp, so a retrain cannot serve the previous cycle's advice.
+ *  3. A cached cycle is reused only while the live facts used for its advice
+ *     remain unchanged.
  */
 
 uses(RefreshDatabase::class);
@@ -45,7 +46,7 @@ beforeEach(function () {
         ],
     );
 
-    seedLiveForecastTestData($this->custodian);
+    $this->trainingPayload = seedLiveForecastTestData($this->custodian);
 
     $this->forecastRows = app(StoredDemandForecastService::class)->read($this->custodian)['rows'];
     $this->provider = ['briefs' => [], 'chunks' => []];
@@ -681,6 +682,35 @@ test('refresh rewrites the cycle instead of reading the saved one', function () 
 
     expect($refreshed['cached'])->toBeFalse()
         ->and(count($this->provider['briefs']) + count($this->provider['chunks']))->toBeGreaterThan($callsAfterFirst);
+});
+
+test('changed live stock invalidates cached actions for the same forecast timestamp', function () {
+    $target = collect($this->trainingPayload['forecasts'])->first();
+    $inventoryId = (int) $target['inventory_id'];
+
+    spikeRowInPayload($this->trainingPayload, $inventoryId, $target['monthly_usage'], [], [
+        'confidence' => 'High',
+        'predicted_quantity' => 200,
+        'required_months' => 3,
+        'status' => 'success',
+    ]);
+
+    fakeProvider($this->provider);
+
+    $first = recommend()->assertOk()->json();
+    $firstItem = collect(allItems($first))->firstWhere('inventory_id', $inventoryId);
+
+    expect(queueOf($first, $inventoryId))->toBe(ForecastAiRecommendationService::QUEUE_BUY_NOW)
+        ->and($firstItem['action'])->toContain('Order');
+
+    Inventory::query()->findOrFail($inventoryId)->update(['quantity' => 500]);
+
+    $second = recommend()->assertOk()->json();
+    $secondItem = collect(allItems($second))->firstWhere('inventory_id', $inventoryId);
+
+    expect($second['cached'])->toBeFalse()
+        ->and(queueOf($second, $inventoryId))->toBe(ForecastAiRecommendationService::QUEUE_NO_ACTION)
+        ->and($secondItem['action'])->toContain('No action needed');
 });
 
 test('a retrained forecast is not served the previous cycle advice', function () {

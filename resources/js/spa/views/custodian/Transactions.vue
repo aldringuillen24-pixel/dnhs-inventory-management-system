@@ -251,59 +251,6 @@
               </div>
             </div>
 
-            <!-- Assignments Awaiting End Users -->
-            <div>
-              <div class="mb-3 flex items-center justify-between border-b border-gray-100 pb-2.5 dark:border-white/5 min-[480px]:mb-4 min-[480px]:pb-3">
-              <div class="flex min-w-0 items-center gap-1.5 min-[480px]:gap-2">
-                <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-100 text-[10px] font-bold text-amber-700 dark:bg-amber-950 dark:text-amber-300 min-[480px]:h-6 min-[480px]:w-6 min-[480px]:text-xs">
-                    {{ assignments.length }}
-                  </span>
-                  <h3 class="text-xs font-bold text-gray-800 dark:text-white min-[480px]:text-sm">Assignments Awaiting End-User Acceptance</h3>
-                </div>
-              </div>
-
-              <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
-                <table class="w-full min-w-[48rem] text-left text-xs">
-                  <thead class="sticky top-0 z-10">
-                    <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400">
-                      <th class="px-4 py-3.5">Recipient</th>
-                      <th class="px-4 py-3.5">Item</th>
-                      <th class="px-4 py-3.5 text-center">Quantity</th>
-                      <th class="px-4 py-3.5">Issued Date</th>
-                      <th class="px-4 py-3.5">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-gray-100 dark:divide-white/5">
-                    <tr v-for="assignment in filteredAssignments" :key="assignment.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
-                      <td class="px-4 py-3.5 font-semibold text-gray-900 dark:text-white">
-                        {{ personName(assignment.target_user ?? assignment.targetUser) }}
-                      </td>
-                      <td class="px-4 py-3.5">
-                        <div class="font-medium text-gray-800 dark:text-gray-200">{{ assignment.item?.item_name ?? 'Unknown item' }}</div>
-                        <span v-if="assignment.item?.inventory_item_no" class="text-xs text-gray-400 font-mono">{{ assignment.item.inventory_item_no }}</span>
-                      </td>
-                      <td class="px-4 py-3.5 text-center font-bold text-gray-900 dark:text-white">
-                        {{ assignment.quantity }}
-                      </td>
-                      <td class="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400">
-                        {{ formatDate(assignment.requested_at) }}
-                      </td>
-                      <td class="px-4 py-3.5">
-                        <span class="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 border border-amber-200/60 dark:bg-amber-950/40 dark:text-amber-300">
-                          <span class="h-1.5 w-1.5 rounded-md bg-amber-500 animate-pulse" />
-                          Waiting for End User
-                        </span>
-                      </td>
-                    </tr>
-                    <tr v-if="!filteredAssignments.length">
-                      <td colspan="5" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
-                        {{ requestsSearch.trim() ? `No results for '${requestsSearch.trim()}'.` : 'No pending assignment requests waiting for end user.' }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </template>
 
           <!-- DRAFTS TAB -->

@@ -18,6 +18,13 @@ This path reads only `ml/demo_stock_out_data.csv` and runs `ml/demo_forecast_dem
 
 The sample declares each identity's history window and whether it is complete. Missing months are zero-filled only for complete windows; gaps in incomplete windows remain unknown. Only verified months count toward the configured minimum. Rows below that minimum appear under `insufficient_history` and have no predicted quantity.
 
+The AI Inventory Assistant's historical-usage comparison reads the bundled
+`resources/data/historical-stock-outs.csv` directly. It aggregates approved
+stock-out quantities by item and month, and labels the comparison as historical
+usage data. This is separate from live activity comparisons, which continue to
+read database records. Keep the bundled CSV synchronized with the intended
+historical source data when updating the June–September history.
+
 Chat uses the stored demo result only for an explicit sample/demo forecast request. The reports page reads the same validated file and labels it as sample data. Demo rows may be matched to inventory by item name, category, and unit to calculate a clearly labeled stock-adjusted recommendation; unmatched rows remain demand-only. This does not modify inventory or the live forecast. Missing or invalid output is reported explicitly; no live result is substituted.
 
 The demo Python dependencies are listed in `ml/requirements.txt`.

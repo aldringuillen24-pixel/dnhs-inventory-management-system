@@ -27,6 +27,8 @@ class InventoryComparisonService
         'disposal_quantity' => ['label' => 'Completed disposal quantity', 'quantity' => true],
     ];
 
+    private const HISTORICAL_METRIC = ['label' => 'Monthly usage', 'quantity' => true];
+
     public function metrics(): array
     {
         return collect(self::METRICS)
@@ -37,8 +39,10 @@ class InventoryComparisonService
 
     public function draft(string $message): array
     {
+        $historical = $this->historicalDataset();
         $metric = $this->recognizedMetric($message);
         $periods = $this->recognizedMonths($message);
+        $historicalRequested = preg_match('/\b(?:monthly\s+)?usage\b/i', $message) === 1;
         $scope = null;
         $itemName = null;
         $itemId = null;
@@ -48,6 +52,18 @@ class InventoryComparisonService
         if (preg_match('/\b(?:all inventory|all items|overall inventory)\b/i', $message) === 1) {
             $scope = 'all';
         } elseif (preg_match('/\bitem\s+["\']([^"\']{1,255})["\']/i', $message, $matches) === 1) {
+            if ($historicalRequested) {
+                $historicalMatches = collect($historical['rows'])
+                    ->filter(fn (array $row): bool => mb_strtolower(trim((string) $row['item_name'])) === mb_strtolower(trim($matches[1])))
+                    ->values();
+
+                if ($historicalMatches->count() === 1) {
+                    $scope = 'item';
+                    $itemName = $historicalMatches->first()['item_name'];
+                    $itemId = (int) $historicalMatches->first()['inventory_id'];
+                    $itemUnit = $historicalMatches->first()['unit'];
+                }
+            } else {
             $matchesForName = Inventory::query()->with('category')
                 ->whereRaw('LOWER(item_name) = ?', [mb_strtolower(trim($matches[1]))])
                 ->limit(50)
@@ -69,22 +85,38 @@ class InventoryComparisonService
                     ])),
                 ])->all();
             }
+            }
         }
 
         return [
+            'source' => $historicalRequested ? 'historical' : 'live',
             'metrics' => $this->metrics(),
+            'historical_metrics' => [['value' => 'monthly_usage', 'label' => self::HISTORICAL_METRIC['label']]],
+            'historical_items' => collect($historical['rows'])
+                ->map(fn (array $row): array => [
+                    'value' => (int) ($row['inventory_id'] ?? 0),
+                    'label' => implode(' | ', array_filter([
+                        $row['item_name'] ?? null,
+                        $row['category'] ?? null,
+                        $row['unit'] ?? null,
+                    ])),
+                ])
+                ->values()
+                ->all(),
+            'historical_units' => collect($historical['rows'])->pluck('unit')->filter()->unique()->sort()->values()->all(),
+            'historical_months' => $historical['months'],
             'quantity_metrics' => array_keys(array_filter(self::METRICS, fn (array $metric): bool => $metric['quantity'])),
             'units' => $this->unitOptions(),
-            'metric' => $metric,
+            'metric' => $historicalRequested ? 'monthly_usage' : $metric,
             'scope' => $scope,
             'item_id' => $itemId,
             'item_name' => $itemName,
             'item_options' => $itemOptions,
             'item_unit' => $itemUnit,
             'unit' => null,
-            'month_one' => $periods[0]['value'] ?? null,
+            'month_one' => $periods[0]['value'] ?? ($historicalRequested ? ($historical['months'][0] ?? null) : null),
             'month_one_label' => $periods[0]['label'] ?? null,
-            'month_two' => $periods[1]['value'] ?? null,
+            'month_two' => $periods[1]['value'] ?? ($historicalRequested ? ($historical['months'][count($historical['months']) - 1] ?? null) : null),
             'month_two_label' => $periods[1]['label'] ?? null,
         ];
     }
@@ -96,6 +128,10 @@ class InventoryComparisonService
 
     public function comparisonContextSummary(array $result): ?array
     {
+        if (($result['source'] ?? 'live') !== 'live') {
+            return null;
+        }
+
         $metric = $result['metric'] ?? null;
         $series = $result['series'][0] ?? null;
         $months = $result['months'] ?? null;
@@ -239,6 +275,10 @@ class InventoryComparisonService
 
     public function compare(InventoryComparisonData $data): array
     {
+        if ($data->source === 'historical') {
+            return $this->compareHistoricalUsage($data);
+        }
+
         $itemId = null;
         $resolvedItemName = null;
         $itemUnit = null;
@@ -336,6 +376,7 @@ class InventoryComparisonService
         $explanation = $this->resultExplanation($metric['label'], $scopeLabel, $monthOneLabel, $monthTwoLabel, $series[0]);
 
         return [
+            'source' => 'live',
             'metric' => $data->metric,
             'metric_label' => $metric['label'],
             'scope' => $data->scope,
@@ -359,6 +400,234 @@ class InventoryComparisonService
                 ], $series),
             ],
         ];
+    }
+
+    private function compareHistoricalUsage(InventoryComparisonData $data): array
+    {
+        if ($data->metric !== 'monthly_usage') {
+            throw ValidationException::withMessages(['metric' => 'Historical comparisons support monthly usage only.']);
+        }
+
+        $historical = $this->historicalDataset();
+        $months = $historical['months'];
+        $monthOne = $data->monthOne->format('Y-m');
+        $monthTwo = $data->monthTwo->format('Y-m');
+
+        foreach ([$monthOne, $monthTwo] as $month) {
+            if (! in_array($month, $months, true)) {
+                throw ValidationException::withMessages(['month_one' => 'Choose months available in the historical usage dataset.']);
+            }
+        }
+
+        $rows = $historical['rows'];
+        $itemName = null;
+        if ($data->scope === 'item') {
+            $matches = array_values(array_filter($rows, fn (array $row): bool => $data->itemId !== null
+                ? (int) ($row['inventory_id'] ?? 0) === $data->itemId
+                : mb_strtolower(trim((string) ($row['item_name'] ?? ''))) === mb_strtolower(trim((string) $data->itemName))));
+
+            if (count($matches) !== 1) {
+                throw ValidationException::withMessages(['item_name' => 'Choose one item from the historical usage dataset.']);
+            }
+            $item = $matches[0];
+            if ($data->itemName !== null && mb_strtolower(trim($data->itemName)) !== mb_strtolower((string) $item['item_name'])) {
+                throw ValidationException::withMessages(['item_name' => 'The selected item does not match the historical usage record.']);
+            }
+            if ($data->unit !== null && $data->unit !== ($item['unit'] ?? null)) {
+                throw ValidationException::withMessages(['unit' => 'The selected unit does not match the historical item.']);
+            }
+
+            $rows = [$item];
+            $itemName = (string) ($item['item_name'] ?? 'Inventory item');
+            $unit = (string) ($item['unit'] ?? '');
+        } else {
+            if ($data->itemId !== null || ! is_string($data->unit) || trim($data->unit) === '') {
+                throw ValidationException::withMessages(['unit' => 'Choose one inventory unit for an all-items comparison.']);
+            }
+            $unit = trim($data->unit);
+            $rows = array_values(array_filter($rows, fn (array $row): bool => ($row['unit'] ?? null) === $unit));
+            if ($rows === []) {
+                throw ValidationException::withMessages(['unit' => 'Choose a unit present in the historical usage dataset.']);
+            }
+        }
+
+        $one = $this->historicalMonthlyTotal($rows, $monthOne);
+        $two = $this->historicalMonthlyTotal($rows, $monthTwo);
+        $status = fn (?int $total): string => $total === null ? 'unavailable' : ($total === 0 ? 'verified_zero' : 'available');
+        $oneStatus = $status($one);
+        $twoStatus = $status($two);
+        $difference = $one === null || $two === null ? null : $two - $one;
+        $percentageStatus = $one === null || $two === null
+            ? 'unavailable'
+            : ($one === 0 ? 'zero_denominator' : 'available');
+        $percentage = $percentageStatus === 'available'
+            ? round((($two - $one) / $one) * 100, 2)
+            : null;
+        $labelOne = $data->monthOne->startOfMonth()->format('F Y');
+        $labelTwo = $data->monthTwo->startOfMonth()->format('F Y');
+        $scopeLabel = $itemName ?? 'All inventory ('.$unit.')';
+        $metricLabel = self::HISTORICAL_METRIC['label'];
+        $series = [[
+            'unit' => $unit,
+            'period_one' => $one,
+            'period_two' => $two,
+            'period_one_status' => $oneStatus,
+            'period_two_status' => $twoStatus,
+            'difference' => $difference,
+            'percentage_change' => $percentage,
+            'percentage_change_status' => $percentageStatus,
+        ]];
+        $explanation = $this->resultExplanation($metricLabel, $scopeLabel, $labelOne, $labelTwo, $series[0]);
+        $notice = 'Source: historical usage data, June–September 2026.';
+
+        return [
+            'source' => 'historical',
+            'source_label' => 'Historical usage data',
+            'data_notice' => $notice,
+            'metric' => $data->metric,
+            'metric_label' => $metricLabel,
+            'scope' => $data->scope,
+            'scope_label' => $scopeLabel,
+            'explanation' => $explanation,
+            'months' => [
+                ['value' => $monthOne, 'label' => $labelOne],
+                ['value' => $monthTwo, 'label' => $labelTwo],
+            ],
+            'series' => $series,
+            'chart' => [
+                'categories' => [$labelOne, $labelTwo],
+                'unit' => $unit,
+                'statuses' => [$this->activityStatusLabel($oneStatus), $this->activityStatusLabel($twoStatus)],
+                'series' => array_map(fn (array $row): array => [
+                    'name' => $row['unit'],
+                    'data' => [$row['period_one'], $row['period_two']],
+                ], $series),
+            ],
+        ];
+    }
+
+    /**
+     * Loads historical approved stock-out records from the existing CSV.
+     *
+     * @return array{rows: array<int, array<string, mixed>>, months: array<int, string>}
+     */
+    private function historicalDataset(): array
+    {
+        $path = (string) config('forecast.historical_usage_path', resource_path('data/historical-stock-outs.csv'));
+        if (! is_file($path) || ! is_readable($path)) {
+            throw ValidationException::withMessages(['source' => 'The historical usage CSV is not available in this environment.']);
+        }
+
+        $file = new \SplFileObject($path, 'r');
+        $file->setFlags(\SplFileObject::READ_CSV | \SplFileObject::SKIP_EMPTY);
+        $headers = $file->fgetcsv();
+        if (! is_array($headers)) {
+            throw ValidationException::withMessages(['source' => 'The historical usage CSV has no header row.']);
+        }
+
+        $headers[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $headers[0]);
+        $requiredHeaders = [
+            'inventory_id', 'item_name', 'category', 'unit', 'quantity_issued',
+            'stock_out_date', 'history_start_month', 'history_end_month',
+            'history_complete', 'movement_type', 'status',
+        ];
+        if (array_diff($requiredHeaders, $headers) !== []) {
+            throw ValidationException::withMessages(['source' => 'The historical usage CSV is missing required columns.']);
+        }
+
+        $aggregates = [];
+        foreach ($file as $values) {
+            if (! is_array($values) || $values === [null]) {
+                continue;
+            }
+            if (count($values) !== count($headers)) {
+                throw ValidationException::withMessages(['source' => 'The historical usage CSV contains a malformed row.']);
+            }
+            $record = array_combine($headers, $values);
+            if (! is_array($record)) {
+                throw ValidationException::withMessages(['source' => 'The historical usage CSV contains a malformed row.']);
+            }
+            if (($record['movement_type'] ?? null) !== 'stock_out' || ($record['status'] ?? null) !== 'approved') {
+                continue;
+            }
+
+            $month = substr((string) ($record['stock_out_date'] ?? ''), 0, 7);
+            if (! isset($record['inventory_id'], $record['item_name'], $record['category'], $record['unit'])
+                || ! is_numeric($record['inventory_id'])
+                || ! is_numeric($record['quantity_issued'] ?? null)
+                || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month) !== 1
+                || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string) ($record['history_start_month'] ?? '')) !== 1
+                || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string) ($record['history_end_month'] ?? '')) !== 1) {
+                throw ValidationException::withMessages(['source' => 'The historical usage CSV contains an invalid approved stock-out record.']);
+            }
+
+            $id = (int) $record['inventory_id'];
+            $aggregates[$id] ??= [
+                'inventory_id' => $id,
+                'item_name' => (string) $record['item_name'],
+                'category' => (string) $record['category'],
+                'unit' => (string) $record['unit'],
+                'start_month' => (string) $record['history_start_month'],
+                'end_month' => (string) $record['history_end_month'],
+                'complete' => filter_var($record['history_complete'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'monthly_usage' => [],
+            ];
+            $aggregates[$id]['monthly_usage'][$month] = ($aggregates[$id]['monthly_usage'][$month] ?? 0)
+                + (int) $record['quantity_issued'];
+        }
+
+        $rows = array_values($aggregates);
+        if ($rows === []) {
+            throw ValidationException::withMessages(['source' => 'The historical usage CSV contains no approved stock-out records.']);
+        }
+
+        $months = collect($rows)
+            ->flatMap(fn (array $row): array => $this->monthsBetween($row['start_month'], $row['end_month']))
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        return ['rows' => $rows, 'months' => $months];
+    }
+
+    /**
+     * Missing months are zero only when the source history window is complete.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     */
+    private function historicalMonthlyTotal(array $rows, string $month): ?int
+    {
+        $total = 0;
+
+        foreach ($rows as $row) {
+            if ($month < $row['start_month'] || $month > $row['end_month']) {
+                return null;
+            }
+            if (! array_key_exists($month, $row['monthly_usage']) && ! $row['complete']) {
+                return null;
+            }
+            $total += (int) ($row['monthly_usage'][$month] ?? 0);
+        }
+
+        return $total;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function monthsBetween(string $start, string $end): array
+    {
+        $months = [];
+        $month = \Carbon\CarbonImmutable::createFromFormat('!Y-m', $start);
+        $last = \Carbon\CarbonImmutable::createFromFormat('!Y-m', $end);
+
+        while ($month->lte($last)) {
+            $months[] = $month->format('Y-m');
+            $month = $month->addMonth();
+        }
+
+        return $months;
     }
 
     private function resultExplanation(

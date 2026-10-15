@@ -241,7 +241,9 @@ function defaultExpanded(received) {
  * here and a figure read there are recognisably the same number.
  */
 function figures(item) {
-    return `${item.forecast_demand} + ${item.safety_stock} - ${item.available_stock} - ${item.pending_demand} + ${item.unmet_demand}`;
+    const value = (quantity) => quantity === null || quantity === undefined ? 'N/A' : quantity;
+
+    return `${value(item.forecast_demand)} - ${value(item.available_stock)} - ${value(item.pending_demand)} + ${value(item.unmet_demand)}`;
 }
 
 /**

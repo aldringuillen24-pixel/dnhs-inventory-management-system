@@ -259,6 +259,41 @@ test('draft slip preview includes entered item conditions in the PDF data', func
         ->assertHeader('content-type', 'application/pdf');
 });
 
+test('draft slip preview renders a PDF response', function () {
+    $item = makeAvailableItem($this, 'Bond Paper', 4);
+
+    $response = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.assignments.draft.preview'), [
+            'inventory_ids' => [$item->item_id],
+            'inventory_quantities' => [$item->item_id => 1],
+            'slip_fields' => ['recipient_name' => 'End User'],
+        ])
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
+
+    expect($response->getContent())->toStartWith('%PDF');
+});
+
+test('saving a draft persists the expected return date', function () {
+    $item = makeAvailableItem($this, 'Bond Paper', 4);
+
+    $response = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.assignments.draft'), [
+            'item_id' => $item->item_id,
+            'user_id' => $this->endUser->id,
+            'quantity' => 1,
+            'transaction_date' => '2026-10-10',
+            'expected_return_date' => '2026-11-01',
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect(AssignmentRequest::query()->where('id', $response->json('draft_id'))->value('expected_return_date'))
+        ->toBe('2026-11-01')
+        ->and(AssignmentRequest::query()->where('parent_request_id', $response->json('draft_id'))->value('expected_return_date'))
+        ->toBe('2026-11-01');
+});
+
 test('request slip preview preserves edited recipient and signatory names', function () {
     $item = makeAvailableItem($this, 'Desk', 1);
     $request = AssignmentRequest::create([
