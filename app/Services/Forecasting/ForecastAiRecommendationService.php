@@ -43,22 +43,27 @@ class ForecastAiRecommendationService
     /**
      * Rows per provider call.
      *
-     * Not a token limit — a hundred rows fit comfortably in one prompt. It is
-     * the smallest slice whose loss to a grounding rejection is tolerable, and
-     * small enough that one bad sentence is an obvious outlier rather than a
-     * twelfth of the list.
+     * The recommendation tab is shown in a single view and is intended to feel
+     * instant. Larger chunks produce longer provider calls and trigger the 30s
+     * PHP timeout on real forecasts, so the model only writes a small slice at a
+     * time and the rest falls back to deterministic text.
      */
-    public const MAX_CHUNK_ITEMS = 20;
+    public const MAX_CHUNK_ITEMS = 8;
 
     /**
      * Ceiling on provider calls per cycle.
      *
-     * A safety valve, not an expected limit: at the configured chunk size this
-     * allows 240 actionable rows. Anything beyond is rendered from the local
-     * template so a pathological forecast cannot fan out into an unbounded
-     * number of billable requests.
+     * A safety valve with a much tighter budget than the previous version, so a
+     * large forecast remains responsive and the tab does not time out while the
+     * model explains hundreds of rows.
      */
-    public const MAX_CHUNKS = 12;
+    public const MAX_CHUNKS = 4;
+
+    /**
+     * When a cycle is too large to explain with a bounded AI call budget, the
+     * service stays deterministic and keeps the tab usable.
+     */
+    public const MAX_PROVIDER_ITEMS = 32;
 
     public function __construct(
         protected AiCapabilityPolicy $policy,
@@ -176,6 +181,14 @@ class ForecastAiRecommendationService
      * rewrites the value on write but leaves the where clause alone, so the
      * second read missed its own row and tried to insert a duplicate.
      */
+    private function shouldUseProvider(Collection $rows, array $queues): bool
+    {
+        $actionable = ($queues[self::QUEUE_BUY_NOW] ?? collect())->count()
+            + ($queues[self::QUEUE_VERIFY_FIRST] ?? collect())->count();
+
+        return $rows->count() <= 60 && $actionable <= self::MAX_PROVIDER_ITEMS;
+    }
+
     private function cycleKey(array $forecast): string
     {
         $generated = $forecast['generated_at'] ?? null;
@@ -409,17 +422,20 @@ class ForecastAiRecommendationService
     private function generateAndStore(array $forecast, Collection $rows, array $queues, string $cycleKey, User $user): array
     {
         $hasKey = is_string(config('services.gemini.api_key')) && trim((string) config('services.gemini.api_key')) !== '';
+        $useProvider = $hasKey && $this->shouldUseProvider($rows, $queues);
 
-        [$brief, $briefSource, $briefStatus] = $hasKey
+        [$brief, $briefSource, $briefStatus] = $useProvider
             ? $this->generateBrief($forecast, $rows, $queues)
-            : [$this->localBrief($forecast, $rows, $queues), 'local', 'no_key'];
+            : [$this->localBrief($forecast, $rows, $queues), 'local', $hasKey ? 'oversized_cycle' : 'no_key'];
 
         $actions = [];
         $chunkBudget = self::MAX_CHUNKS;
 
         // Only the actionable queues are worth a provider call. The No action
         // queue is the same sentence for every row in it, so asking a model to
-        // write twenty identical lines buys nothing.
+        // write identical lines buys nothing. Large cycles are intentionally
+        // handled by the template so the page remains fast and never exceeds the
+        // PHP timeout while Gemini is still chewing through a hundred-row batch.
         foreach ([self::QUEUE_BUY_NOW, self::QUEUE_VERIFY_FIRST] as $queueKey) {
             $queue = $queues[$queueKey];
 
@@ -428,7 +444,7 @@ class ForecastAiRecommendationService
             }
 
             foreach (array_chunk($queue->all(), self::MAX_CHUNK_ITEMS) as $chunk) {
-                if ($hasKey && $chunkBudget > 0) {
+                if ($useProvider && $chunkBudget > 0) {
                     $chunkBudget--;
                     $actions += $this->generateChunkActions($chunk, $queueKey, $forecast, $user);
                 } else {
