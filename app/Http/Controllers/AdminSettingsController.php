@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AdminSettingsController extends Controller
@@ -76,11 +77,13 @@ class AdminSettingsController extends Controller
             'inventoryPolicy',
             'securityPolicy',
             'aiConfig',
-        ) + ['aiKeys' => $this->maskedKeys()]);
+        ) + ['aiKeys' => $this->maskedKeys(), 'envKey' => $this->envKeyInfo()]);
     }
 
     /**
      * Pool holds keys when migrated; env GEMINI_API_KEY seeds otherwise.
+     * Only `gemini` provider rows count: other providers reserve pool
+     * rows for future wiring and never drive AI failover.
      */
     private function geminiKeySet(): bool
     {
@@ -89,11 +92,56 @@ class AdminSettingsController extends Controller
         }
 
         try {
-            return Schema::hasTable('ai_api_keys')
-                && AiApiKey::query()->where('is_active', true)->exists();
+            if (! Schema::hasTable('ai_api_keys')) {
+                return false;
+            }
+
+            $query = AiApiKey::query()->where('is_active', true);
+            if (Schema::hasColumn('ai_api_keys', 'provider')) {
+                $query->where('provider', 'gemini');
+            }
+
+            return $query->exists();
         } catch (\Throwable) {
             return false;
         }
+    }
+
+    /**
+     * Environment fallback key for its own status card. Only a masked
+     * tail is exposed — never the value. `in_use` mirrors the failover
+     * rule: the env key serves traffic exactly when no active pooled
+     * Gemini key exists.
+     *
+     * @return array{masked_key: string, in_use: bool}|null
+     */
+    private function envKeyInfo(): ?array
+    {
+        $env = config('services.gemini.api_key');
+        if (! is_string($env) || trim($env) === '') {
+            return null;
+        }
+
+        try {
+            if (! Schema::hasTable('ai_api_keys')) {
+                $inUse = true;
+            } else {
+                $query = AiApiKey::query()->where('is_active', true);
+                if (Schema::hasColumn('ai_api_keys', 'provider')) {
+                    $query->where('provider', 'gemini');
+                }
+                $inUse = ! $query->exists();
+            }
+        } catch (\Throwable) {
+            // Unreadable pool behaves like an empty pool: failover falls
+            // through to the env key (see GeminiApiService::activePool).
+            $inUse = true;
+        }
+
+        return [
+            'masked_key' => '…'.substr($env, -4),
+            'in_use' => $inUse,
+        ];
     }
 
     /**
@@ -106,7 +154,12 @@ class AdminSettingsController extends Controller
                 return [];
             }
 
-            return AiApiKey::query()->orderBy('priority')->orderBy('id')
+            $query = AiApiKey::query();
+            if (Schema::hasColumn('ai_api_keys', 'provider')) {
+                $query->orderBy('provider');
+            }
+
+            return $query->orderBy('priority')->orderBy('id')
                 ->get()->map(fn (AiApiKey $key): array => $key->toMaskedArray())->all();
         } catch (\Throwable) {
             return [];
@@ -115,17 +168,27 @@ class AdminSettingsController extends Controller
 
     /**
      * @throws ValidationException when the 5-active-key cap is reached.
+     * The cap applies per provider, so a full Gemini pool never blocks
+     * other providers (and vice versa).
      */
-    private function ensureKeyCapacity(?int $ignoreId = null): void
+    private function ensureKeyCapacity(?int $ignoreId = null, string $provider = 'gemini'): void
     {
         $active = AiApiKey::query()->where('is_active', true);
         if ($ignoreId !== null) {
             $active->where('id', '!=', $ignoreId);
         }
 
+        try {
+            if (Schema::hasColumn('ai_api_keys', 'provider')) {
+                $active->where('provider', $provider);
+            }
+        } catch (\Throwable) {
+            // Pre-migration schema: fall through to the global count.
+        }
+
         if ($active->count() >= AiApiKey::MAX_ACTIVE) {
             throw ValidationException::withMessages([
-                'key' => ['At most '.AiApiKey::MAX_ACTIVE.' active API keys are allowed. Deactivate or remove one first.'],
+                'key' => ['At most '.AiApiKey::MAX_ACTIVE." active API keys are allowed for provider '{$provider}'. Deactivate or remove one first."],
             ]);
         }
     }
@@ -245,20 +308,23 @@ class AdminSettingsController extends Controller
      */
     public function keys(): JsonResponse
     {
-        return response()->json(['keys' => $this->maskedKeys()]);
+        return response()->json(['keys' => $this->maskedKeys(), 'envKey' => $this->envKeyInfo()]);
     }
 
     public function storeKey(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            'provider' => ['sometimes', 'string', Rule::in(AiApiKey::PROVIDERS)],
             'label' => ['required', 'string', 'max:30'],
             'key' => ['required', 'string', 'min:20', 'max:500'],
             'priority' => ['nullable', 'integer', 'min:0', 'max:1000'],
         ]);
 
-        $this->ensureKeyCapacity();
+        $provider = $validated['provider'] ?? 'gemini';
+        $this->ensureKeyCapacity(null, $provider);
 
         $record = AiApiKey::create([
+            'provider' => $provider,
             'label' => $validated['label'],
             'key_encrypted' => AiApiKey::encryptKey($validated['key']),
             'is_active' => true,
@@ -271,13 +337,16 @@ class AdminSettingsController extends Controller
     public function updateKey(Request $request, AiApiKey $key): JsonResponse
     {
         $validated = $request->validate([
+            'provider' => ['sometimes', 'string', Rule::in(AiApiKey::PROVIDERS)],
             'label' => ['sometimes', 'string', 'max:30'],
             'is_active' => ['sometimes', 'boolean'],
             'priority' => ['sometimes', 'integer', 'min:0', 'max:1000'],
         ]);
 
-        if (($validated['is_active'] ?? $key->is_active) && ! $key->is_active) {
-            $this->ensureKeyCapacity($key->id);
+        $effectiveProvider = $validated['provider'] ?? ($key->provider ?? 'gemini');
+
+        if (($validated['is_active'] ?? $key->is_active) && (! $key->is_active || $effectiveProvider !== ($key->provider ?? 'gemini'))) {
+            $this->ensureKeyCapacity($key->id, $effectiveProvider);
         }
 
         $key->fill($validated);
@@ -294,10 +363,20 @@ class AdminSettingsController extends Controller
     }
 
     /**
-     * 8-token probe against one pooled key only.
+     * 8-token live probe against one pooled Gemini key. Other providers
+     * have no live probe yet: the key is stored (encrypted, masked) and
+     * reported as such without ever touching the network.
      */
     public function pingKey(AiApiKey $key, GeminiApiService $geminiApi): JsonResponse
     {
+        if (($key->provider ?? 'gemini') !== 'gemini') {
+            return response()->json([
+                'ok' => false,
+                'message' => "Key '{$key->label}' is stored for provider '{$key->provider}'. No live probe exists for this provider yet.",
+                'key' => $key->fresh()->toMaskedArray(),
+            ]);
+        }
+
         $ok = $geminiApi->probe($key);
 
         return response()->json([

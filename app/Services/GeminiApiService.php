@@ -69,6 +69,9 @@ class GeminiApiService
 
     /**
      * 8-token connectivity probe against one pooled key (per-key ping).
+     * Records the probe outcome (token usage when the provider reports
+     * it, ok/fail, check time) for the status card. Legacy
+     * last_used_at/last_error semantics are unchanged.
      */
     public function probe(AiApiKey $keyRecord): bool
     {
@@ -80,7 +83,10 @@ class GeminiApiService
         try {
             $plaintext = $keyRecord->decryptedKey();
         } catch (\Throwable) {
-            $keyRecord->forceFill(['last_error' => 'Key could not be decrypted.'])->save();
+            $keyRecord->forceFill(array_merge(
+                ['last_error' => 'Key could not be decrypted.'],
+                $this->probeStatsColumns(false, null),
+            ))->save();
 
             return false;
         }
@@ -94,17 +100,81 @@ class GeminiApiService
             $keyRecord->id
         );
 
-        $keyRecord->forceFill([
-            'last_used_at' => $attempt['text'] !== null ? now() : $keyRecord->last_used_at,
-            'last_error' => $attempt['text'] !== null ? null : $attempt['error'],
-        ])->save();
+        $ok = $attempt['text'] !== null;
 
-        return $attempt['text'] !== null;
+        $keyRecord->forceFill(array_merge(
+            [
+                'last_used_at' => $ok ? now() : $keyRecord->last_used_at,
+                'last_error' => $ok ? null : $attempt['error'],
+            ],
+            // A failed probe keeps the previous token count: it describes
+            // the last probe that returned usage, not this failed one.
+            $this->probeStatsColumns($ok, $ok ? $attempt['usage'] : null),
+        ))->save();
+
+        return $ok;
     }
 
     /**
-     * Active pooled keys ordered by priority. Empty when the table has not
-     * been migrated yet, so old installs keep working on the env key.
+     * Probe outcome columns for the status card. Empty on pre-migration
+     * schemas so pings keep working with legacy fields only.
+     *
+     * @return array<string, mixed>
+     */
+    private function probeStatsColumns(bool $ok, ?int $usage): array
+    {
+        try {
+            if (! Schema::hasTable('ai_api_keys') || ! Schema::hasColumn('ai_api_keys', 'last_checked_at')) {
+                return [];
+            }
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $columns = [
+            'last_checked_at' => now(),
+            'last_ping_ok' => $ok,
+        ];
+
+        if ($ok) {
+            // Successful probe: usage may be null when the provider
+            // reports none, which clears any stale count so the card
+            // shows — instead of a previous probe's number.
+            $columns['last_tokens_sent'] = $usage;
+        }
+
+        return $columns;
+    }
+
+    /**
+     * Total tokens for one response from usageMetadata, or null when the
+     * provider reports none.
+     */
+    private function responseUsage(mixed $usageMetadata): ?int
+    {
+        if (! is_array($usageMetadata)) {
+            return null;
+        }
+
+        $total = $usageMetadata['totalTokenCount'] ?? null;
+        if (is_int($total)) {
+            return $total;
+        }
+
+        $prompt = $usageMetadata['promptTokenCount'] ?? null;
+        $candidates = $usageMetadata['candidatesTokenCount'] ?? null;
+        if (is_int($prompt) && is_int($candidates) && ($prompt + $candidates) > 0) {
+            return $prompt + $candidates;
+        }
+
+        return null;
+    }
+
+    /**
+     * Active pooled Gemini keys ordered by priority. Empty when the table
+     * has not been migrated yet, so old installs keep working on the env
+     * key. Rows tagged for other providers never enter this pool, so AI
+     * failover only ever spends Gemini quota.
      *
      * @return AiApiKey[]
      */
@@ -115,8 +185,12 @@ class GeminiApiService
                 return [];
             }
 
-            return AiApiKey::query()
-                ->where('is_active', true)
+            $query = AiApiKey::query()->where('is_active', true);
+            if (Schema::hasColumn('ai_api_keys', 'provider')) {
+                $query->where('provider', 'gemini');
+            }
+
+            return $query
                 ->orderBy('priority')
                 ->orderBy('id')
                 ->get()
@@ -129,7 +203,7 @@ class GeminiApiService
     /**
      * One request with one key. Logs status + key_id, never the key value.
      *
-     * @return array{text: ?string, retryable: bool, error: ?string, status: ?int}
+     * @return array{text: ?string, retryable: bool, error: ?string, status: ?int, usage: ?int}
      */
     private function requestOnce(
         string $apiKey,
@@ -176,6 +250,7 @@ class GeminiApiService
                     'retryable' => $retryable,
                     'error' => "HTTP {$status}",
                     'status' => $status,
+                    'usage' => null,
                 ];
             }
 
@@ -200,10 +275,10 @@ class GeminiApiService
                     'model' => $model,
                 ]);
 
-                return ['text' => null, 'retryable' => true, 'error' => 'Empty response', 'status' => 200];
+                return ['text' => null, 'retryable' => true, 'error' => 'Empty response', 'status' => 200, 'usage' => null];
             }
 
-            return ['text' => $text, 'retryable' => false, 'error' => null, 'status' => 200];
+            return ['text' => $text, 'retryable' => false, 'error' => null, 'status' => 200, 'usage' => $this->responseUsage($response->json('usageMetadata'))];
         } catch (ConnectionException $exception) {
             Log::warning('Gemini API request timed out.', [
                 'key_id' => $keyId,
@@ -211,7 +286,7 @@ class GeminiApiService
                 'exception' => $exception->getMessage(),
             ]);
 
-            return ['text' => null, 'retryable' => true, 'error' => 'Timeout', 'status' => null];
+            return ['text' => null, 'retryable' => true, 'error' => 'Timeout', 'status' => null, 'usage' => null];
         } catch (\Throwable $exception) {
             Log::warning('Gemini API request failed.', [
                 'key_id' => $keyId,
@@ -219,7 +294,7 @@ class GeminiApiService
                 'exception' => $exception->getMessage(),
             ]);
 
-            return ['text' => null, 'retryable' => true, 'error' => 'Request failed', 'status' => null];
+            return ['text' => null, 'retryable' => true, 'error' => 'Request failed', 'status' => null, 'usage' => null];
         }
     }
 }

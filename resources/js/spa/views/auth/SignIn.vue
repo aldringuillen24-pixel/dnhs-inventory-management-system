@@ -1,7 +1,7 @@
 <template>
   <main class="min-h-screen bg-[#f6f7f2] text-slate-900">
     <div class="mx-auto flex min-h-screen w-full max-w-lg items-center justify-center px-4 py-6 sm:px-8 lg:py-10">
-      <div class="signin-enter w-full rounded-2xl bg-white shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
+      <div class="signin-enter w-full rounded-md bg-white shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
         <!-- Sign-in form -->
         <section class="flex min-w-0 flex-1 items-center justify-center px-6 py-10 sm:px-12">
           <div class="w-full max-w-sm">
@@ -15,14 +15,6 @@
 
             <h1 class="text-2xl font-semibold text-[#173f3b]">Log In</h1>
             <p class="mb-8 mt-1 text-sm text-slate-500">Welcome back. Sign in to access your inventory dashboard.</p>
-
-            <div
-              v-if="formError"
-              role="alert"
-              class="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-            >
-              {{ formError }}
-            </div>
 
             <form class="space-y-5" novalidate @submit.prevent="submit">
               <div>
@@ -100,7 +92,7 @@
               <button
                 type="submit"
                 :disabled="busy"
-                class="h-12 w-full rounded-full bg-[#173f3b] px-5 text-xs font-semibold uppercase tracking-wider text-white shadow-[0_10px_30px_rgba(23,63,59,0.35)] transition-all hover:-translate-y-0.5 hover:bg-[#0f302d] hover:shadow-[0_14px_36px_rgba(23,63,59,0.4)] focus:ring-4 focus:ring-[#173f3b]/20 active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+                class="h-11 w-full rounded-full bg-[#173f3b] px-5 text-xs font-semibold uppercase tracking-wider text-white shadow-[0_10px_30px_rgba(23,63,59,0.35)] transition-all hover:-translate-y-0.5 hover:bg-[#0f302d] hover:shadow-[0_14px_36px_rgba(23,63,59,0.4)] focus:ring-4 focus:ring-[#173f3b]/20 active:translate-y-0 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
               >
                 {{ busy ? 'Signing in…' : 'Sign in' }}
               </button>
@@ -141,7 +133,6 @@ const showPassword = ref(false);
 const capsLockOn = ref(false);
 const busy = ref(false);
 const errors = ref({});
-const formError = ref('');
 
 function checkCapsLock(event) {
   const state = typeof event?.getModifierState === 'function'
@@ -163,7 +154,6 @@ async function submit() {
   if (busy.value) return;
   busy.value = true;
   errors.value = {};
-  formError.value = '';
 
   try {
     // skipToast: sign-in either redirects into onboarding or leaves the page,
@@ -194,13 +184,8 @@ async function submit() {
 
     router.push(auth.homePath);
   } catch (error) {
-    const responseErrors = error?.response?.data?.errors;
-    if (responseErrors) {
-      errors.value = responseErrors;
-      const first = Object.values(responseErrors).flat().find(Boolean);
-      formError.value = typeof first === 'string' ? first : (error?.response?.data?.message ?? 'Sign in failed.');
-    } else {
-      formError.value = error?.response?.data?.message ?? 'Could not sign in. Please try again.';
+    if (error?.response?.data?.errors) {
+      errors.value = error.response.data.errors;
     }
   } finally {
     busy.value = false;

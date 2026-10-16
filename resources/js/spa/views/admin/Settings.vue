@@ -212,7 +212,125 @@
 
           <!-- AI Configuration Panel -->
           <form v-else-if="activeTab === 'ai'" key="ai" @submit.prevent="saveSection('ai', aiForm)">
-            <div class="grid gap-3 sm:grid-cols-2">
+            <!-- API key status cards: one card per pooled key (Ping refreshes inline) -->
+            <div
+              class="mb-4 rounded-md border border-gray-200 bg-gray-50/60 p-3 dark:border-white/10 dark:bg-white/[0.03]"
+              aria-live="polite"
+            >
+              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">API key status</h3>
+              <p class="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">Quota-hit Gemini keys fail over automatically. Keys are stored encrypted and shown masked — the full value is never displayed again. Max 5 active keys per provider.</p>
+              <div class="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  v-model="newKeyLabel"
+                  maxlength="30"
+                  placeholder="Label (e.g. key-1)"
+                  class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 sm:max-w-40"
+                />
+                <input
+                  v-model="newKeyValue"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="Paste API key (min 20 chars)"
+                  class="w-full flex-1 rounded-md border border-gray-200 px-3 py-1.5 font-mono text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                />
+                <button
+                  type="button"
+                  :disabled="keyWorking || !newKeyLabel.trim() || newKeyValue.length < 20"
+                  class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-emerald-600 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-500/40 dark:bg-gray-800 dark:text-emerald-300"
+                  @click="addKey"
+                >
+                  {{ keyWorking ? 'Saving…' : 'Add key' }}
+                </button>
+              </div>
+              <p v-if="keyMessage" class="mt-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">{{ keyMessage }}</p>
+              <div
+                v-if="!hasActiveKeys && !envKey"
+                class="mt-2 rounded-md border border-gray-200 bg-gray-100 px-2.5 py-1.5 text-xs text-gray-500 dark:border-white/10 dark:bg-white/5 dark:text-gray-400"
+              >
+                No active key — add one with the form above and Ping to verify.
+              </div>
+              <div v-if="statusKeys.length || envKey" class="mt-2 grid gap-2 sm:grid-cols-2">
+                <div
+                  v-for="key in statusKeys"
+                  :key="'status-' + key.id"
+                  class="rounded-md border border-gray-300 bg-white p-2.5 text-xs shadow-sm dark:border-white/15 dark:bg-gray-900"
+                >
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span v-if="key.is_active && key.last_ping_ok === true" class="relative flex h-2 w-2 shrink-0">
+                      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                      <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                    </span>
+                    <span v-else class="h-2 w-2 shrink-0 rounded-full" :class="statusDotClass(key)"></span>
+                    <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-gray-500 dark:bg-white/10 dark:text-gray-400">{{ key.provider ?? 'gemini' }}</span>
+                    <span class="truncate font-medium text-gray-800 dark:text-gray-200">{{ key.label }}</span>
+                    <span class="shrink-0 font-mono text-gray-500 dark:text-gray-400">{{ key.masked_key }}</span>
+                    <span class="ml-auto inline-flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        :disabled="keyWorking"
+                        class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        @click="pingKey(key.id)"
+                      >
+                        Ping
+                      </button>
+                      <button
+                        type="button"
+                        :disabled="keyWorking"
+                        class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        @click="toggleKey(key)"
+                      >
+                        {{ key.is_active ? 'Disable' : 'Enable' }}
+                      </button>
+                      <button
+                        type="button"
+                        :disabled="keyWorking"
+                        class="rounded border border-rose-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:bg-gray-800"
+                        @click="deleteKey(key.id)"
+                      >
+                        Delete
+                      </button>
+                    </span>
+                  </div>
+                  <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                    <span>{{ key.is_active ? 'Active' : 'Off' }}</span>
+                    <span class="font-mono">{{ key.last_tokens_sent ?? '—' }} tokens</span>
+                    <span
+                      v-if="key.last_checked_at"
+                      :class="key.last_ping_ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                    >
+                      {{ key.last_ping_ok ? 'Ping ok' : 'Ping fail' }} · {{ key.last_checked_at }}
+                    </span>
+                    <span v-else-if="(key.provider ?? 'gemini') !== 'gemini'">Stored only — no live probe</span>
+                    <span v-else>Never pinged</span>
+                  </div>
+                  <p v-if="key.last_error" class="mt-1 text-[11px] text-rose-600 dark:text-rose-400">{{ key.last_error }}</p>
+                </div>
+                <!-- Environment fallback key card (GEMINI_API_KEY) -->
+                <div
+                  v-if="envKey"
+                  class="rounded-md border border-gray-300 bg-white p-2.5 text-xs shadow-sm dark:border-white/15 dark:bg-gray-900"
+                >
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="relative flex h-2 w-2 shrink-0">
+                      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                      <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                    </span>
+                    <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-gray-500 dark:bg-white/10 dark:text-gray-400">gemini</span>
+                    <span class="truncate font-medium text-gray-800 dark:text-gray-200">Environment key (GEMINI_API_KEY)</span>
+                    <span class="shrink-0 font-mono text-gray-500 dark:text-gray-400">{{ envKey.masked_key }}</span>
+                    <span class="ml-auto shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">In use</span>
+                  </div>
+                  <div class="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                    Serving Gemini traffic — pooled keys take precedence once added.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 grid items-start gap-4 lg:grid-cols-2">
+              <div class="rounded-md border border-gray-200 bg-white p-3 dark:border-white/10 dark:bg-gray-900">
+                <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Model configuration</h3>
+                <div class="mt-2 grid gap-3">
               <div>
                 <label for="primary_model" class="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
                   Primary model
@@ -249,58 +367,55 @@
                 />
                 <p class="mt-1 text-[11px] text-gray-400 dark:text-gray-500">How many past messages the AI retains per session (2–20).</p>
               </div>
-            </div>
-
-            <div class="mt-4 border-t border-gray-100 pt-3.5 dark:border-white/5">
-              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Gemini key pool (max 5 active)</h3>
-              <p class="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">Quota-hit keys fail over automatically. Keys are stored encrypted and shown masked.</p>
-              <ul v-if="aiKeys.length" class="mt-2 space-y-1.5">
-                <li
-                  v-for="key in aiKeys"
-                  :key="key.id"
-                  class="flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50/60 px-2.5 py-1.5 text-xs dark:border-white/5 dark:bg-white/[0.03]"
-                >
-                  <span class="font-medium text-gray-800 dark:text-gray-200">{{ key.label }}</span>
-                  <span class="font-mono text-gray-500 dark:text-gray-400">{{ key.masked_key }}</span>
-                  <span
-                    class="rounded px-1.5 py-0.5 text-[10px] font-bold"
-                    :class="key.is_active ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400'"
-                  >
-                    {{ key.is_active ? 'Active' : 'Off' }}
-                  </span>
-                  <span v-if="key.last_error" class="text-[11px] text-rose-600 dark:text-rose-400">{{ key.last_error }}</span>
-                  <span class="ml-auto inline-flex items-center gap-1.5">
-                    <button type="button" :disabled="keyWorking" class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" @click="pingKey(key.id)">Ping</button>
-                    <button type="button" :disabled="keyWorking" class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" @click="toggleKey(key)">{{ key.is_active ? 'Disable' : 'Enable' }}</button>
-                    <button type="button" :disabled="keyWorking" class="rounded border border-rose-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:bg-gray-800" @click="deleteKey(key.id)">Delete</button>
-                  </span>
-                </li>
-              </ul>
-              <p v-else class="mt-2 text-[11px] text-gray-400 dark:text-gray-500">No pooled keys — using the <span class="font-mono">GEMINI_API_KEY</span> env value.</p>
-              <div class="mt-2 flex flex-col gap-2 sm:flex-row">
-                <input
-                  v-model="newKeyLabel"
-                  maxlength="30"
-                  placeholder="Label (e.g. key-1)"
-                  class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 sm:max-w-40"
-                />
-                <input
-                  v-model="newKeyValue"
-                  type="password"
-                  autocomplete="new-password"
-                  placeholder="Paste Gemini API key (min 20 chars)"
-                  class="w-full flex-1 rounded-md border border-gray-200 px-3 py-1.5 font-mono text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-                />
-                <button
-                  type="button"
-                  :disabled="keyWorking || !newKeyLabel.trim() || newKeyValue.length < 20"
-                  class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-emerald-600 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-500/40 dark:bg-gray-800 dark:text-emerald-300"
-                  @click="addKey"
-                >
-                  {{ keyWorking ? 'Saving…' : 'Add key' }}
-                </button>
+                </div>
               </div>
-              <p v-if="keyMessage" class="mt-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">{{ keyMessage }}</p>
+              <div>
+                <!-- Setup guide: per-provider key configuration -->
+                <div class="rounded-md border border-gray-100 bg-gray-50/60 p-3 dark:border-white/5 dark:bg-white/[0.03]">
+                <h4 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Setup guide</h4>
+                <ol class="mt-1.5 list-decimal space-y-2 pl-5 text-xs text-gray-600 dark:text-gray-300">
+                  <li>
+                    <span class="font-semibold text-gray-800 dark:text-gray-200">Gemini — get a key.</span>
+                    Create one in Google AI Studio (AI Studio → Get API key) and enable the Generative Language API if prompted.
+                  </li>
+                  <li>
+                    <span class="font-semibold text-gray-800 dark:text-gray-200">Gemini — paste it above.</span>
+                    Add a label, paste the key, then Add key. Each card shows only a masked tail (e.g. <span class="font-mono">…Ab12</span>) — the full value is never displayed again.
+                  </li>
+                  <li>
+                    <span class="font-semibold text-gray-800 dark:text-gray-200">Gemini — verify with Ping.</span>
+                    Use the per-key Ping button (or the header Ping AI Provider). Green means the key, quota, and model access all work — on a fresh deploy this takes you from an empty pool to Ping green.
+                  </li>
+                  <li>
+                    <span class="font-semibold text-gray-800 dark:text-gray-200">Env fallback.</span>
+                    With zero pooled keys the app uses the <span class="font-mono">GEMINI_API_KEY</span> env value (model from <span class="font-mono">GEMINI_MODEL</span>). Once any pooled key exists the pool is authoritative and the env key is ignored — remove all pooled keys to fall back to env.
+                    <div class="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <code class="flex-1 break-all whitespace-pre-line rounded bg-white px-2 py-1.5 font-mono text-[11px] text-gray-800 dark:bg-black/30 dark:text-gray-100">GEMINI_API_KEY=paste-key-here&#10;GEMINI_MODEL=gemini-3.1-flash-lite</code>
+                      <button
+                        type="button"
+                        class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        @click="copyEnvSnippet"
+                      >
+                        <LucideIcon :icon="copiedEnv ? Check : Copy" class="h-3.5 w-3.5" />
+                        {{ copiedEnv ? 'Copied' : 'Copy' }}
+                      </button>
+                    </div>
+                  </li>
+                  <li>
+                    <span class="font-semibold text-gray-800 dark:text-gray-200">Quota failover.</span>
+                    Quota and server errors (429 / 500 / 503) rotate to the next active Gemini key in priority order; a bad request (400) stops rotation so it never burns the pool. Each row shows its last error when a key fails.
+                  </li>
+                  <li>
+                    <span class="font-semibold text-gray-800 dark:text-gray-200">Forecast — no key needed today.</span>
+                    Forecasting runs on local models, so nothing external is required — no key to create, paste, or rotate.
+                  </li>
+                  <li>
+                    <span class="font-semibold text-gray-800 dark:text-gray-200">Rotation.</span>
+                    Disable or delete a compromised key (max 5 active per provider). Gemini traffic fails over to the remaining active keys automatically.
+                  </li>
+                </ol>
+                </div>
+              </div>
             </div>
 
             <div class="mt-4 flex justify-end border-t border-gray-100 pt-3.5 dark:border-white/5">
@@ -324,7 +439,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
-import { Activity, BrainCircuit, CheckCircle, PackageOpen, RefreshCw, Save, Trash2, Wifi } from 'lucide';
+import { Activity, BrainCircuit, Check, CheckCircle, Copy, PackageOpen, RefreshCw, Save, Trash2, Wifi } from 'lucide';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { useToastStore } from '../../stores/toast';
@@ -342,10 +457,14 @@ const inventoryForm = reactive({ low_stock_threshold: 5, default_lifespan_years:
 const aiForm = reactive({ primary_model: '', fallback_model: '', max_history_messages: 6 });
 const formErrors = ref({});
 const aiKeys = ref([]);
+const envKey = ref(null);
 const newKeyLabel = ref('');
 const newKeyValue = ref('');
 const keyWorking = ref(false);
 const keyMessage = ref('');
+const copiedEnv = ref(false);
+
+const ENV_SNIPPET = 'GEMINI_API_KEY=paste-key-here\nGEMINI_MODEL=gemini-3.1-flash-lite';
 
 const activeTab = ref('diagnostics');
 
@@ -370,8 +489,7 @@ const tabs = [
   },
 ];
 
-const diagnosticsList = computed(() => {
-  const d = diagnostics.value ?? {};
+const diagnosticsList = computed(() => {  const d = diagnostics.value ?? {};
   return {
     PHP: d.phpVersion ?? '—',
     Laravel: d.laravelVersion ?? '—',
@@ -383,6 +501,21 @@ const diagnosticsList = computed(() => {
     'AI model': d.activeAiModel ?? '—',
   };
 });
+
+// Status cards: one per pooled key (all providers), active first. Shares
+// the aiKeys pool state, so Ping updates each card inline via refreshKeys().
+const statusKeys = computed(() => {
+  const rows = aiKeys.value ?? [];
+  return [...rows].sort((a, b) => Number(b.is_active) - Number(a.is_active));
+});
+
+const hasActiveKeys = computed(() => statusKeys.value.some((key) => key.is_active));
+
+function statusDotClass(key) {
+  if (!key.is_active) return 'bg-gray-300 dark:bg-gray-600';
+  if (key.last_ping_ok === false) return 'bg-rose-500';
+  return 'bg-emerald-500';
+}
 
 async function load(options = {}) {
   await loadCachedPage({
@@ -398,6 +531,7 @@ async function load(options = {}) {
       Object.assign(inventoryForm, data.inventoryPolicy ?? {});
       Object.assign(aiForm, data.aiConfig ?? {});
       aiKeys.value = data.aiKeys ?? [];
+      envKey.value = data.envKey ?? null;
     },
     onStart: () => {
       error.value = '';
@@ -450,6 +584,7 @@ async function pingAi() {
 async function refreshKeys() {
   const { data } = await api.get('/admin/settings/keys');
   aiKeys.value = data.keys ?? [];
+  envKey.value = data.envKey ?? null;
 }
 
 async function addKey() {
@@ -468,6 +603,26 @@ async function addKey() {
   } finally {
     keyWorking.value = false;
   }
+}
+
+async function copyEnvSnippet() {
+  try {
+    await navigator.clipboard.writeText(ENV_SNIPPET);
+  } catch {
+    const fallback = document.createElement('textarea');
+    fallback.value = ENV_SNIPPET;
+    document.body.appendChild(fallback);
+    fallback.select();
+    try {
+      document.execCommand('copy');
+    } catch {
+      return;
+    } finally {
+      fallback.remove();
+    }
+  }
+  copiedEnv.value = true;
+  setTimeout(() => { copiedEnv.value = false; }, 2000);
 }
 
 async function toggleKey(key) {

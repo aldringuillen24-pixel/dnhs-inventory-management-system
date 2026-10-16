@@ -2,15 +2,7 @@
   <main class="min-h-screen bg-[#f6f7f2] px-5 py-8 text-slate-900 sm:px-8">
     <div class="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-4xl items-center justify-center">
       <section class="w-full max-w-xl overflow-hidden rounded-md border border-slate-200 bg-white p-4 shadow-[0_24px_80px_rgba(15,23,42,0.10)] sm:p-12 lg:p-10">
-        <div class="mx-auto flex w-full max-w-md flex-col justify-center">
-          <div class="mb-8 flex items-center justify-center gap-5 text-left">
-            <img :src="logoUrl" alt="DNHS Logo" class="h-24 w-auto object-contain" />
-            <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-[#173f3b]">Dian-ay NHS</p>
-              <h1 class="text-xl font-semibold text-slate-800">Reset Password</h1>
-            </div>
-          </div>
-
+        <div class="mx-auto flex w-full max-w-md flex-col justify-center pt-2">
           <div
             v-if="formError"
             role="alert"
@@ -154,8 +146,6 @@
 import { computed, onUnmounted, ref } from 'vue';
 import api from '../../lib/axios';
 import FieldError from '../../components/ui/feedback/FieldError.vue';
-
-const logoUrl = '/images/logo/dnhs_school_logo.svg';
 
 const step = ref('email');
 const email = ref('');
