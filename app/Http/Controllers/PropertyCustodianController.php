@@ -1832,6 +1832,10 @@ class PropertyCustodianController extends Controller
      */
     public function storeDraft(Request $request)
     {
+        if (is_array($request->input('items'))) {
+            return $this->storeMultiDraft($request);
+        }
+
         $validated = $request->validate([
             'item_id' => ['required', 'exists:inventory,item_id'],
             'user_id' => ['required', 'exists:users,id'],
@@ -1893,6 +1897,74 @@ class PropertyCustodianController extends Controller
             return redirect()->back()->with('error', $message)->withInput();
         }
 
+        $draft->loadMissing('fulfillmentRequests:id,item_id,parent_request_id');
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Draft saved. Print the slip, then allocate once the signed slip is collected.',
+                'draft_id' => (int) $draft->id,
+                'inventory_ids' => $draft->fulfillmentRequests->map(fn ($child) => (int) $child->item_id)->values()->all(),
+            ]);
+        }
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Draft saved. Print the slip, then allocate once the signed slip is collected.');
+    }
+
+    private function storeMultiDraft(Request $request)
+    {
+        $validated = $request->validate([
+            'user_id' => ['required', 'exists:users,id'],
+            'transaction_date' => ['nullable', 'date'],
+            'is_temporary' => ['sometimes', 'boolean'],
+            'expected_return_date' => [
+                Rule::requiredIf(fn () => $request->boolean('is_temporary')),
+                'nullable',
+                'date',
+                function (string $attribute, mixed $value, \Closure $fail) use ($request): void {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+                    $floor = now()->toDateString();
+                    if ($request->filled('transaction_date')) {
+                        try {
+                            $floor = Carbon::parse($request->input('transaction_date'))->toDateString();
+                        } catch (\Throwable) {
+                        }
+                    }
+                    if ((string) $value < $floor) {
+                        $fail('The expected return date must be on or after the assignment date.');
+                    }
+                },
+            ],
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.item_id' => ['required', 'exists:inventory,item_id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $endUser = User::with('role')->findOrFail($validated['user_id']);
+
+        if (strtolower((string) $endUser->role?->role_name) !== 'end user') {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Items can only be drafted for an End User.'], 422);
+            }
+
+            return redirect()->back()->withErrors(['user_id' => 'Items can only be drafted for an End User.'])->withInput();
+        }
+
+        $result = $this->inventoryOperations->createDrafts(
+            array_values($validated['items']),
+            (int) $request->user()->id,
+            (int) $endUser->id,
+            $validated['transaction_date'] ?? null,
+            $validated['expected_return_date'] ?? null,
+        );
+
+        if (is_array($result)) {
+            return $this->assignmentLineErrors($request, $result['errors'], count($validated['items']));
+        }
+
+        $draft = $result;
         $draft->loadMissing('fulfillmentRequests:id,item_id,parent_request_id');
 
         if ($request->expectsJson()) {
@@ -2408,7 +2480,129 @@ class PropertyCustodianController extends Controller
         $assignmentType = $request->input('assignment_type', 'registered');
 
         if ($assignmentType === 'manual') {
+            if (! is_array($request->input('items'))) {
+                return $this->assignSingleManual($request);
+            }
+
             $validated = $request->validate([
+                'manual_recipient_name' => ['required', 'string', 'max:255'],
+                'manual_department' => ['nullable', 'string', 'max:255'],
+                'building' => ['nullable', 'string', 'max:255'],
+                'room' => ['nullable', 'string', 'max:255'],
+                'manual_recipient_type' => ['nullable', 'string', 'max:100'],
+                'manual_contact' => ['nullable', 'string', 'max:255'],
+                'manual_notes' => ['nullable', 'string', 'max:1000'],
+                'transaction_date' => ['required', 'date'],
+                'expected_return_date' => ['nullable', 'date', 'after_or_equal:transaction_date'],
+                'items' => ['required', 'array', 'min:1', 'max:100'],
+                'items.*.item_id' => ['required', 'exists:inventory,item_id'],
+                'items.*.category_id' => ['required', 'exists:categories,category_id'],
+                'items.*.unit' => ['required', 'string', 'max:255'],
+                'items.*.quantity' => ['required', 'integer', 'min:1'],
+            ]);
+
+            $shared = collect($validated)->except('items')->all();
+            $lines = array_values(array_map(
+                fn ($line) => [...$shared, ...$line],
+                $validated['items'],
+            ));
+            $result = $this->inventoryOperations->issueManuals($lines, (int) $request->user()->id);
+
+            if (isset($result['errors'])) {
+                return $this->assignmentLineErrors($request, $result['errors'], count($lines));
+            }
+
+            $count = count($result['transactions'] ?? []);
+
+            return redirect()->route('propertyCustodian.transactions')->with(
+                'success',
+                $count === 1
+                    ? 'Item issued manually and recorded in transaction history.'
+                    : "{$count} items issued manually and recorded in transaction history.",
+            );
+        }
+
+        if (! is_array($request->input('items'))) {
+            return $this->assignSingleRegistered($request);
+        }
+
+        $validated = $request->validate([
+            'user_id' => ['required', 'exists:users,id'],
+            'transaction_date' => ['nullable', 'date'],
+            'is_temporary' => ['sometimes', 'boolean'],
+            'expected_return_date' => [
+                Rule::requiredIf(fn () => $request->boolean('is_temporary')),
+                'nullable',
+                'date',
+                function (string $attribute, mixed $value, \Closure $fail) use ($request): void {
+                    if ($value === null || $value === '') {
+                        return;
+                    }
+                    $floor = now()->toDateString();
+                    if ($request->filled('transaction_date')) {
+                        try {
+                            $floor = Carbon::parse($request->input('transaction_date'))->toDateString();
+                        } catch (\Throwable) {
+                        }
+                    }
+                    if ((string) $value < $floor) {
+                        $fail('The expected return date must be on or after the assignment date.');
+                    }
+                },
+            ],
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.item_id' => ['required', 'exists:inventory,item_id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $endUser = User::with('role')->findOrFail($validated['user_id']);
+        $userId = $request->user()?->getAuthIdentifier();
+
+        if (strtolower((string) $endUser->role?->role_name) !== 'end user') {
+            return redirect()->back()->withErrors(['user_id' => 'Items can only be assigned to an End User.'])->withInput();
+        }
+
+        $result = $this->inventoryOperations->submitRegisteredAssignments(
+            array_values($validated['items']),
+            (int) $userId,
+            (int) $endUser->id,
+            $validated['transaction_date'] ?? null,
+            $validated['expected_return_date'] ?? null,
+        );
+
+        if (isset($result['errors'])) {
+            return $this->assignmentLineErrors($request, $result['errors'], count($validated['items']));
+        }
+
+        $count = count($result['requests'] ?? []);
+
+        return redirect()->route('propertyCustodian.transactions')->with(
+            'success',
+            $count === 1
+                ? 'Assignment request submitted for approval.'
+                : "{$count} assignment requests submitted for approval.",
+        );
+    }
+
+    /**
+     * Per-line failures in stockInImport shape: nothing was written,
+     * errors keyed by line position for inline display.
+     */
+    private function assignmentLineErrors(Request $request, array $lineErrors, int $lineCount)
+    {
+        $message = $lineCount === 1
+            ? 'The assignment could not be completed. Review the line below and try again.'
+            : 'Some assignment lines could not be completed. Nothing was saved; review the marked lines and try again.';
+        if ($request->expectsJson()) {
+            return response()->json(['message' => $message, 'errors' => $lineErrors], 422);
+        }
+
+        return redirect()->back()->withErrors(['items' => $message])->withInput();
+    }
+
+    private function assignSingleManual(Request $request)
+    {
+        $validated = $request->validate([
                 'item_id' => ['required', 'exists:inventory,item_id'],
                 'category_id' => ['required', 'exists:categories,category_id'],
                 'unit' => ['required', 'string', 'max:255'],
@@ -2434,8 +2628,10 @@ class PropertyCustodianController extends Controller
             }
 
             return redirect()->route('propertyCustodian.transactions')->with('success', 'Item issued manually and recorded in transaction history.');
-        }
+    }
 
+    private function assignSingleRegistered(Request $request)
+    {
         $validated = $request->validate([
             'item_id' => ['required', 'exists:inventory,item_id'],
             'user_id' => ['required', 'exists:users,id'],

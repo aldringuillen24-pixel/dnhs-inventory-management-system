@@ -29,7 +29,7 @@
         :disabled="busy || (required && !text.trim())"
         @click="$emit('submit', text)"
       >
-        {{ busy ? 'Working…' : confirmLabel }}
+        {{ busy ? (busyLabel || 'Working…') : confirmLabel }}
       </button>
     </div>
   </Modal>
@@ -52,6 +52,7 @@ const props = defineProps({
     danger: { type: Boolean, default: false },
     errors: { type: Object, default: () => ({}) },
     busy: { type: Boolean, default: false },
+    busyLabel: { type: String, default: '' },
 });
 
 defineEmits(['cancel', 'submit']);

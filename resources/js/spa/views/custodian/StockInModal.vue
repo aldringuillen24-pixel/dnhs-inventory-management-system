@@ -3,7 +3,7 @@
     :open="open"
     title="Stock In New Items"
     subtitle="Prepare a receiving batch and review each inventory line before saving."
-    max-width="max-w-[83rem]"
+    max-width="max-w-[84rem]"
     :close-on-escape="!managerOpen"
     @close="$emit('close')"
   >

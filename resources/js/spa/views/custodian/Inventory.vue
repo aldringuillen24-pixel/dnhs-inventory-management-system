@@ -79,8 +79,9 @@
               </svg>
               <span class="truncate">{{ activeWorkspaceTab.label }}</span>
               <span
-                class="shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold min-[480px]:px-2 min-[480px]:text-[10px]"
-                :class="tabBadgeClass(activeWorkspaceTab.key, true)"
+                :key="`trigger:${activeWorkspaceTab.key}:${activeWorkspaceTab.count}`"
+                class="inline-block shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold min-[480px]:px-2 min-[480px]:text-[10px]"
+                :class="[tabBadgeClass(activeWorkspaceTab.key, true), animationsLive && 'tab-badge-pop']"
               >
                 {{ format(activeWorkspaceTab.count) }}
               </span>
@@ -108,8 +109,9 @@
             >
               <span>{{ tab.label }}</span>
               <span
-                class="rounded-md px-2 py-0.5 text-[10px] font-bold"
-                :class="tabBadgeClass(tab.key, workspace === tab.key)"
+                :key="`${tab.key}:${tab.count}`"
+                class="inline-block rounded-md px-2 py-0.5 text-[10px] font-bold"
+                :class="[tabBadgeClass(tab.key, workspace === tab.key), animationsLive && 'tab-badge-pop']"
               >
                 {{ format(tab.count) }}
               </span>
@@ -132,15 +134,21 @@
           </div>
         </div>
 
-        <div class="hidden shrink-0 flex-wrap gap-1.5 border-b border-gray-200/80 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-gray-900/50 sm:flex">
+        <div ref="tabStripRef" class="relative hidden shrink-0 flex-nowrap gap-1.5 overflow-x-auto border-b border-gray-200/80 bg-gray-50/50 p-2 dark:border-gray-800 dark:bg-gray-900/50 sm:flex">
+          <span
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-y-2 rounded-md bg-white shadow-sm ring-1 ring-emerald-500/20 motion-safe:transition-all motion-safe:duration-200 dark:bg-gray-800 dark:ring-emerald-500/30"
+            :style="pillStyle"
+          />
           <button
             v-for="tab in tabs"
             :key="tab.key"
+            :data-workspace-tab="tab.key"
             type="button"
-            class="group inline-flex min-w-0 items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-xs font-semibold transition-all sm:justify-start sm:px-3.5"
+            class="group relative inline-flex min-h-[2rem] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
             :class="
               workspace === tab.key
-                ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+                ? 'text-emerald-900 dark:text-emerald-300'
                 : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'
             "
             :aria-pressed="workspace === tab.key"
@@ -148,15 +156,16 @@
           >
             <span>{{ tab.label }}</span>
             <span
-              class="rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors"
-              :class="tabBadgeClass(tab.key, workspace === tab.key)"
+              :key="`${tab.key}:${tab.count}`"
+              class="inline-block rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums transition-colors"
+              :class="[tabBadgeClass(tab.key, workspace === tab.key), animationsLive && 'tab-badge-pop']"
             >
               {{ format(tab.count) }}
             </span>
           </button>
           <button
             type="button"
-            class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition-all sm:px-3.5"
+            class="ml-auto inline-flex min-h-[2rem] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
             :class="logsOpen
               ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
               : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
@@ -260,6 +269,8 @@
           </div>
         </div>
 
+        <Transition name="workspace" mode="out-in">
+          <div :key="workspace" class="flex min-h-0 min-w-0 flex-1 flex-col">
         <div v-if="loading" class="min-h-0 min-w-0 flex-1 shrink space-y-2.5 overflow-y-auto p-3 xl:hidden" aria-hidden="true">
           <div v-for="row in 4" :key="row" class="space-y-2.5 rounded-md border border-gray-200 p-3 dark:border-gray-800">
             <div class="h-3.5 w-2/3 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
@@ -657,6 +668,8 @@
             </tbody>
           </table>
         </div>
+          </div>
+        </Transition>
         <InventoryItemLogDrawer
           :open="logsOpen"
           :workspace="workspace"
@@ -1659,7 +1672,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import QRCode from 'qrcode';
 import { Armchair, BookOpen, Camera, Dumbbell, FileStack, FlaskConical, HardDrive, Monitor, Package, Printer, Projector, Wrench } from 'lucide';
 import api from '../../lib/axios';
@@ -2808,6 +2821,7 @@ async function load(options = {}) {
 }
 
 function switchWorkspace(next) {
+  animationsLive.value = true;
   if (workspace.value === next) {
     return;
   }
@@ -2815,6 +2829,49 @@ function switchWorkspace(next) {
   page.value = 1;
   selection.value = [];
 }
+
+// Sliding active-tab pill: measured from the rendered button so it tracks
+// label/badge widths, wrapping, and dark mode without hardcoded sizes.
+const tabStripRef = ref(null);
+const pillStyle = ref({ opacity: '0' });
+const animationsLive = ref(false);
+
+function updatePill() {
+  const strip = tabStripRef.value;
+  if (!strip) return;
+  const active = strip.querySelector(`[data-workspace-tab="${workspace.value}"]`);
+  const next = !active
+    ? { opacity: '0' }
+    : {
+      opacity: '1',
+      left: `${active.offsetLeft}px`,
+      width: `${active.offsetWidth}px`,
+    };
+  const prev = pillStyle.value;
+  if (prev.opacity === next.opacity && prev.left === next.left && prev.width === next.width) {
+    return;
+  }
+  pillStyle.value = next;
+}
+
+let pillObserver = null;
+
+onMounted(() => {
+  nextTick(updatePill);
+  if (typeof ResizeObserver !== 'undefined' && tabStripRef.value) {
+    pillObserver = new ResizeObserver(() => updatePill());
+    pillObserver.observe(tabStripRef.value);
+  } else {
+    window.addEventListener('resize', updatePill);
+  }
+});
+
+onUnmounted(() => {
+  pillObserver?.disconnect();
+  window.removeEventListener('resize', updatePill);
+});
+
+watch(workspace, () => nextTick(updatePill));
 
 function selectWorkspace(next) {
   switchWorkspace(next);
@@ -2896,3 +2953,39 @@ function onEditSaved() {
 watch([workspace, page], () => load());
 onMounted(() => load());
 </script>
+
+<style scoped>
+.workspace-enter-active {
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+}
+.workspace-leave-active {
+  transition: opacity 0.15s ease-in, transform 0.15s ease-in;
+}
+.workspace-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.workspace-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@keyframes workspace-badge-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+.tab-badge-pop {
+  animation: workspace-badge-pop 0.15s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-enter-active,
+  .workspace-leave-active {
+    transition: none;
+  }
+  .tab-badge-pop {
+    animation: none;
+  }
+}
+</style>

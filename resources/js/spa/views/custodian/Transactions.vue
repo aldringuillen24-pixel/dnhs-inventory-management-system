@@ -51,15 +51,21 @@
       <!-- Main Transactions Panel -->
       <div class="custodian-panel overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <!-- Interactive Segmented Navigation -->
-        <div class="grid grid-cols-3 gap-1 border-b border-gray-200/80 bg-gray-50/50 p-2 dark:border-gray-800 dark:bg-gray-900/50 min-[480px]:flex min-[480px]:flex-wrap min-[480px]:gap-1.5 min-[480px]:p-2.5">
+        <div ref="tabStripRef" class="relative flex shrink-0 flex-nowrap gap-1.5 overflow-x-auto border-b border-gray-200/80 bg-gray-50/50 p-2 dark:border-gray-800 dark:bg-gray-900/50">
+          <span
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-y-2 rounded-md bg-white shadow-sm ring-1 ring-emerald-500/20 motion-safe:transition-all motion-safe:duration-200 dark:bg-gray-800 dark:ring-emerald-500/30"
+            :style="pillStyle"
+          />
           <button
             v-for="tab in tabs"
             :key="tab.key"
+            :data-transaction-tab="tab.key"
             type="button"
-            class="group inline-flex min-w-0 items-center justify-between gap-1 rounded-md px-1.5 py-1.5 text-[10px] font-semibold transition-all min-[480px]:w-auto min-[480px]:justify-start min-[480px]:gap-2 min-[480px]:px-4 min-[480px]:py-2 min-[480px]:text-xs"
+            class="relative inline-flex min-h-[2rem] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
             :class="
               activeTab === tab.key
-                ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+                ? 'text-emerald-900 dark:text-emerald-300'
                 : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'
             "
             :aria-pressed="activeTab === tab.key"
@@ -67,8 +73,9 @@
           >
             <span>{{ tab.label }}</span>
             <span
-              class="shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition-colors min-[480px]:px-2 min-[480px]:text-[10px]"
-              :class="tabCountBadgeClass(tab.key, activeTab === tab.key)"
+              :key="`${tab.key}:${tab.count}`"
+              class="inline-block rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums transition-colors"
+              :class="[tabCountBadgeClass(tab.key, activeTab === tab.key), animationsLive && 'tab-badge-pop']"
             >
               {{ format(tab.count) }}
             </span>
@@ -78,7 +85,8 @@
         <!-- Panel Body Loading -->
         <TransactionsSkeleton v-if="loading" :active-tab="activeTab" />
 
-        <div v-else class="p-2.5 min-[480px]:p-4 sm:p-6">
+        <Transition name="tab" mode="out-in">
+          <div v-if="!loading" :key="activeTab" class="p-2.5 min-[480px]:p-4 sm:p-6">
           <!-- 1. REQUESTS TAB -->
           <template v-if="activeTab === 'requests'">
             <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -92,7 +100,7 @@
                     type="search"
                     placeholder="Search requester, item, category…"
                     aria-label="Search requests"
-                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-[12px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
                   />
                 </div>
                 <button
@@ -266,7 +274,7 @@
                     type="search"
                     placeholder="Search recipient, item…"
                     aria-label="Search drafts"
-                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-[12px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
                   />
                 </div>
                 <button
@@ -341,8 +349,9 @@
                         </button>
                         <button
                           type="button"
-                          class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-                          @click="openPrompt('cancel-draft', draft.id)"
+                          class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                          :disabled="working || confirmAction !== null || prompt !== null"
+                          @click="confirmAction = { kind: 'cancel-draft', id: draft.id, label: `Delete draft and release ${draft.quantity} held unit(s)?` }"
                         >
                           Delete
                         </button>
@@ -373,7 +382,7 @@
                     type="search"
                     placeholder="Search sender, recipient, item…"
                     aria-label="Search transfers"
-                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-[12px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
                   />
                 </div>
                 <button
@@ -488,7 +497,7 @@
                     type="search"
                     placeholder="Search user, item…"
                     aria-label="Search returns"
-                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-[12px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
                   />
                 </div>
                 <button
@@ -597,7 +606,7 @@
                     type="search"
                     placeholder="Search by item, person, department…"
                     aria-label="Search transaction history"
-                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-[12px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
                   />
                 </div>
                 <span class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
@@ -762,7 +771,7 @@
                     type="search"
                     placeholder="Search item, movement, actor, details…"
                     aria-label="Search audit ledger"
-                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+                    class="w-full rounded-md border border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-[12px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
                   />
                 </div>
                 <button
@@ -921,7 +930,8 @@
               </table>
             </div>
           </template>
-        </div>
+          </div>
+        </Transition>
       </div>
     </template>
 
@@ -938,15 +948,16 @@
       :confirm-label="promptConfig.confirmLabel"
       :danger="promptConfig.danger"
       :busy="working"
-      @cancel="prompt = null"
+      :busy-label="promptConfig.busyLabel"
+      @cancel="cancelPrompt"
       @submit="submitPrompt"
     />
 
     <ConfirmDialog
       :open="confirmAction !== null"
-      title="Confirm Approval"
+      :title="confirmAction?.kind === 'cancel-draft' ? 'Delete Draft' : 'Confirm Approval'"
       :message="confirmAction?.label ?? ''"
-      confirm-label="Confirm Approval"
+      :confirm-label="confirmAction?.kind === 'cancel-draft' ? 'Yes' : 'Confirm Approval'"
       :busy="working"
       @cancel="confirmAction = null"
       @confirm="submitConfirm"
@@ -984,7 +995,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { groupLedgerEntries } from '../../lib/auditLedger';
@@ -1000,6 +1011,52 @@ import ApproveRequestModal from './ApproveRequestModal.vue';
 const toast = useToastStore();
 
 const activeTab = ref('requests');
+
+// Sliding active-tab pill, measured from the rendered button. Writes are
+// guarded so render never feeds back into reactive state.
+const tabStripRef = ref(null);
+const pillStyle = ref({ opacity: '0' });
+const animationsLive = ref(false);
+
+function updatePill() {
+  const strip = tabStripRef.value;
+  if (!strip) return;
+  const active = strip.querySelector(`[data-transaction-tab="${activeTab.value}"]`);
+  const next = !active
+    ? { opacity: '0' }
+    : {
+      opacity: '1',
+      left: `${active.offsetLeft}px`,
+      width: `${active.offsetWidth}px`,
+    };
+  const prev = pillStyle.value;
+  if (prev.opacity === next.opacity && prev.left === next.left && prev.width === next.width) {
+    return;
+  }
+  pillStyle.value = next;
+}
+
+let pillObserver = null;
+
+onMounted(() => {
+  nextTick(updatePill);
+  if (typeof ResizeObserver !== 'undefined' && tabStripRef.value) {
+    pillObserver = new ResizeObserver(() => updatePill());
+    pillObserver.observe(tabStripRef.value);
+  } else {
+    window.addEventListener('resize', updatePill);
+  }
+});
+
+onUnmounted(() => {
+  pillObserver?.disconnect();
+  window.removeEventListener('resize', updatePill);
+});
+
+watch(activeTab, () => {
+  animationsLive.value = true;
+  nextTick(updatePill);
+});
 const loading = ref(true);
 const error = ref('');
 const working = ref(false);
@@ -1016,6 +1073,7 @@ const assignOpen = ref(false);
 const reviewRequest = ref(null);
 const prompt = ref(null);
 const confirmAction = ref(null);
+const pendingConfirm = ref(null);
 const approveReturn = ref(null);
 const returnLocation = ref({ building: '', room: '' });
 
@@ -1219,7 +1277,7 @@ const promptConfig = computed(() => {
     case 'manual-return':
       return { title: 'Record Manual Return', subtitle: 'Return the manually issued item back to stockroom inventory.', label: 'Notes (optional)', required: false, confirmLabel: 'Confirm Return', danger: false };
     case 'cancel-draft':
-      return { title: 'Delete Draft', subtitle: 'Release the held units back to free stock.', label: 'Reason (Required)', required: true, confirmLabel: 'Delete Draft', danger: true };
+      return { title: 'Delete Draft', subtitle: 'Release the held units back to free stock.', label: 'Reason (Required)', required: true, confirmLabel: 'Delete Draft', busyLabel: 'Deleting…', danger: true };
     default:
       return { title: '', subtitle: '', label: 'Notes', required: false, confirmLabel: 'Confirm', danger: false };
   }
@@ -1422,6 +1480,14 @@ function openPrompt(kind, id) {
   prompt.value = { kind, id };
 }
 
+function cancelPrompt() {
+  if (prompt.value?.kind === 'cancel-draft' && pendingConfirm.value) {
+    confirmAction.value = pendingConfirm.value;
+  }
+  pendingConfirm.value = null;
+  prompt.value = null;
+}
+
 function openApproveReturn(returnRequest) {
   approveReturn.value = returnRequest;
   returnLocation.value = { building: returnRequest.building ?? '', room: returnRequest.room ?? '' };
@@ -1511,7 +1577,6 @@ async function submitPrompt(text) {
   if (!target) {
     return;
   }
-  prompt.value = null;
 
   const routes = {
     'decline-request': [(id) => `/custodian/requests/${id}/decline`, { notes: text || null }],
@@ -1521,6 +1586,17 @@ async function submitPrompt(text) {
     'cancel-draft': [(id) => `/custodian/requests/${id}/cancel`, { cancellation_reason: text }],
   };
 
+  if (target.kind === 'cancel-draft') {
+    const [urlFor, payload] = routes[target.kind];
+    pendingConfirm.value = null;
+    await runMutation(() => api.post(urlFor(target.id), payload));
+    prompt.value = null;
+    return;
+  }
+
+  prompt.value = null;
+  pendingConfirm.value = null;
+
   const [urlFor, payload] = routes[target.kind];
   await runMutation(() => api.post(urlFor(target.id), payload));
 }
@@ -1528,6 +1604,13 @@ async function submitPrompt(text) {
 async function submitConfirm() {
   const action = confirmAction.value;
   if (!action) {
+    return;
+  }
+
+  if (action.kind === 'cancel-draft') {
+    pendingConfirm.value = action;
+    confirmAction.value = null;
+    prompt.value = { kind: 'cancel-draft', id: action.id };
     return;
   }
 
@@ -1557,3 +1640,39 @@ async function submitApproveReturn() {
 
 onMounted(() => load());
 </script>
+
+<style scoped>
+.tab-enter-active {
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+}
+.tab-leave-active {
+  transition: opacity 0.15s ease-in, transform 0.15s ease-in;
+}
+.tab-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.tab-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@keyframes tab-badge-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+.tab-badge-pop {
+  animation: tab-badge-pop 0.15s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-enter-active,
+  .tab-leave-active {
+    transition: none;
+  }
+  .tab-badge-pop {
+    animation: none;
+  }
+}
+</style>

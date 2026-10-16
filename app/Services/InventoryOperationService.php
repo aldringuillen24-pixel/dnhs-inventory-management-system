@@ -79,8 +79,92 @@ class InventoryOperationService
     }
 
     /**
-     * Hold stock for a signed slip without moving custody.
+     * Multi-line registered assignment: one recipient, N items, all-or-none.
      *
+     * Every line is validated before anything is written (same guards as the
+     * single-line path, plus same-item lines share one free-stock pool). On
+     * any failure nothing is written and per-line errors are returned in
+     * stockInImport shape: ['errors' => [lineIndex => [messages]]].
+     *
+     * @return array{requests?: AssignmentRequest[], errors?: array}
+     */
+    public function submitRegisteredAssignments(
+        array $lines,
+        int $actorId,
+        int $recipientId,
+        ?string $transactionDate,
+        ?string $expectedReturnDate = null,
+    ): array {
+        return DB::transaction(function () use ($lines, $actorId, $recipientId, $transactionDate, $expectedReturnDate): array {
+            $recipient = User::query()->whereKey($recipientId)->lockForUpdate()->firstOrFail();
+            $ids = array_values(array_unique(array_map(
+                fn ($line) => (int) ($line['item_id'] ?? 0),
+                $lines,
+            )));
+            sort($ids);
+            $items = Inventory::query()
+                ->whereIn('item_id', $ids)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('item_id');
+
+            $errors = [];
+            $promised = [];
+            foreach (array_values($lines) as $index => $line) {
+                $itemId = (int) ($line['item_id'] ?? 0);
+                $quantity = $line['quantity'] ?? null;
+                $item = $items->get($itemId);
+                if (! $item) {
+                    $errors[$index][] = 'The selected item is no longer available.';
+                    continue;
+                }
+                if ($item->status !== 'available') {
+                    $errors[$index][] = 'The selected item is not available for assignment.';
+                    continue;
+                }
+                if (! is_numeric($quantity) || (int) $quantity != $quantity || (int) $quantity < 1) {
+                    $errors[$index][] = 'Quantity must be a whole number of at least 1.';
+                    continue;
+                }
+                $quantity = (int) $quantity;
+                $pendingHold = (int) AssignmentRequest::query()
+                    ->whereIn('status', ['waiting for approval', 'draft'])
+                    ->where('item_id', $item->item_id)
+                    ->sum('quantity');
+                $free = max(0, (int) $item->quantity - $pendingHold);
+                $already = $promised[$itemId] ?? 0;
+                if ($quantity + $already > $free) {
+                    $errors[$index][] = 'The requested quantity exceeds the free stock (available minus units already promised).';
+                    continue;
+                }
+                $promised[$itemId] = $already + $quantity;
+            }
+
+            if ($errors !== []) {
+                return ['errors' => $errors];
+            }
+
+            $created = [];
+            foreach (array_values($lines) as $line) {
+                $created[] = AssignmentRequest::create([
+                    'item_id' => (int) $line['item_id'],
+                    'user_id' => $actorId,
+                    'target_user_id' => $recipientId,
+                    'building' => $recipient->building,
+                    'room' => $recipient->room,
+                    'quantity' => (int) $line['quantity'],
+                    'status' => 'waiting for approval',
+                    'requested_at' => $transactionDate ? Carbon::parse($transactionDate) : now(),
+                    'expected_return_date' => $expectedReturnDate,
+                ]);
+            }
+
+            return ['requests' => $created];
+        });
+    }
+
+    /**
+     * Hold stock for a signed slip without moving custody.
      * Creates a `draft` parent (item-type summary, item_id null) plus one
      * `draft` child per inventory row. Nothing is deducted, no transaction or
      * movement is written — printable immediately, allocatable later. The
@@ -149,6 +233,114 @@ class InventoryOperationService
                 'requested_at' => $parent->requested_at,
                 'expected_return_date' => $expectedReturnDate,
             ]);
+
+            return $parent->fresh();
+        });
+    }
+
+    /**
+     * Multi-line draft hold: one slip, one parent, one `draft` child per line.
+     *
+     * Same guards as the single-line path per row (available, free stock
+     * after holds, serial allocation), with same-item lines sharing one
+     * free-stock pool. The parent carries a summary of the first line plus a
+     * "+N more" suffix; custody math only ever reads the children.
+     *
+     * @return AssignmentRequest|array the draft parent, or ['errors' => [...]]
+     */
+    public function createDrafts(
+        array $lines,
+        int $actorId,
+        int $recipientId,
+        ?string $transactionDate,
+        ?string $expectedReturnDate = null,
+    ): AssignmentRequest|array {
+        return DB::transaction(function () use ($lines, $actorId, $recipientId, $transactionDate, $expectedReturnDate): AssignmentRequest|array {
+            $recipient = User::query()->whereKey($recipientId)->firstOrFail();
+            $ids = array_values(array_unique(array_map(
+                fn ($line) => (int) ($line['item_id'] ?? 0),
+                $lines,
+            )));
+            sort($ids);
+            $items = Inventory::with('category')
+                ->whereIn('item_id', $ids)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('item_id');
+
+            $errors = [];
+            $promised = [];
+            $ordered = array_values($lines);
+            foreach ($ordered as $index => $line) {
+                $itemId = (int) ($line['item_id'] ?? 0);
+                $quantity = $line['quantity'] ?? null;
+                $item = $items->get($itemId);
+                if (! $item) {
+                    $errors[$index][] = 'The selected item is no longer available.';
+                    continue;
+                }
+                if ($item->status !== 'available' || (int) $item->quantity < 1) {
+                    $errors[$index][] = 'The selected item is not available for a draft hold.';
+                    continue;
+                }
+                if (! is_numeric($quantity) || (int) $quantity != $quantity || (int) $quantity < 1) {
+                    $errors[$index][] = 'Quantity must be a whole number of at least 1.';
+                    continue;
+                }
+                $quantity = (int) $quantity;
+                $held = (int) AssignmentRequest::query()
+                    ->whereIn('status', ['waiting for approval', 'draft'])
+                    ->where('item_id', $item->item_id)
+                    ->sum('quantity');
+                $already = $promised[$itemId] ?? 0;
+                if ($quantity + $already > max(0, (int) $item->quantity - $held)) {
+                    $errors[$index][] = 'The requested quantity exceeds the free stock (available minus units already promised).';
+                    continue;
+                }
+                if ($item->category?->requires_serial_number
+                    && ($quantity !== 1 || (int) $item->quantity !== 1 || ! $item->serial_number)
+                ) {
+                    $errors[$index][] = 'Serialized stock must be drafted as its exact individual asset with quantity 1.';
+                    continue;
+                }
+                $promised[$itemId] = $already + $quantity;
+            }
+
+            if ($errors !== []) {
+                return ['errors' => $errors];
+            }
+
+            $first = $items->get((int) $ordered[0]['item_id']);
+            $totalQuantity = array_sum(array_map(fn ($line) => (int) $line['quantity'], $ordered));
+            $parent = AssignmentRequest::create([
+                'user_id' => $actorId,
+                'target_user_id' => $recipientId,
+                'requested_item_name' => count($ordered) > 1
+                    ? $first->item_name . ' +' . (count($ordered) - 1) . ' more'
+                    : $first->item_name,
+                'requested_category_id' => $first->category_id,
+                'requested_unit' => $first->unit,
+                'building' => $recipient->building ?? $first->building,
+                'room' => $recipient->room ?? $first->room,
+                'quantity' => $totalQuantity,
+                'status' => 'draft',
+                'requested_at' => $transactionDate ? Carbon::parse($transactionDate) : now(),
+                'expected_return_date' => $expectedReturnDate,
+            ]);
+            foreach ($ordered as $line) {
+                AssignmentRequest::create([
+                    'user_id' => $actorId,
+                    'target_user_id' => $recipientId,
+                    'item_id' => (int) $line['item_id'],
+                    'building' => $parent->building,
+                    'room' => $parent->room,
+                    'parent_request_id' => $parent->id,
+                    'quantity' => (int) $line['quantity'],
+                    'status' => 'draft',
+                    'requested_at' => $parent->requested_at,
+                    'expected_return_date' => $expectedReturnDate,
+                ]);
+            }
 
             return $parent->fresh();
         });
@@ -285,76 +477,129 @@ class InventoryOperationService
 
     public function issueManual(array $attributes, int $actorId): Transaction|string
     {
-        return DB::transaction(function () use ($attributes, $actorId): Transaction|string {
-            $inventoryItem = Inventory::with('category')
-                ->whereKey($attributes['item_id'])
+        $result = $this->issueManuals([$attributes], $actorId);
+
+        return $result['transactions'][0] ?? $result['errors'][0][0] ?? 'The manual assignment could not be recorded.';
+    }
+
+    /**
+     * Multi-line manual issue: one recipient, N transactions, all-or-none.
+     *
+     * Same guards as the single-line path per row (available, category/unit
+     * match, serial allocation, quantity), with same-item lines sharing one
+     * stock pool. Shared recipient fields come from $attributes; per-line
+     * stock fields come from each $lines entry.
+     *
+     * @return array{transactions?: Transaction[], errors?: array}
+     */
+    public function issueManuals(array $lines, int $actorId): array
+    {
+        return DB::transaction(function () use ($lines, $actorId): array {
+            $ordered = array_values($lines);
+            $ids = array_values(array_unique(array_map(
+                fn ($line) => (int) ($line['item_id'] ?? 0),
+                $ordered,
+            )));
+            sort($ids);
+            $items = Inventory::with('category')
+                ->whereIn('item_id', $ids)
                 ->lockForUpdate()
-                ->firstOrFail();
+                ->get()
+                ->keyBy('item_id');
 
-            if (
-                $inventoryItem->status !== 'available'
-                || (int) $inventoryItem->quantity < 1
-                || (int) $inventoryItem->category_id !== (int) $attributes['category_id']
-                || $inventoryItem->unit !== $attributes['unit']
-            ) {
-                return 'The selected inventory record is no longer available or does not match its category and unit.';
-            }
-
-            $quantity = (int) $attributes['quantity'];
-            if ($inventoryItem->category?->requires_serial_number) {
-                if ($quantity !== 1 || (int) $inventoryItem->quantity !== 1 || ! $inventoryItem->serial_number) {
-                    return 'Serialized inventory must be issued as its exact individual asset with quantity 1.';
+            $errors = [];
+            $promised = [];
+            foreach ($ordered as $index => $attributes) {
+                $itemId = (int) ($attributes['item_id'] ?? 0);
+                $quantity = $attributes['quantity'] ?? null;
+                $item = $items->get($itemId);
+                if (! $item) {
+                    $errors[$index][] = 'The selected inventory record is no longer available.';
+                    continue;
                 }
-            } elseif ($quantity < 1 || $quantity > (int) $inventoryItem->quantity) {
-                return 'The requested quantity exceeds the selected inventory record.';
+                if (
+                    $item->status !== 'available'
+                    || (int) $item->quantity < 1
+                    || (int) $item->category_id !== (int) ($attributes['category_id'] ?? 0)
+                    || $item->unit !== ($attributes['unit'] ?? null)
+                ) {
+                    $errors[$index][] = 'The selected inventory record is no longer available or does not match its category and unit.';
+                    continue;
+                }
+                if (! is_numeric($quantity) || (int) $quantity != $quantity || (int) $quantity < 1) {
+                    $errors[$index][] = 'Quantity must be a whole number of at least 1.';
+                    continue;
+                }
+                $quantity = (int) $quantity;
+                if ($item->category?->requires_serial_number) {
+                    if ($quantity !== 1 || (int) $item->quantity !== 1 || ! $item->serial_number) {
+                        $errors[$index][] = 'Serialized inventory must be issued as its exact individual asset with quantity 1.';
+                        continue;
+                    }
+                } elseif ($quantity + ($promised[$itemId] ?? 0) > (int) $item->quantity) {
+                    $errors[$index][] = 'The requested quantity exceeds the selected inventory record.';
+                    continue;
+                }
+                $promised[$itemId] = ($promised[$itemId] ?? 0) + $quantity;
             }
 
-            $quantityBefore = (int) $inventoryItem->quantity;
-            $quantityAfter = $quantityBefore - $quantity;
-            $locationBefore = $inventoryItem->only(['building', 'room']);
-            $inventoryItem->quantity = $quantityAfter;
-            $inventoryItem->building = $attributes['building'] ?? $inventoryItem->building;
-            $inventoryItem->room = $attributes['room'] ?? $inventoryItem->room;
-            if ($quantityAfter === 0) {
-                $inventoryItem->status = 'assigned';
-                $inventoryItem->assigned_to_user_id = null;
+            if ($errors !== []) {
+                return ['errors' => $errors];
             }
-            $inventoryItem->save();
 
-            $transaction = Transaction::create([
-                'user_id' => null,
-                'from_user_id' => $actorId,
-                'item_id' => $inventoryItem->item_id,
-                'quantity' => $quantity,
-                'issued_quantity' => $quantity,
-                'from_building' => $locationBefore['building'],
-                'from_room' => $locationBefore['room'],
-                'building' => $inventoryItem->building,
-                'room' => $inventoryItem->room,
-                'transaction_date' => $attributes['transaction_date'],
-                'status' => 'assigned',
-                'manual_recipient_name' => $attributes['manual_recipient_name'],
-                'manual_department' => $attributes['manual_department'] ?? null,
-                'manual_recipient_type' => $attributes['manual_recipient_type'] ?? null,
-                'manual_contact' => $attributes['manual_contact'] ?? null,
-                'manual_notes' => $attributes['manual_notes'] ?? null,
-                'expected_return_date' => $attributes['expected_return_date'] ?? null,
-            ]);
+            $created = [];
+            foreach ($ordered as $attributes) {
+                $inventoryItem = $items->get((int) $attributes['item_id']);
+                $quantity = (int) $attributes['quantity'];
+                $quantityBefore = (int) $inventoryItem->quantity;
+                $quantityAfter = $quantityBefore - $quantity;
+                $locationBefore = $inventoryItem->only(['building', 'room']);
+                $inventoryItem->quantity = $quantityAfter;
+                $inventoryItem->building = $attributes['building'] ?? $inventoryItem->building;
+                $inventoryItem->room = $attributes['room'] ?? $inventoryItem->room;
+                if ($quantityAfter === 0) {
+                    $inventoryItem->status = 'assigned';
+                    $inventoryItem->assigned_to_user_id = null;
+                }
+                $inventoryItem->save();
 
-            $this->recordMovement(
-                $inventoryItem->item_id,
-                $actorId,
-                'assignment',
-                $quantity,
-                $quantityBefore,
-                $quantityAfter,
-                'transaction',
-                $transaction->id,
-                "Manual issue to {$transaction->manual_recipient_name}".($transaction->manual_department ? " ({$transaction->manual_department})" : '')."; transaction #{$transaction->id}",
-                $locationBefore,
-            );
+                $transaction = Transaction::create([
+                    'user_id' => null,
+                    'from_user_id' => $actorId,
+                    'item_id' => $inventoryItem->item_id,
+                    'quantity' => $quantity,
+                    'issued_quantity' => $quantity,
+                    'from_building' => $locationBefore['building'],
+                    'from_room' => $locationBefore['room'],
+                    'building' => $inventoryItem->building,
+                    'room' => $inventoryItem->room,
+                    'transaction_date' => $attributes['transaction_date'],
+                    'status' => 'assigned',
+                    'manual_recipient_name' => $attributes['manual_recipient_name'],
+                    'manual_department' => $attributes['manual_department'] ?? null,
+                    'manual_recipient_type' => $attributes['manual_recipient_type'] ?? null,
+                    'manual_contact' => $attributes['manual_contact'] ?? null,
+                    'manual_notes' => $attributes['manual_notes'] ?? null,
+                    'expected_return_date' => $attributes['expected_return_date'] ?? null,
+                ]);
 
-            return $transaction;
+                $this->recordMovement(
+                    $inventoryItem->item_id,
+                    $actorId,
+                    'assignment',
+                    $quantity,
+                    $quantityBefore,
+                    $quantityAfter,
+                    'transaction',
+                    $transaction->id,
+                    "Manual issue to {$transaction->manual_recipient_name}".($transaction->manual_department ? " ({$transaction->manual_department})" : '')."; transaction #{$transaction->id}",
+                    $locationBefore,
+                );
+
+                $created[] = $transaction;
+            }
+
+            return ['transactions' => $created];
         });
     }
 

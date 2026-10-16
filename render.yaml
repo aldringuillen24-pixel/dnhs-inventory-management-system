@@ -59,6 +59,22 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.1-flash-lite
+      - key: MAIL_MAILER
+        sync: false # e.g. smtp (set in dashboard; local stays log)
+      - key: MAIL_HOST
+        sync: false # e.g. smtp.gmail.com (production SMTP host)
+      - key: MAIL_PORT
+        sync: false # e.g. 587
+      - key: MAIL_USERNAME
+        sync: false # production SMTP username
+      - key: MAIL_PASSWORD
+        sync: false # production SMTP password (never commit)
+      - key: MAIL_ENCRYPTION
+        sync: false # e.g. tls
+      - key: MAIL_FROM_ADDRESS
+        sync: false # e.g. noreply@example.com
+      - key: MAIL_FROM_NAME
+        sync: false # e.g. DNHS Inventory
       - key: FORECAST_API_URL
         sync: false # Set to the dnhs-demand-forecast service URL.
       - key: FORECAST_API_TOKEN
