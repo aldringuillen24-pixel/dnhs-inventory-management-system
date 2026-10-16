@@ -1534,7 +1534,7 @@
       </QrScannerModal>
 
     <!-- Modals -->
-    <StockInModal :open="stockInOpen" :categories="categories" @close="stockInOpen = false" @saved="onStockInSaved" />
+    <StockInModal :open="stockInOpen" :categories="categories" @close="stockInOpen = false" @saved="onStockInSaved" @categories-updated="categories = $event" />
     <EditInventoryModal :open="editItemId !== null" :item-id="editItemId" :categories="categories" @close="editItemId = null" @saved="onEditSaved" />
 
     <Modal

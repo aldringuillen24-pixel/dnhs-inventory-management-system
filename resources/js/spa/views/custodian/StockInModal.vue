@@ -4,6 +4,7 @@
     title="Stock In New Items"
     subtitle="Prepare a receiving batch and review each inventory line before saving."
     max-width="max-w-[83rem]"
+    :close-on-escape="!managerOpen"
     @close="$emit('close')"
   >
     <div class="space-y-3">
@@ -147,17 +148,15 @@
                     <p v-if="row.fieldErrors.description" class="mt-1 text-[10px] text-rose-700 dark:text-rose-300">{{ row.fieldErrors.description }}</p>
                   </td>
                   <td class="min-w-40 px-3 py-2 align-top">
-                    <select
-                      v-model="row.category_id"
-                      aria-label="Category"
-                      class="w-40 rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-                      @change="setRowCategory(row)"
-                    >
-                      <option value="">Select category</option>
-                      <option v-for="category in categories" :key="category.category_id" :value="category.category_id">
-                        {{ category.category_name }}
-                      </option>
-                    </select>
+                    <CategoryCombobox
+                      :ref="(el) => setComboboxRef(row.id, el)"
+                      :model-value="row.category_id"
+                      :categories="categories"
+                      :invalid="Boolean(row.fieldErrors.category_id)"
+                      :aria-label="`Category for line ${index + 1}`"
+                      @update:model-value="onComboboxSelect(row, $event)"
+                      @manage="openManager(row.id)"
+                    />
                     <textarea
                       v-if="rowRequiresSerial(row)"
                       v-model="row.serial_numbers_text"
@@ -169,6 +168,14 @@
                     />
                     <p v-if="row.fieldErrors.category_id || row.fieldErrors.serial_numbers" class="mt-1 max-w-40 break-words text-[10px] text-rose-700 dark:text-rose-300">
                       {{ row.fieldErrors.category_id || row.fieldErrors.serial_numbers }}
+                      <button
+                        v-if="row.unknownCategoryName"
+                        type="button"
+                        class="mt-0.5 block font-bold text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
+                        @click="openManager(row.id)"
+                      >
+                        Manage categories
+                      </button>
                     </p>
                   </td>
                   <td class="whitespace-nowrap px-3 py-2 align-top font-mono text-[11px] text-gray-500 dark:text-gray-400">
@@ -239,21 +246,29 @@
         </button>
       </div>
     </div>
+
+    <CategoryManager
+      :open="managerOpen"
+      @close="onManagerClose"
+      @saved="onManagerSaved"
+    />
   </Modal>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import Papa from 'papaparse';
 import api from '../../lib/axios';
 import Modal from '../../components/ui/dialogs/Modal.vue';
+import CategoryCombobox from '../../components/ui/inputs/CategoryCombobox.vue';
+import CategoryManager from './CategoryManager.vue';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   categories: { type: Array, default: () => [] },
 });
 
-const emit = defineEmits(['close', 'saved']);
+const emit = defineEmits(['close', 'saved', 'categories-updated']);
 const stockInTabs = [
   { key: 'manual', label: 'Manual' },
   { key: 'csv', label: 'Through CSV' },
@@ -314,6 +329,7 @@ function createLine(values = {}) {
     errors: [],
     fieldErrors: {},
     serverErrors: [],
+    unknownCategoryName: '',
   };
   Object.assign(row, validateLine(row));
   return row;
@@ -369,6 +385,61 @@ function setRowCategory(row) {
     row.serial_numbers_text = '';
   }
   refreshLine(row);
+}
+
+const managerOpen = ref(false);
+const originRowId = ref(null);
+const comboboxRefs = new Map();
+
+function setComboboxRef(rowId, el) {
+  if (el) comboboxRefs.set(rowId, el);
+  else comboboxRefs.delete(rowId);
+}
+
+function onComboboxSelect(row, categoryId) {
+  row.category_id = categoryId;
+  setRowCategory(row);
+}
+
+function openManager(rowId) {
+  comboboxRefs.forEach((combobox) => combobox?.close?.());
+  originRowId.value = rowId;
+  managerOpen.value = true;
+}
+
+function onManagerClose() {
+  managerOpen.value = false;
+  comboboxRefs.get(originRowId.value)?.focusButton?.();
+  originRowId.value = null;
+}
+
+async function onManagerSaved({ categories, category }) {
+  emit('categories-updated', categories ?? []);
+  // Wait for the refreshed list to reach this modal's props so rematching
+  // and re-validation run against the new flags, not the stale ones.
+  await nextTick();
+  // New/renamed flags apply immediately: re-validate every typed row
+  // without discarding input. Rows waiting on a CSV category name rematch.
+  for (const row of lineItems.value) {
+    if (row.unknownCategoryName) {
+      const match = categoryForCsv(row.unknownCategoryName);
+      if (match) {
+        row.category_id = match.category_id;
+        row.unknownCategoryName = '';
+      }
+    }
+    refreshLine(row);
+  }
+  // Preselect the new/edited category in the row that opened the manager.
+  if (category?.category_id != null) {
+    const origin = lineItems.value.find((row) => row.id === originRowId.value);
+    if (origin) {
+      origin.category_id = category.category_id;
+      origin.unknownCategoryName = '';
+      setRowCategory(origin);
+    }
+  }
+  batchMessage.value = '';
 }
 
 function rowRequiresSerial(row) {
@@ -437,6 +508,7 @@ function csvLine(raw) {
   if (!category) {
     row.fieldErrors.category_id = `Unknown category '${String(raw.category_name ?? '').trim()}'. Choose an active category.`;
     row.errors = Object.values(row.fieldErrors);
+    row.unknownCategoryName = String(raw.category_name ?? '').trim();
   }
   return row;
 }

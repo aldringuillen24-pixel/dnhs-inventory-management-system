@@ -11,6 +11,11 @@ class Category extends Model
 
     protected $primaryKey = 'category_id';
 
+    public function getRouteKeyName(): string
+    {
+        return 'category_id';
+    }
+
     protected $fillable = [
         'category_name',
         'default_lifespan_years',

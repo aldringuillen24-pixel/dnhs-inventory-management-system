@@ -2766,6 +2766,89 @@ class PropertyCustodianController extends Controller
         ]);
     }
 
+    public function categories(Request $request)
+    {
+        $categories = Category::query()
+            ->withCount('inventoryItems as items_count')
+            ->orderBy('category_name')
+            ->get();
+
+        return response()->json(['categories' => $categories]);
+    }
+
+    public function storeCategory(Request $request)
+    {
+        $validated = $request->validate([
+            'category_name' => ['required', 'string', 'max:255', 'unique:categories,category_name'],
+            'default_lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'requires_serial_number' => ['sometimes', 'boolean'],
+            'requires_qr_code' => ['sometimes', 'boolean'],
+            'is_maintenance_eligible' => ['sometimes', 'boolean'],
+        ]);
+
+        $category = Category::create([
+            'category_name' => $validated['category_name'],
+            'default_lifespan_years' => $validated['default_lifespan_years'] ?? null,
+            'requires_serial_number' => $validated['requires_serial_number'] ?? false,
+            'requires_qr_code' => $validated['requires_qr_code'] ?? false,
+            'is_maintenance_eligible' => $validated['is_maintenance_eligible'] ?? false,
+        ]);
+
+        $category = Category::query()
+            ->withCount('inventoryItems as items_count')
+            ->findOrFail($category->category_id);
+
+        return response()->json([
+            'message' => "Category '{$category->category_name}' created.",
+            'category' => $category,
+        ], 201);
+    }
+
+    public function updateCategory(Request $request, Category $category)
+    {
+        $validated = $request->validate([
+            'category_name' => ['required', 'string', 'max:255', Rule::unique('categories', 'category_name')->ignore($category->category_id, 'category_id')],
+            'default_lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'requires_serial_number' => ['sometimes', 'boolean'],
+            'requires_qr_code' => ['sometimes', 'boolean'],
+            'is_maintenance_eligible' => ['sometimes', 'boolean'],
+        ]);
+
+        $category->update([
+            'category_name' => $validated['category_name'],
+            'default_lifespan_years' => $validated['default_lifespan_years'] ?? null,
+            'requires_serial_number' => $validated['requires_serial_number'] ?? false,
+            'requires_qr_code' => $validated['requires_qr_code'] ?? false,
+            'is_maintenance_eligible' => $validated['is_maintenance_eligible'] ?? false,
+        ]);
+
+        $category = Category::query()
+            ->withCount('inventoryItems as items_count')
+            ->findOrFail($category->category_id);
+
+        return response()->json([
+            'message' => "Category '{$category->category_name}' updated.",
+            'category' => $category,
+        ]);
+    }
+
+    public function destroyCategory(Request $request, Category $category)
+    {
+        $itemsCount = $category->inventoryItems()->count();
+
+        if ($itemsCount > 0) {
+            return response()->json([
+                'message' => "Cannot delete '{$category->category_name}': it is used by {$itemsCount} inventoried item(s).",
+                'items' => $itemsCount,
+            ], 409);
+        }
+
+        $name = $category->category_name;
+        $category->delete();
+
+        return response()->json(['message' => "Category '{$name}' deleted."]);
+    }
+
     public function editInventory(Request $request, Inventory $inventory)
     {
         $inventory->loadMissing('category');

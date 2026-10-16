@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="open || keepMounted" v-show="open" class="fixed inset-0 z-99999 flex items-center justify-center p-4">
+    <div v-if="open || keepMounted" v-show="open" class="fixed inset-0 flex items-center justify-center p-4" :class="zClass">
       <div class="absolute inset-0 bg-gray-900/50" @click="closeOnBackdrop && $emit('close')" />
       <div
         role="dialog"
@@ -60,12 +60,17 @@ const props = defineProps({
     // scroll; inner regions own their own scrolling.
     fixedBody: { type: Boolean, default: false },
     compact: { type: Boolean, default: false },
+    // Lets a stacked dialog underneath stay open on Escape while a dialog on
+    // top owns the keypress (e.g. Stock-In stays mounted behind the manager).
+    closeOnEscape: { type: Boolean, default: true },
+    // Stacking order for nested dialogs teleported to the same body target.
+    zClass: { type: String, default: 'z-99999' },
 });
 
 const emit = defineEmits(['close']);
 
 function onKeydown(event) {
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && props.closeOnEscape) {
         emit('close');
     }
 }
