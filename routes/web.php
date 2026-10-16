@@ -277,6 +277,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::delete('/categories/{category}', [PropertyCustodianController::class, 'destroyCategory'])->name('categories.destroy');
         Route::get('/inventory/qr/lookup', [PropertyCustodianController::class, 'qrLookup'])->name('inventory.qr.lookup');
         Route::post('/inventory/receive-return', [PropertyCustodianController::class, 'receiveReturn'])->name('inventory.receive-return');
+        Route::get('/inventory-logs', [PropertyCustodianController::class, 'inventoryLogs'])->name('inventory.logs');
         Route::get('/inventory/{inventory}', [PropertyCustodianController::class, 'editInventory'])->name('inventory.edit');
         Route::patch('/inventory/{inventory}', [PropertyCustodianController::class, 'updateInventory'])->name('inventory.update');
         Route::delete('/inventory/{inventory}', [PropertyCustodianController::class, 'destroyInventory'])->name('inventory.destroy');

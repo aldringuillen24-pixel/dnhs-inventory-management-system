@@ -7,6 +7,7 @@ use App\Models\AssignmentReturn;
 use App\Models\Category;
 use App\Models\InspectionRecord;
 use App\Models\Inventory;
+use App\Models\InventoryItemLog;
 use App\Models\MaintenanceRecord;
 use App\Models\StockMovement;
 use App\Models\Transaction;
@@ -1405,6 +1406,26 @@ class InventoryOperationService
                 'inventory_item_no' => sprintf('INV-%06d', $inventory->item_id),
                 'qr_code' => $qrCode,
             ]);
+            $inventory->refresh();
+
+            $this->recordItemLog([
+                'item_id' => $inventory->item_id,
+                'inventory_item_no' => $inventory->inventory_item_no,
+                'item_name' => $inventory->item_name,
+                'category_id' => $inventory->category_id,
+                'category_name' => $category?->category_name,
+                'status' => $inventory->status,
+                'action' => InventoryItemLog::ACTION_CREATED,
+                'changes' => [
+                    'quantity' => $quantity,
+                    'unit_cost' => $inventory->unit_cost,
+                    'unit' => $inventory->unit,
+                    'category' => $category?->category_name,
+                    'ics_no' => $inventory->ics_no,
+                ],
+                'reason' => null,
+                'user_id' => isset($attributes['user_id']) ? (int) $attributes['user_id'] : null,
+            ]);
 
             return $inventory;
         });
@@ -1418,8 +1439,9 @@ class InventoryOperationService
         array $groupItemIds,
         int $actorId,
         ?array $serialNumbers = null,
+        ?string $reason = null,
     ): ?string {
-        return DB::transaction(function () use ($itemId, $attributes, $quantity, $isSerialized, $groupItemIds, $actorId, $serialNumbers): ?string {
+        return DB::transaction(function () use ($itemId, $attributes, $quantity, $isSerialized, $groupItemIds, $actorId, $serialNumbers, $reason): ?string {
             $items = Inventory::query()
                 ->whereIn('item_id', $groupItemIds)
                 ->orderBy('item_id')
@@ -1440,11 +1462,13 @@ class InventoryOperationService
                         array_key_exists('room', $attributes)
                         && $attributes['room'] !== $item->room
                     );
+                    $before = $this->itemLogState($item);
                     $itemAttributes = $attributes;
                     if ($serialNumbers !== null && array_key_exists($index, $serialNumbers)) {
                         $itemAttributes['serial_number'] = $serialNumbers[$index];
                     }
                     $item->update($itemAttributes);
+                    $this->recordItemDiff($item->refresh(), $actorId, $before, $reason);
                     if ($locationChanged) {
                         $quantity = (int) $item->quantity;
                         $this->recordMovement(
@@ -1478,20 +1502,23 @@ class InventoryOperationService
                 array_key_exists('room', $attributes)
                 && $attributes['room'] !== $inventory->room
             );
+            $before = $this->itemLogState($inventory);
             $inventory->update([...$attributes, 'quantity' => $quantity]);
+            $inventory->refresh();
+            $this->recordItemDiff($inventory, $actorId, $before, $reason);
             $quantityDelta = $quantity - $quantityBefore;
 
             if ($quantityDelta !== 0 || $locationChanged) {
                 $this->recordMovement(
                     $inventory->item_id,
                     $actorId,
-                    $quantityDelta === 0 ? 'relocated' : ($quantityDelta > 0 ? 'stock_in' : 'stock_out'),
+                    $quantityDelta === 0 ? 'relocated' : 'correction',
                     abs($quantityDelta),
                     $quantityBefore,
                     $quantity,
                     'inventory',
                     $inventory->item_id,
-                    $quantityDelta === 0 ? 'Inventory location updated' : "Available quantity edited from {$quantityBefore} to {$quantity}",
+                    $quantityDelta === 0 ? 'Inventory location updated' : "Available quantity corrected from {$quantityBefore} to {$quantity}",
                     $locationBefore,
                 );
             }
@@ -1691,6 +1718,18 @@ class InventoryOperationService
 
             $quantity = (int) $inventory->quantity;
             $inventory->update(['status' => 'ready_to_dispose']);
+            $inventory->refresh();
+            $this->recordItemLog([
+                'item_id' => $inventory->item_id,
+                'inventory_item_no' => $inventory->inventory_item_no,
+                'item_name' => $inventory->item_name,
+                'category_id' => $inventory->category_id,
+                'status' => $inventory->status,
+                'action' => InventoryItemLog::ACTION_UPDATED,
+                'changes' => ['status' => ['old' => 'under_repair', 'new' => 'ready_to_dispose']],
+                'reason' => $notes,
+                'user_id' => $actorId,
+            ]);
             $this->recordMovement(
                 $inventory->item_id,
                 $actorId,
@@ -1735,6 +1774,18 @@ class InventoryOperationService
 
             $quantity = (int) $inventory->quantity;
             $inventory->update(['status' => 'disposed']);
+            $inventory->refresh();
+            $this->recordItemLog([
+                'item_id' => $inventory->item_id,
+                'inventory_item_no' => $inventory->inventory_item_no,
+                'item_name' => $inventory->item_name,
+                'category_id' => $inventory->category_id,
+                'status' => $inventory->status,
+                'action' => InventoryItemLog::ACTION_DISPOSED,
+                'changes' => $this->itemLogState($inventory),
+                'reason' => $notes,
+                'user_id' => $actorId,
+            ]);
             $this->recordMovement(
                 $inventory->item_id,
                 $actorId,
@@ -2018,6 +2069,68 @@ class InventoryOperationService
 
             return null;
         });
+    }
+
+    /**
+     * Fields tracked for item-log diffs and snapshots.
+     */
+    private const ITEM_LOG_FIELDS = [
+        'item_name',
+        'category_id',
+        'description',
+        'ics_no',
+        'unit',
+        'unit_cost',
+        'date_acquired',
+        'lifespan_years',
+        'building',
+        'room',
+        'serial_number',
+        'quantity',
+        'status',
+    ];
+
+    private function itemLogState(Inventory $item): array
+    {
+        $state = [];
+        foreach (self::ITEM_LOG_FIELDS as $field) {
+            $state[$field] = $item->getAttribute($field);
+        }
+
+        return $state;
+    }
+
+    private function recordItemDiff(Inventory $item, int $actorId, array $before, ?string $reason): void
+    {
+        $after = $this->itemLogState($item);
+        $diff = [];
+        foreach ($after as $field => $new) {
+            $old = $before[$field] ?? null;
+            if ($old != $new) {
+                $diff[$field] = ['old' => $old, 'new' => $new];
+            }
+        }
+
+        if ($diff === []) {
+            return;
+        }
+
+        $this->recordItemLog([
+            'item_id' => $item->item_id,
+            'inventory_item_no' => $item->inventory_item_no,
+            'item_name' => $item->item_name,
+            'category_id' => $item->category_id,
+            'status' => $item->status,
+            'action' => InventoryItemLog::ACTION_UPDATED,
+            'changes' => $diff,
+            'reason' => $reason,
+            'user_id' => $actorId,
+        ]);
+    }
+
+    private function recordItemLog(array $attributes): InventoryItemLog
+    {
+        return InventoryItemLog::create($attributes);
     }
 
     private function recordMovement(

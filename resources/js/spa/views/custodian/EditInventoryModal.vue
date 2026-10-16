@@ -156,6 +156,24 @@
           </div>
         </div>
 
+        <!-- Change Reason -->
+        <div class="shrink-0 rounded-md border border-gray-100 bg-gray-50/60 p-4 dark:border-white/5 dark:bg-white/[0.02]">
+          <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="edit-reason">
+            Reason for change <span class="text-rose-500">*</span>
+          </label>
+          <textarea
+            id="edit-reason"
+            v-model="form.reason"
+            rows="2"
+            required
+            maxlength="1000"
+            placeholder="e.g. Corrected quantity after recount"
+            class="block w-full resize-none rounded-md border border-gray-200 bg-white px-3.5 py-2 text-sm text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          />
+          <FieldError :errors="errors" field="reason" />
+          <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Recorded in the item log with this edit.</p>
+        </div>
+
         <div
           v-if="serialNumbers.length"
           class="shrink-0 rounded-md border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/40 dark:bg-amber-950/20"
@@ -246,6 +264,7 @@ const form = reactive({
   date_acquired: '',
   lifespan_years: null,
   ics_no: '',
+  reason: '',
 });
 
 function dateOnly(value) {
@@ -269,6 +288,7 @@ async function fetchItem() {
     form.date_acquired = dateOnly(item.date_acquired);
     form.lifespan_years = item.lifespan_years ?? null;
     form.ics_no = item.ics_no ?? '';
+    form.reason = '';
   } catch (requestError) {
     serialNumbers.value = [];
     toast.error('Error', requestError?.response?.data?.message ?? 'Could not load the item.');
@@ -293,6 +313,7 @@ async function submit() {
       date_acquired: form.date_acquired,
       ...(form.lifespan_years ? { lifespan_years: Number(form.lifespan_years) } : {}),
       ics_no: form.ics_no || null,
+      reason: form.reason,
       ...(serialNumbers.value.length
         ? { serial_numbers: serialNumbers.value.map((serialNumber) => serialNumber.trim()) }
         : {}),

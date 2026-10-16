@@ -61,7 +61,7 @@
 
     <template v-else>
       <!-- Main Inventory Panel -->
-      <div class="custodian-panel flex max-h-[calc(100vh-7rem)] min-h-[32rem] flex-col overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="custodian-panel relative flex max-h-[calc(100vh-7rem)] min-h-[32rem] flex-col overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <!-- Interactive Workspace Tabs -->
         <div class="relative shrink-0 border-b border-gray-200/80 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-gray-900/50 sm:hidden">
           <button
@@ -114,6 +114,21 @@
                 {{ format(tab.count) }}
               </span>
             </button>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium transition-colors"
+              :class="logsOpen
+                ? 'bg-emerald-50 text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300'
+                : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/5'"
+              :aria-expanded="logsOpen"
+              aria-controls="item-logs-drawer"
+              @click="workspaceMenuOpen = false; logsOpen = true"
+            >
+              <span>Item logs</span>
+              <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -138,6 +153,21 @@
             >
               {{ format(tab.count) }}
             </span>
+          </button>
+          <button
+            type="button"
+            class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition-all sm:px-3.5"
+            :class="logsOpen
+              ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+              : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
+            :aria-expanded="logsOpen"
+            aria-controls="item-logs-drawer"
+            @click="logsOpen = !logsOpen"
+          >
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Item logs</span>
           </button>
         </div>
 
@@ -230,17 +260,17 @@
           </div>
         </div>
 
-        <div v-if="loading" class="min-h-0 shrink space-y-2.5 overflow-y-auto p-3 xl:hidden" aria-hidden="true">
+        <div v-if="loading" class="min-h-0 min-w-0 flex-1 shrink space-y-2.5 overflow-y-auto p-3 xl:hidden" aria-hidden="true">
           <div v-for="row in 4" :key="row" class="space-y-2.5 rounded-md border border-gray-200 p-3 dark:border-gray-800">
             <div class="h-3.5 w-2/3 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
             <div class="h-3 w-1/2 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
             <div class="h-10 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
           </div>
         </div>
-        <InventoryTableSkeleton v-if="loading" class="hidden xl:block" />
+        <InventoryTableSkeleton v-if="loading" class="hidden min-w-0 flex-1 xl:block" />
 
         <!-- Compact item cards for phones and tablets -->
-        <div v-else class="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5 xl:hidden min-[480px]:space-y-2 min-[480px]:p-3">
+        <div v-else class="min-h-0 min-w-0 flex-1 space-y-1.5 overflow-y-auto p-2.5 xl:hidden min-[480px]:space-y-2 min-[480px]:p-3">
           <article
             v-for="row in filteredRows"
             :key="groupKey(row)"
@@ -294,7 +324,7 @@
         </div>
 
         <!-- Table -->
-        <div v-if="!loading" class="hidden min-h-0 flex-1 overflow-auto custom-scrollbar xl:block" role="region" aria-label="Inventory table, scroll horizontally to view all columns" tabindex="0">
+        <div v-if="!loading" class="hidden min-h-0 min-w-0 flex-1 overflow-auto custom-scrollbar xl:block" role="region" aria-label="Inventory table, scroll horizontally to view all columns" tabindex="0">
           <p class="sticky left-0 z-10 border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400 sm:hidden">
             Scroll horizontally to view all columns
           </p>
@@ -627,6 +657,15 @@
             </tbody>
           </table>
         </div>
+        <InventoryItemLogDrawer
+          :open="logsOpen"
+          :workspace="workspace"
+          :search="search"
+          :category-id="categoryFilter"
+          :categories="categories"
+          :workspace-label="activeWorkspaceTab.label"
+          @close="logsOpen = false"
+        />
 
         <!-- Pagination & Footer -->
         <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-gray-200/80 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-900/50">
@@ -1634,6 +1673,7 @@ import ConfirmDialog from '../../components/ui/dialogs/ConfirmDialog.vue';
 import Modal from '../../components/ui/dialogs/Modal.vue';
 import QrScannerModal from '../../components/ui/qr/QrScannerModal.vue';
 import StockInModal from './StockInModal.vue';
+import InventoryItemLogDrawer from './InventoryItemLogDrawer.vue';
 import EditInventoryModal from './EditInventoryModal.vue';
 
 const STATUSES = ['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
@@ -1689,6 +1729,7 @@ function applyInventoryPayload(data) {
 }
 const deleting = ref(false);
 const stockInOpen = ref(false);
+const logsOpen = ref(false);
 const qrScannerOpen = ref(false);
 const qrLookupLoading = ref(false);
 const qrError = ref('');

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AssignmentRequest;
 use App\Models\Category;
+use App\Models\InventoryItemLog;
 use App\Models\User;
 use App\Services\AuditLedgerService;
 use App\Models\Transaction;
@@ -2890,6 +2891,7 @@ class PropertyCustodianController extends Controller
             'quantity' => ['required', 'integer', 'min:1'],
             'building' => ['nullable', 'string', 'max:255'],
             'room' => ['nullable', 'string', 'max:255'],
+            'reason' => ['required', 'string', 'max:1000'],
         ]);
 
         $inventory->loadMissing('category');
@@ -2963,6 +2965,7 @@ class PropertyCustodianController extends Controller
             $groupItems->pluck('item_id')->all(),
             (int) $request->user()->id,
             $serialNumbers,
+            $validated['reason'],
         );
 
         if ($error !== null) {
@@ -2974,6 +2977,9 @@ class PropertyCustodianController extends Controller
 
     public function destroyInventory(Request $request, Inventory $inventory)
     {
+        $request->validate(['reason' => ['nullable', 'string', 'max:1000']]);
+        $reason = $request->input('reason');
+        $actorId = (int) $request->user()->id;
         $selectedIds = $request->input('selected_item_ids');
 
         if (is_array($selectedIds) && !empty($selectedIds)) {
@@ -2995,7 +3001,13 @@ class PropertyCustodianController extends Controller
             }
 
             $count = $items->count();
-            Inventory::whereIn('item_id', $selectedIds)->delete();
+            $snapshots = $items->map(fn (Inventory $item) => $this->deletedItemLogAttributes($item, $actorId, $reason))->all();
+            DB::transaction(function () use ($selectedIds, $snapshots): void {
+                Inventory::whereIn('item_id', $selectedIds)->delete();
+                foreach ($snapshots as $snapshot) {
+                    InventoryItemLog::create($snapshot);
+                }
+            });
 
             $message = $count === 1
                 ? 'Selected inventory item deleted successfully.'
@@ -3019,13 +3031,78 @@ class PropertyCustodianController extends Controller
             return redirect()->route('propertyCustodian.inventory')->with('error', 'Only available inventory can be deleted.');
         }
 
-        $inventory->delete();
+        $snapshot = $this->deletedItemLogAttributes($inventory, $actorId, $reason);
+        DB::transaction(function () use ($inventory, $snapshot): void {
+            $inventory->delete();
+            InventoryItemLog::create($snapshot);
+        });
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Inventory item deleted successfully.');
     }
 
-    private function inventoryHasLinkedHistory(array $itemIds): bool
+    private function deletedItemLogAttributes(Inventory $item, int $actorId, ?string $reason): array
     {
+        return [
+            'item_id' => $item->item_id,
+            'inventory_item_no' => $item->inventory_item_no,
+            'item_name' => $item->item_name,
+            'category_id' => $item->category_id,
+            'status' => $item->status,
+            'action' => InventoryItemLog::ACTION_DELETED,
+            'changes' => [
+                'item_name' => $item->item_name,
+                'quantity' => (int) $item->quantity,
+                'unit_cost' => $item->unit_cost,
+                'unit' => $item->unit,
+                'category_id' => $item->category_id,
+                'ics_no' => $item->ics_no,
+                'status' => $item->status,
+            ],
+            'reason' => $reason,
+            'user_id' => $actorId,
+        ];
+    }
+
+    public function inventoryLogs(Request $request)
+    {
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:255'],
+            'category_id' => ['nullable', 'integer', 'exists:categories,category_id'],
+            'workspace' => ['nullable', 'string', 'max:32'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $query = InventoryItemLog::query()->with('user:id,first_name,last_name');
+
+        if (! empty($validated['search'])) {
+            $search = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $validated['search']).'%';
+            $query->where(function ($inner) use ($search): void {
+                $inner->where('item_name', 'like', $search)
+                    ->orWhere('inventory_item_no', 'like', $search);
+            });
+        }
+
+        if (! empty($validated['category_id'])) {
+            $query->where('category_id', (int) $validated['category_id']);
+        }
+
+        $workspace = $validated['workspace'] ?? 'all';
+        if ($workspace !== 'all') {
+            $query->where('status', $workspace);
+        }
+
+        $perPage = 20;
+        $page = max(1, (int) ($validated['page'] ?? 1));
+        $total = (clone $query)->count();
+        $logs = $query->orderByDesc('id')->forPage($page, $perPage)->get();
+
+        return response()->json([
+            'logs' => $logs,
+            'has_more' => $total > $page * $perPage,
+        ]);
+    }
+
+    private function inventoryHasLinkedHistory(array $itemIds): bool    {
         if ($itemIds === []) {
             return false;
         }
