@@ -36,6 +36,17 @@
           </svg>
           Stock In
         </button>
+
+        <button
+          type="button"
+          class="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50 dark:border-blue-500/30 dark:bg-gray-800 dark:text-blue-300 dark:hover:bg-blue-500/10 sm:w-auto"
+          @click="openQrPrintModal"
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H5a2 2 0 00-2 2v4h2a2 2 0 002 2zm0 0v2a2 2 0 002 2h6a2 2 0 002-2v-2" />
+          </svg>
+          Print QR Codes
+        </button>
       </div>
     </div>
 
@@ -1585,6 +1596,166 @@
         </section>
       </QrScannerModal>
 
+    <!-- Print QR Codes modal: lists QR-coded items across the current workspace -->
+    <Modal
+      :open="qrPrintOpen"
+      title="Print QR Codes"
+      subtitle="Select item records that have a QR code, then print stickers."
+      max-width="max-w-3xl"
+      fixed-body
+      @close="closeQrPrintModal"
+    >
+      <div class="flex min-h-0 flex-col space-y-2">
+        <!-- Search (always visible) -->
+        <div class="relative w-full shrink-0">
+          <svg
+            class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          </svg>
+          <input
+            v-model="qrPrintSearch"
+            type="search"
+            placeholder="Search item no., name, category, serial…"
+            aria-label="Search QR-coded items"
+            :disabled="qrPrintLoading"
+            class="w-full rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 pl-7 pr-7 text-[12px] text-gray-800 transition-colors focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-100"
+          />
+        </div>
+
+        <!-- Loading skeleton -->
+        <div v-if="qrPrintLoading" class="min-h-[12rem] max-h-[60vh] shrink overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700" aria-hidden="true">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="border-b bg-gray-50/50 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                <th class="w-10 px-3 py-2.5">
+                  <div class="h-4 w-4 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
+                </th>
+                <th class="px-3 py-2.5"><div class="h-3 w-12 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></th>
+                <th class="px-3 py-2.5"><div class="h-3 w-16 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></th>
+                <th class="px-3 py-2.5"><div class="h-3 w-12 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></th>
+                <th class="px-3 py-2.5"><div class="h-3 w-12 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></th>
+                <th class="px-3 py-2.5"><div class="h-4 w-12 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></th>
+                <th class="px-3 py-2.5 text-right"><div class="h-3 w-8 animate-pulse rounded-md bg-gray-100 dark:bg-white/5 ml-auto" /></th>
+                <th class="px-3 py-2.5 text-center" />
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100 dark:divide-white/5">
+              <tr v-for="row in 4" :key="row">
+                <td class="px-3 py-2.5"><div class="h-4 w-4 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></td>
+                <td class="px-3 py-2.5"><div class="h-3 w-16 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></td>
+                <td class="px-3 py-2.5"><div class="h-3 w-24 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></td>
+                <td class="px-3 py-2.5"><div class="h-3 w-20 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></td>
+                <td class="px-3 py-2.5"><div class="h-3 w-12 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></td>
+                <td class="px-3 py-2.5"><div class="h-4 w-12 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" /></td>
+                <td class="px-3 py-2.5 text-right"><div class="h-3 w-8 animate-pulse rounded-md bg-gray-100 dark:bg-white/5 ml-auto" /></td>
+                <td class="px-3 py-2.5" />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Error state -->
+        <div v-else-if="qrPrintError" class="p-4 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-400">
+          {{ qrPrintError }}
+          <button
+            type="button"
+            class="mt-2 text-xs font-semibold underline hover:text-rose-900 dark:hover:text-rose-200"
+            @click="loadQrPrintItems"
+          >
+            Try again
+          </button>
+        </div>
+
+        <!-- Real table + footer -->
+        <template v-else>
+          <div class="min-h-[12rem] max-h-[60vh] shrink divide-y divide-gray-100 overflow-y-auto rounded-md border border-gray-200 dark:divide-white/5 dark:border-gray-700 dark:bg-gray-900/5">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="border-b bg-gray-50/50 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                  <th class="w-10 px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      :checked="allQrPrintChecked"
+                      :aria-label="filteredQrPrintItems.length ? 'Select all' : 'Select all (none available)'"
+                      :disabled="!filteredQrPrintItems.length"
+                      class="h-4 w-4 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
+                      @change="toggleAllQrPrint($event.target.checked)"
+                    />
+                  </th>
+                  <th class="px-3 py-2.5 font-mono">Item No.</th>
+                  <th class="px-3 py-2.5">Item Name</th>
+                  <th class="px-3 py-2.5">Category</th>
+                  <th class="px-3 py-2.5">Serial</th>
+                  <th class="px-3 py-2.5 text-center">Status</th>
+                  <th class="px-3 py-2.5 text-right">Qty</th>
+                  <th class="px-3 py-2.5 text-center" />
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 dark:divide-white/5">
+                <tr
+                  v-for="item in filteredQrPrintItems"
+                  :key="item.item_id"
+                  class="hover:bg-gray-50/40 dark:hover:bg-white/5"
+                >
+                  <td class="px-3 py-2.5">
+                    <input
+                      v-model="qrPrintSelected"
+                      :value="item.item_id"
+                      type="checkbox"
+                      :aria-label="`Select ${item.inventory_item_no || item.item_name}`"
+                      class="h-4 w-4 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800"
+                    />
+                  </td>
+                  <td class="px-3 py-2.5 font-mono text-gray-900 dark:text-white truncate max-w-[8rem]" :title="item.inventory_item_no || `#${item.item_id}`">
+                    {{ item.inventory_item_no || `#${item.item_id}` }}
+                  </td>
+                  <td class="px-3 py-2.5 text-gray-900 dark:text-white truncate">{{ item.item_name }}</td>
+                  <td class="px-3 py-2.5 text-gray-600 dark:text-gray-400 truncate">{{ item.category.category_name }}</td>
+                  <td class="px-3 py-2.5 font-mono text-gray-600 dark:text-gray-400">{{ item.serial_number || '—' }}</td>
+                  <td class="px-3 py-2.5 text-center capitalize">{{ item.status?.replace(/_/g, ' ') ?? '—' }}</td>
+                  <td class="px-3 py-2.5 text-right text-gray-900 dark:text-white">{{ format(item.quantity) }} {{ item.unit }}</td>
+                  <td class="px-3 py-2.5 text-center" />
+                </tr>
+                <tr v-if="!filteredQrPrintItems.length">
+                  <td :colspan="8" class="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                    <p class="font-semibold text-gray-800 dark:text-white">No QR-coded items found</p>
+                    <p class="mt-1 text-xs text-gray-400">{{ qrPrintSearch ? 'Try adjusting your search.' : 'Stock QR-eligible items first.' }}</p>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="shrink-0 flex items-center justify-between gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+            <span class="text-xs text-gray-500 dark:text-gray-400">
+              {{ qrPrintSelected.length }} of {{ filteredQrPrintItems.length }} selected
+            </span>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded-md border border-blue-200 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/30 dark:hover:bg-blue-700/80"
+                :disabled="qrPrintSelected.length === 0 || printingQr || qrPrintLoading"
+                @click="printQrAll"
+              >
+                {{ printingQr ? 'Printing…' : 'Print all' }}
+              </button>
+              <button
+                type="button"
+                class="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+                @click="closeQrPrintModal"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </Modal>
+
     <!-- Modals -->
     <StockInModal :open="stockInOpen" :categories="categories" @close="stockInOpen = false" @saved="onStockInSaved" @categories-updated="categories = $event" />
     <EditInventoryModal :open="editItemId !== null" :item-id="editItemId" :categories="categories" @close="editItemId = null" @saved="onEditSaved" />
@@ -1757,6 +1928,13 @@ const confirmBulk = ref(false);
 const selection = ref([]);
 const recordGroup = ref(null);
 const selectedPrintItemIds = ref([]);
+// "Print QR Codes" header modal state: lists QR-coded items across the current workspace.
+const qrPrintOpen = ref(false);
+const qrPrintItems = ref([]);
+const qrPrintSelected = ref([]);
+const qrPrintSearch = ref('');
+const qrPrintLoading = ref(false);
+const qrPrintError = ref('');
 const repairDecisionId = ref(null);
 const reportDecisionId = ref(null);
 const maintenanceGroup = ref(null);
@@ -1854,6 +2032,18 @@ const filteredRows = computed(() => {
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
   });
+});
+
+const filteredQrPrintItems = computed(() => {
+  const query = qrPrintSearch.value.toLowerCase().trim();
+  if (!query) {
+    return qrPrintItems.value;
+  }
+  return qrPrintItems.value.filter((item) =>
+    [item.inventory_item_no, item.item_name, item.category?.category_name, item.serial_number]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(query)),
+  );
 });
 
 const exportPdfHref = computed(() => {
@@ -1986,6 +2176,14 @@ function toggleAllPrint(checked) {
   selectedPrintItemIds.value = checked ? qrSources.value.map((source) => source.item_id) : [];
 }
 
+const allQrPrintChecked = computed(() =>
+  filteredQrPrintItems.value.length > 0 && qrPrintSelected.value.length === filteredQrPrintItems.value.length,
+);
+
+function toggleAllQrPrint(checked) {
+  qrPrintSelected.value = checked ? filteredQrPrintItems.value.map((item) => item.item_id) : [];
+}
+
 const printingQr = ref(false);
 
 function escapeStickerHtml(value) {
@@ -2070,6 +2268,78 @@ async function printStickers(itemsToPrint) {
 
 function openPrintSelected() {
   const selected = qrSources.value.filter((source) => selectedPrintItemIds.value.includes(source.item_id));
+  void printStickers(selected);
+}
+
+async function openQrPrintModal() {
+  qrPrintSearch.value = '';
+  qrPrintSelected.value = [];
+  qrPrintError.value = '';
+  qrPrintOpen.value = true;
+  await loadQrPrintItems();
+}
+
+function closeQrPrintModal() {
+  if (printingQr.value) return;
+  qrPrintOpen.value = false;
+  qrPrintItems.value = [];
+  qrPrintSelected.value = [];
+  qrPrintSearch.value = '';
+  qrPrintError.value = '';
+}
+
+async function loadQrPrintItems() {
+  qrPrintLoading.value = true;
+  qrPrintError.value = '';
+  try {
+    const ws = workspace.value;
+    const pageName = ws === 'all' ? 'all_page' : `${ws}_page`;
+    const collected = [];
+    let page = 1;
+    let lastPage = 1;
+    do {
+      const { data } = await api.get('/custodian/inventory', {
+        params: { workspace: ws, [pageName]: page },
+      });
+      const pageData = ws === 'all' ? data.allInventoryPage : (data.inventoryPages ?? {})[ws];
+      const groups = pageData?.data ?? [];
+      for (const group of groups) {
+        for (const source of group.sourceItems ?? []) {
+          if (!source.qr_code) continue;
+          collected.push({
+            item_id: source.item_id,
+            inventory_item_no: source.inventory_item_no,
+            item_name: source.item_name,
+            category: { category_name: source.category?.category_name ?? 'Uncategorized' },
+            serial_number: source.serial_number,
+            quantity: sourceQuantity(source),
+            unit: source.unit,
+            status: source.status,
+            qr_code: source.qr_code,
+          });
+        }
+      }
+      lastPage = Number(pageData?.last_page ?? 1);
+      page++;
+    } while (page <= lastPage);
+
+    // De-duplicate by item_id in case a group appears under multiple paginators.
+    const seen = new Set();
+    qrPrintItems.value = collected.filter((item) => {
+      if (seen.has(item.item_id)) return false;
+      seen.add(item.item_id);
+      return true;
+    });
+  } catch (requestError) {
+    qrPrintError.value = requestError?.response?.data?.message ?? 'Could not load QR-coded items.';
+    useToastStore().error('Could not load QR-coded items', qrPrintError.value);
+  } finally {
+    qrPrintLoading.value = false;
+  }
+}
+
+function printQrAll() {
+  const selected = qrPrintItems.value.filter((item) => qrPrintSelected.value.includes(item.item_id));
   void printStickers(selected);
 }
 
