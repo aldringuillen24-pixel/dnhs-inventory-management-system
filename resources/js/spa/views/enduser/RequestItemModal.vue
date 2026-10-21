@@ -12,7 +12,7 @@
     fixed-body
     @close="$emit('close')"
   >
-    <form class="compact-modal-body" @submit.prevent="submit">
+    <form id="request-item-form" class="compact-modal-body flex-1" @submit.prevent="submit">
       <!-- STEP 1: CATEGORY -->
       <div v-if="step === 'category'" class="min-h-0 flex-1 overflow-y-auto">
         <div v-if="!categories.length" class="py-6 text-center text-xs text-gray-500 dark:text-gray-400">
@@ -140,7 +140,9 @@
         </div>
       </template>
 
-      <div class="flex shrink-0 items-center justify-between gap-2 pt-3">
+    </form>
+    <template #footer>
+      <div class="flex items-center justify-between gap-2">
         <button
           v-if="step === 'item'"
           type="button"
@@ -161,13 +163,14 @@
         <button
           v-if="step === 'item'"
           type="submit"
+          form="request-item-form"
           class="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
           :disabled="busy"
         >
           {{ busy ? 'Submitting…' : submitLabel }}
         </button>
       </div>
-    </form>
+    </template>
   </Modal>
 </template>
 

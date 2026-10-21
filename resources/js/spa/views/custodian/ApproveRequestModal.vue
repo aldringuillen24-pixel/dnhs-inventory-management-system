@@ -119,42 +119,24 @@
           </p>
         </div>
 
-        <!-- Action Buttons -->
-        <div class="mt-5 flex justify-end gap-2.5 pt-3 border-t border-gray-100 dark:border-white/5">
-          <button
-            type="button"
-            class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
-            @click="closeModal"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="min-w-28 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
-            :disabled="busy || approvalComplete || !canApprove"
-            @click="showSlip = true"
-          >
-            PDF Slip
-          </button>
-          <button
-            type="button"
-            class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-md transition-all hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
-            :disabled="busy || approvalComplete || !canApprove"
-            @click="approve"
-          >
-            <svg v-if="busy" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            <svg v-else class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-            {{ busy ? 'Preparing…' : isItemType ? 'Allocate & Approve' : 'Confirm & Approve' }}
-          </button>
-        </div>
       </div>
     </div>
-
+    <template #footer>
+      <div class="flex justify-end gap-2.5">
+        <button type="button" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" @click="closeModal">Cancel</button>
+        <button type="button" class="min-w-28 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300" :disabled="busy || approvalComplete || !canApprove" @click="showSlip = true">PDF Slip</button>
+        <button type="button" class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-md transition-all hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50" :disabled="busy || approvalComplete || !canApprove" @click="approve">
+          <svg v-if="busy" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <svg v-else class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          {{ busy ? 'Preparing…' : isItemType ? 'Allocate & Approve' : 'Confirm & Approve' }}
+        </button>
+      </div>
+    </template>
   </Modal>
 
   <SlipDocument

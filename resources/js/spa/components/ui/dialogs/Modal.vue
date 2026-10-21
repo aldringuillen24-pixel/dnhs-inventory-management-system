@@ -5,12 +5,10 @@
       <div
         role="dialog"
         aria-modal="true"
-        class="relative max-h-[90vh] w-full rounded-md border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900"
+        class="relative flex max-h-[90vh] min-h-0 w-full flex-col overflow-hidden rounded-md border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900"
         :class="[
           maxWidth,
           compact ? 'p-3 min-[480px]:p-6' : 'p-6',
-          fixedBody ? 'flex flex-col' : '',
-          scrollable || fixedBody ? 'overflow-y-auto' : 'overflow-visible',
         ]"
       >
         <div class="mb-4 flex shrink-0 items-start justify-between gap-4" :class="compact ? 'mb-2 gap-3 min-[480px]:mb-4 min-[480px]:gap-4' : ''">
@@ -31,12 +29,16 @@
         </div>
         <!-- fixedBody: the panel itself stays put and the body is capped to the remaining
              height, so nested scroll regions (e.g. a list card) scroll instead of the dialog. -->
-        <template v-if="fixedBody">
-          <div class="flex min-h-0 flex-col overflow-hidden">
-            <slot />
-          </div>
-        </template>
-        <slot v-else />
+        <div v-if="fixedBody" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <slot />
+        </div>
+        <div v-else class="min-h-0 flex-1" :class="scrollable ? 'overflow-y-auto' : 'overflow-visible'">
+          <slot />
+        </div>
+        <footer v-if="$slots.footer" class="shrink-0 border-t border-gray-100 pt-3 dark:border-gray-800">
+          <slot name="footer" />
+        </footer>
+        <slot name="overlay" />
       </div>
     </div>
   </Teleport>

@@ -1,6 +1,6 @@
 <template>
   <Modal :open="open" title="Transfer Item" subtitle="Send units to another end user." max-width="max-w-md" @close="$emit('close')">
-    <form v-if="row" class="flex flex-col gap-2.5" @submit.prevent="submit">
+    <form v-if="row" id="transfer-modal-form" class="flex flex-col gap-2.5" @submit.prevent="submit">
       <p class="rounded-md bg-gray-50 p-2.5 text-xs dark:bg-white/5">
         <span class="font-medium">{{ row.item_name }}</span>
         <span class="text-gray-500"> · up to {{ row.quantity }} units</span>
@@ -49,7 +49,9 @@
         />
         <FieldError :errors="errors" field="notes" />
       </div>
-      <div class="flex justify-end gap-2 pt-1.5">
+    </form>
+    <template #footer>
+      <div class="flex justify-end gap-2">
         <button
           type="button"
           class="inline-flex items-center justify-center whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
@@ -59,13 +61,14 @@
         </button>
         <button
           type="submit"
+          form="transfer-modal-form"
           class="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
           :disabled="busy"
         >
           {{ busy ? 'Sending…' : 'Send Transfer' }}
         </button>
       </div>
-    </form>
+    </template>
   </Modal>
 </template>
 

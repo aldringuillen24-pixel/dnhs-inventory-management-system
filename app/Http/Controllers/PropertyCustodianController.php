@@ -1523,6 +1523,153 @@ class PropertyCustodianController extends Controller
         return $pdf->download("dnhs_inventory_{$workspace}_" . now()->format('Y-m-d_His') . '.pdf');
     }
 
+    public function generateIirupPdf(Request $request)
+    {
+        $validated = $request->validate([
+            'report_date' => ['nullable', 'date'],
+            'entity_name' => ['nullable', 'string', 'max:255'],
+            'fund_cluster' => ['nullable', 'string', 'max:255'],
+            'accountable_officer_name' => ['nullable', 'string', 'max:255'],
+            'accountable_officer_designation' => ['nullable', 'string', 'max:255'],
+            'accountable_officer_station' => ['nullable', 'string', 'max:255'],
+            'approving_official_name' => ['required', 'string', 'max:255'],
+            'approving_official_designation' => ['nullable', 'string', 'max:255'],
+            'inspection_officer_name' => ['required', 'string', 'max:255'],
+            'inspection_designation' => ['nullable', 'string', 'max:255'],
+            'witness_name' => ['required', 'string', 'max:255'],
+            'selected_ids' => ['required', 'array', 'min:1'],
+            'selected_ids.*' => ['integer', 'exists:inventory,item_id'],
+            'overrides' => ['nullable', 'array'],
+            'overrides.*' => ['nullable', 'array'],
+            'overrides.*.date_acquired' => ['nullable', 'date'],
+            'overrides.*.item_name' => ['nullable', 'string', 'max:255'],
+            'overrides.*.inventory_item_no' => ['nullable', 'string', 'max:255'],
+            'overrides.*.quantity' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.total_cost' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.accumulated_depreciation' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.accumulated_impairment' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.carrying_amount' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.remarks' => ['nullable', 'string', 'max:2000'],
+            'overrides.*.appraised_value' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.disposal_sale' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.disposal_transfer' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.disposal_destruction' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.disposal_others' => ['nullable', 'string', 'max:255'],
+            'overrides.*.disposal_total' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.or_no' => ['nullable', 'string', 'max:255'],
+            'overrides.*.sales_amount' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        $ids = $validated['selected_ids'] ?? [];
+        $items = empty($ids)
+            ? collect()
+            : Inventory::query()->with('category')->whereIn('item_id', $ids)->get();
+
+        $itemData = $items->map(function (Inventory $item): array {
+            $quantity = (int) ($item->quantity ?? 0);
+            $unitCost = (float) ($item->unit_cost ?? 0);
+            $totalCost = $quantity * $unitCost;
+
+            return [
+                'item_id' => $item->item_id,
+                'date_acquired' => $item->date_acquired ? $item->date_acquired->format('Y-m-d') : '',
+                'item_name' => $item->item_name ?? '',
+                'inventory_item_no' => $item->inventory_item_no ?? '',
+                'category_id' => $item->category_id ?? $item->category?->category_id,
+                'category_name' => $item->category?->category_name ?? 'Uncategorized',
+                'quantity' => $quantity,
+                'unit_cost' => $unitCost,
+                'total_cost' => $totalCost,
+                'accumulated_depreciation' => 0,
+                'accumulated_impairment' => 0,
+                'carrying_amount' => $totalCost,
+                'remarks' => $item->description ?? $item->status ?? '',
+                'appraised_value' => 0,
+                'disposal_sale' => 0,
+                'disposal_transfer' => 0,
+                'disposal_destruction' => 0,
+                'disposal_others' => '',
+                'disposal_total' => 0,
+                'or_no' => '',
+                'sales_amount' => 0,
+            ];
+        })->values()->all();
+
+        // Merge frontend overrides keyed by item_id into computed item data
+        $overrides = $validated['overrides'] ?? [];
+        $allowedOverrideKeys = [
+            'date_acquired', 'item_name', 'inventory_item_no',
+            'quantity', 'unit_cost', 'total_cost',
+            'accumulated_depreciation', 'accumulated_impairment', 'carrying_amount',
+            'remarks', 'appraised_value',
+            'disposal_sale', 'disposal_transfer', 'disposal_destruction', 'disposal_others',
+            'disposal_total', 'or_no', 'sales_amount',
+        ];
+
+        foreach ($itemData as &$row) {
+            $itemId = $row['item_id'];
+            if (isset($overrides[$itemId]) && is_array($overrides[$itemId])) {
+                foreach ($allowedOverrideKeys as $key) {
+                    if (array_key_exists($key, $overrides[$itemId])) {
+                        $row[$key] = $overrides[$itemId][$key];
+                    }
+                }
+            }
+        }
+        unset($row);
+
+        $groups = collect($itemData)
+            ->groupBy(fn (array $row) => (string) ($row['category_id'] ?? '0'))
+            ->map(fn ($g) => [
+                'category_id'   => $g->first()['category_id'],
+                'category_name' => $g->first()['category_name'],
+                'items'         => $g->values()->all(),
+            ])
+            ->sortBy('category_name')
+            ->values()
+            ->all();
+
+        $totals = [
+            'total_cost' => array_sum(array_column($itemData, 'total_cost')),
+            'accumulated_depreciation' => array_sum(array_column($itemData, 'accumulated_depreciation')),
+            'carrying_amount' => array_sum(array_column($itemData, 'carrying_amount')),
+            'appraised_value' => array_sum(array_column($itemData, 'appraised_value')),
+        ];
+
+        $user = $request->user();
+        $accountableOfficerName = $validated['accountable_officer_name']
+            ?? trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''))
+            ?: ($user->username ?? '');
+        $accountableOfficerDesignation = $validated['accountable_officer_designation'] ?? 'SCHOOL PROPERTY CUSTODIAN';
+        $station = $validated['accountable_officer_station']
+            ?? trim(($user->building ?? '') . (($user->room ?? '') ? ', Room ' . $user->room : ''));
+
+        $pdf = Pdf::loadView('pdfs.disposal-inspection-report', [
+            'items' => $itemData,
+            'groups' => $groups,
+            'totals' => $totals,
+            'entity_name' => $validated['entity_name'] ?? 'Dian-ay National High School',
+            'fund_cluster' => $validated['fund_cluster'] ?? '',
+            'as_at_date' => $validated['report_date'] ?? now()->format('F j, Y'),
+            'accountable_officer' => [
+                'name' => $accountableOfficerName,
+                'designation' => $accountableOfficerDesignation,
+                'station' => $station ?: 'Dian-ay National High School',
+            ],
+            'requested_by_name' => $accountableOfficerName,
+            'requested_by_designation' => $accountableOfficerDesignation,
+            'approved_by_name' => $validated['approving_official_name'] ?? '',
+            'approved_by_designation' => $validated['approving_official_designation'] ?? 'PRINCIPAL I',
+            'inspection_officer_name' => $validated['inspection_officer_name'] ?? '',
+            'inspection_designation' => $validated['inspection_designation'] ?? '',
+            'witness_name' => $validated['witness_name'] ?? '',
+        ]);
+        $pdf->setPaper('letter', 'landscape');
+
+        return $pdf->download('IIRUP_' . now()->format('Y-m-d_His') . '.pdf');
+    }
+
     public function exportTransactionsPdf(Request $request)
     {
         $filters = Validator::make(

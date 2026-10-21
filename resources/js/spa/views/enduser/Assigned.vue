@@ -370,6 +370,8 @@
             class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         </div>
+      </div>
+      <template #footer>
         <div class="flex justify-end gap-2">
           <button
             type="button"
@@ -387,7 +389,7 @@
             Confirm Return
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
     <!-- Report issue: damage/loss on an assigned item. Report-only — the item
          stays assigned and no stock moves. -->
@@ -437,6 +439,8 @@
             class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         </div>
+      </div>
+      <template #footer>
         <div class="flex justify-end gap-2">
           <button
             type="button"
@@ -454,7 +458,7 @@
             Submit Report
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
   </div>
 </template>

@@ -19,7 +19,7 @@
     </div>
 
     <!-- 1. Registered User Mode -->
-    <form v-if="mode === 'registered'" class="space-y-4" @submit.prevent="openSlipPreview">
+    <form v-if="mode === 'registered'" id="assign-registered-form" class="space-y-4" @submit.prevent="openSlipPreview">
       <div class="grid gap-4 sm:grid-cols-2">
         <div>
           <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="assign-user">
@@ -140,26 +140,10 @@
       </p>
 
       <!-- Action Buttons -->
-      <div class="flex flex-wrap justify-end gap-2 pt-3 border-t border-gray-100 dark:border-white/5">
-        <button
-          type="button"
-          class="shrink-0 rounded-md border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
-          @click="$emit('close')"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          class="shrink-0 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300"
-          :disabled="busy || drafting || !canDraftPreview"
-        >
-          {{ drafting ? 'Saving…' : 'Print & Draft' }}
-        </button>
-      </div>
     </form>
 
     <!-- 2. Manual Issue Mode -->
-    <form v-else class="space-y-4" @submit.prevent="openManualSlip">
+    <form v-else id="assign-manual-form" class="space-y-4" @submit.prevent="openManualSlip">
       <div class="grid gap-3.5 sm:grid-cols-2">
         <div>
           <label class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="manual-name">
@@ -279,23 +263,14 @@
       </p>
 
       <!-- Action Buttons -->
-      <div class="flex flex-wrap justify-end gap-2 pt-3 border-t border-gray-100 dark:border-white/5">
-        <button
-          type="button"
-          class="shrink-0 rounded-md border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
-          @click="$emit('close')"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          class="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition-all hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50"
-          :disabled="busy || !canManualPreview"
-        >
-          {{ busy ? 'Saving…' : 'Preview Slip PDF' }}
-        </button>
-      </div>
     </form>
+    <template #footer>
+      <div class="flex justify-end gap-2">
+        <button type="button" class="shrink-0 rounded-md border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300" @click="$emit('close')">Cancel</button>
+        <button v-if="mode === 'registered'" type="submit" form="assign-registered-form" class="shrink-0 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300" :disabled="busy || drafting || !canDraftPreview">{{ drafting ? 'Saving…' : 'Print & Draft' }}</button>
+        <button v-else type="submit" form="assign-manual-form" class="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition-all hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50" :disabled="busy || !canManualPreview">{{ busy ? 'Saving…' : 'Preview Slip PDF' }}</button>
+      </div>
+    </template>
   </Modal>
 
   <SlipDocument

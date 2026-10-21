@@ -983,13 +983,15 @@
           </div>
         </div>
 
-        <div class="flex justify-end gap-3 pt-2">
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
           <button type="button" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300" @click="approveReturn = null">Cancel</button>
           <button type="button" class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50" :disabled="working" @click="submitApproveReturn">
             {{ working ? 'Working…' : 'Confirm & Accept' }}
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
   </div>
 </template>

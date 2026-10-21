@@ -8,7 +8,7 @@
     :close-on-escape="true"
     @close="$emit('close')"
   >
-    <form class="space-y-4" @submit.prevent="submit">
+    <form id="category-form-modal" class="space-y-4" @submit.prevent="submit">
       <div>
         <label for="category-form-name" class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300">
           Category name <span class="text-rose-500">*</span>
@@ -61,6 +61,8 @@
         {{ formError }}
       </p>
 
+    </form>
+    <template #footer>
       <div class="flex justify-end gap-2">
         <button
           type="button"
@@ -71,13 +73,14 @@
         </button>
         <button
           type="submit"
+          form="category-form-modal"
           :disabled="saving"
           class="rounded-md bg-emerald-700 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {{ saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create category' }}
         </button>
       </div>
-    </form>
+    </template>
   </Modal>
 </template>
 

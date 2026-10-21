@@ -100,6 +100,9 @@
         </div>
       </form>
     </div>
+    <template #footer>
+      <slot name="footer" />
+    </template>
   </Modal>
 </template>
 

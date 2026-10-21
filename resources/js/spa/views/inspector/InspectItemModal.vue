@@ -106,7 +106,9 @@
         />
       </div>
 
-      <div class="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-2.5 dark:border-gray-700">
+    </div>
+    <template #footer>
+      <div class="flex flex-wrap justify-end gap-2">
         <button
           type="button"
           class="compact-btn compact-btn--outline"
@@ -124,7 +126,7 @@
           {{ busy ? 'Saving…' : outcome === 'needs_repair' ? 'Recommend Repair' : 'Mark as Inspected' }}
         </button>
       </div>
-    </div>
+    </template>
   </QrScannerModal>
 </template>
 

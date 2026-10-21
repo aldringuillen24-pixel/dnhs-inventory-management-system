@@ -39,6 +39,18 @@
 
         <button
           type="button"
+          class="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-purple-200 bg-white px-3 py-2 text-xs font-semibold text-purple-800 shadow-sm transition-colors hover:bg-purple-50 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10 sm:w-auto"
+          @click="printIIRUP"
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+          </svg>
+          Print IIRUP
+        </button>
+
+        <button
+          type="button"
           class="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50 dark:border-blue-500/30 dark:bg-gray-800 dark:text-blue-300 dark:hover:bg-blue-500/10 sm:w-auto"
           @click="openQrPrintModal"
         >
@@ -714,7 +726,7 @@
       fixed-body
       @close="recordGroup = null"
     >
-      <div v-if="recordGroup" class="flex min-h-0 flex-col space-y-3">
+      <div v-if="recordGroup" class="flex min-h-0 flex-1 flex-col space-y-3">
         <section class="shrink-0 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
           <div class="flex flex-wrap items-start justify-between gap-2.5">
             <div>
@@ -1007,7 +1019,7 @@
       fixed-body
       @close="closeMaintenanceModal"
     >
-      <div v-if="maintenanceGroup" class="flex min-h-0 flex-col space-y-3">
+      <div v-if="maintenanceGroup" class="flex min-h-0 flex-1 flex-col space-y-3">
         <p
           v-if="maintenanceError"
           role="alert"
@@ -1086,7 +1098,9 @@
           />
         </div>
 
-        <div class="flex shrink-0 justify-end gap-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
           <button
             type="button"
             class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
@@ -1104,7 +1118,7 @@
             {{ sendingToMaintenance ? 'Sending…' : `Send ${maintenanceItemIds.length} for Repair` }}
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
 
     <Modal
@@ -1115,7 +1129,7 @@
       fixed-body
       @close="closeInspectionModal"
     >
-      <div v-if="inspectionGroup" class="flex min-h-0 flex-col space-y-3">
+      <div v-if="inspectionGroup" class="flex min-h-0 flex-1 flex-col space-y-3">
         <p
           v-if="inspectionError"
           role="alert"
@@ -1178,7 +1192,9 @@
           />
         </div>
 
-        <div class="flex shrink-0 justify-end gap-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
           <button
             type="button"
             class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
@@ -1196,7 +1212,7 @@
             {{ sendingToInspection ? 'Sending…' : `Flag ${inspectionItemIds.length} for Inspection` }}
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
 
     <Modal
@@ -1268,7 +1284,9 @@
           />
         </div>
 
-        <div class="flex justify-end gap-3 border-t border-gray-100 pt-4 dark:border-gray-700">
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
           <button
             type="button"
             class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
@@ -1286,7 +1304,7 @@
             {{ disposing ? 'Disposing…' : `Confirm Dispose ${disposeItemIds.length} Selected` }}
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
 
     <Modal
@@ -1403,7 +1421,9 @@
           />
         </div>
 
-        <div class="flex justify-end gap-3 border-t border-gray-100 pt-4 dark:border-gray-700">
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
           <button
             type="button"
             class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
@@ -1422,7 +1442,7 @@
             {{ maintenanceActionBusy ? 'Updating…' : maintenanceAction === 'repair' ? `Confirm ${maintenanceActionItemIds.length} Repaired` : `Confirm ${maintenanceActionItemIds.length} for Disposal` }}
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
 
     <Modal
@@ -1527,7 +1547,9 @@
           />
         </div>
 
-        <div class="flex justify-end gap-3 border-t border-gray-100 pt-4 dark:border-gray-700">
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
           <button
             type="button"
             class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
@@ -1545,7 +1567,7 @@
             {{ returning ? 'Recording return…' : 'Confirm Return' }}
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
 
     <QrScannerModal
@@ -1578,7 +1600,9 @@
               <dd class="text-right font-medium text-gray-900 dark:text-white">{{ qrResult.assigned_to }}</dd>
             </div>
           </dl>
-          <div class="mt-5 flex flex-wrap justify-end gap-2">
+        </section>
+        <template #footer>
+          <div class="flex flex-wrap justify-end gap-2">
             <button
               v-if="qrResult?.status === 'assigned'"
               type="button"
@@ -1593,7 +1617,7 @@
               Scan another
             </button>
           </div>
-        </section>
+        </template>
       </QrScannerModal>
 
     <!-- Print QR Codes modal: lists QR-coded items across the current workspace -->
@@ -1605,7 +1629,7 @@
       fixed-body
       @close="closeQrPrintModal"
     >
-      <div class="flex min-h-0 flex-col space-y-2">
+      <div class="flex min-h-0 flex-1 flex-col space-y-2">
         <!-- Search (always visible) -->
         <div class="relative w-full shrink-0">
           <svg
@@ -1730,31 +1754,41 @@
               </tbody>
             </table>
           </div>
-          <div class="shrink-0 flex items-center justify-between gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
-            <span class="text-xs text-gray-500 dark:text-gray-400">
-              {{ qrPrintSelected.length }} of {{ filteredQrPrintItems.length }} selected
-            </span>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="rounded-md border border-blue-200 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/30 dark:hover:bg-blue-700/80"
-                :disabled="qrPrintSelected.length === 0 || printingQr || qrPrintLoading"
-                @click="printQrAll"
-              >
-                {{ printingQr ? 'Printing…' : 'Print all' }}
-              </button>
-              <button
-                type="button"
-                class="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
-                @click="closeQrPrintModal"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
         </template>
       </div>
+      <template v-if="!qrPrintLoading && !qrPrintError" #footer>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs text-gray-500 dark:text-gray-400">
+            {{ qrPrintSelected.length }} of {{ filteredQrPrintItems.length }} selected
+          </span>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="rounded-md border border-blue-200 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/30 dark:hover:bg-blue-700/80"
+              :disabled="qrPrintSelected.length === 0 || printingQr || qrPrintLoading"
+              @click="printQrAll"
+            >
+              {{ printingQr ? 'Printing…' : 'Print all' }}
+            </button>
+            <button
+              type="button"
+              class="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+              @click="closeQrPrintModal"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </template>
     </Modal>
+
+    <IirupPrintModal
+      :open="iirupPrintOpen"
+      :categories="categories"
+      :selected-ids="selection"
+      :selected-count="selection.length"
+      @close="iirupPrintOpen = false"
+    />
 
     <!-- Modals -->
     <StockInModal :open="stockInOpen" :categories="categories" @close="stockInOpen = false" @saved="onStockInSaved" @categories-updated="categories = $event" />
@@ -1809,6 +1843,8 @@
           {{ deleteItemIds.length }} record(s) selected. Only available inventory can be deleted.
         </p>
 
+      </div>
+      <template #footer>
         <div class="flex justify-end gap-3">
           <button
             type="button"
@@ -1827,7 +1863,7 @@
             {{ deleting ? 'Deleting…' : `Delete ${deleteItemIds.length} selected` }}
           </button>
         </div>
-      </div>
+      </template>
     </Modal>
 
     <ConfirmDialog
@@ -1859,6 +1895,7 @@ import QrScannerModal from '../../components/ui/qr/QrScannerModal.vue';
 import StockInModal from './StockInModal.vue';
 import InventoryItemLogDrawer from './InventoryItemLogDrawer.vue';
 import EditInventoryModal from './EditInventoryModal.vue';
+import IirupPrintModal from './components/IirupPrintModal.vue';
 
 const STATUSES = ['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
 const ITEM_ICONS = [
@@ -1930,6 +1967,7 @@ const recordGroup = ref(null);
 const selectedPrintItemIds = ref([]);
 // "Print QR Codes" header modal state: lists QR-coded items across the current workspace.
 const qrPrintOpen = ref(false);
+const iirupPrintOpen = ref(false);
 const qrPrintItems = ref([]);
 const qrPrintSelected = ref([]);
 const qrPrintSearch = ref('');
@@ -2566,6 +2604,10 @@ function openQrScanner() {
   qrResult.value = null;
   qrError.value = '';
   qrScannerOpen.value = true;
+}
+
+function printIIRUP() {
+  iirupPrintOpen.value = true;
 }
 
 function closeQrScanner() {

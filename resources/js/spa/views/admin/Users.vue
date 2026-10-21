@@ -100,7 +100,7 @@
         </button>
       </div>
 
-      <form v-else-if="createAccountMode === 'single'" class="space-y-2.5" @submit.prevent="submitCreate">
+      <form v-else-if="createAccountMode === 'single'" id="admin-create-user-form" class="space-y-2.5" @submit.prevent="submitCreate">
         <div>
           <label class="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300" for="new-username">Username</label>
           <input id="new-username" v-model="createForm.username" required maxlength="255" class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
@@ -119,13 +119,9 @@
           <input id="new-password" v-model="createForm.password" type="password" minlength="6" class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
           <FieldError :errors="createErrors" field="password" />
         </div>
-        <div class="flex justify-end gap-2">
-          <button type="button" class="rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:text-gray-300" @click="createAccountMode = ''">Back</button>
-          <button type="submit" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600" :disabled="working">{{ working ? 'Saving…' : 'Create' }}</button>
-        </div>
       </form>
 
-      <form v-else class="space-y-2.5" @submit.prevent="submitGenerate">
+      <form v-else id="admin-generate-users-form" class="space-y-2.5" @submit.prevent="submitGenerate">
         <div>
           <label class="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300" for="gen-role">Role</label>
           <select id="gen-role" v-model="generateForm.role_id" required class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
@@ -139,15 +135,18 @@
           <input id="gen-count" v-model.number="generateForm.count" type="number" required min="1" max="20" class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
           <FieldError :errors="generateErrors" field="count" />
         </div>
+      </form>
+      <template v-if="createAccountMode" #footer>
         <div class="flex justify-end gap-2">
           <button type="button" class="rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:text-gray-300" @click="createAccountMode = ''">Back</button>
-          <button type="submit" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600" :disabled="working">{{ working ? 'Saving…' : 'Generate' }}</button>
+          <button v-if="createAccountMode === 'single'" type="submit" form="admin-create-user-form" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600" :disabled="working">{{ working ? 'Saving…' : 'Create' }}</button>
+          <button v-else type="submit" form="admin-generate-users-form" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600" :disabled="working">{{ working ? 'Saving…' : 'Generate' }}</button>
         </div>
-      </form>
+      </template>
     </Modal>
 
     <Modal :open="slipsOpen" title="Export Account Slips" subtitle="Download printable PDF slips with account credentials." @close="slipsOpen = false">
-      <form class="space-y-3" @submit.prevent="exportSlips">
+      <form id="admin-export-slips-form" class="space-y-3" @submit.prevent="exportSlips">
         <div class="flex items-center justify-between">
           <p class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">
             Select Accounts ({{ selectedSlipUsers.length }} selected)
@@ -169,17 +168,19 @@
           </label>
           <p v-if="!users.length" class="p-2 text-center text-[11px] text-gray-500 dark:text-gray-400">No accounts found.</p>
         </div>
+      </form>
+      <template #footer>
         <div class="flex justify-end gap-2">
           <button type="button" class="rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:text-gray-300" @click="slipsOpen = false">Cancel</button>
-          <button type="submit" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!selectedSlipUsers.length || exportingSlips">
+          <button type="submit" form="admin-export-slips-form" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50" :disabled="!selectedSlipUsers.length || exportingSlips">
             {{ exportingSlips ? 'Preparing PDF…' : 'Download PDF Slips' }}
           </button>
         </div>
-      </form>
+      </template>
     </Modal>
 
     <Modal :open="editUser !== null" title="Edit User" :subtitle="editUser?.onboarding_pending ? 'Update account name, password, role, or status.' : 'Only role and status can be changed after onboarding.'" @close="editUser = null">
-      <form v-if="editUser" class="space-y-2.5" @submit.prevent="submitEdit">
+      <form v-if="editUser" id="admin-edit-user-form" class="space-y-2.5" @submit.prevent="submitEdit">
         <div v-if="editUser.onboarding_pending">
           <label class="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300" for="edit-name">Display name</label>
           <input id="edit-name" v-model="editForm.name" maxlength="255" class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />
@@ -208,11 +209,13 @@
         <div v-else class="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
           Personal name and password updates are handled by the user after onboarding.
         </div>
+      </form>
+      <template #footer>
         <div class="flex justify-end gap-2">
           <button type="button" class="rounded-md border border-gray-200 px-3 py-1.5 text-xs dark:border-gray-700 dark:text-gray-300" @click="editUser = null">Cancel</button>
-          <button type="submit" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600" :disabled="working">{{ working ? 'Saving…' : 'Save' }}</button>
+          <button type="submit" form="admin-edit-user-form" class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600" :disabled="working">{{ working ? 'Saving…' : 'Save' }}</button>
         </div>
-      </form>
+      </template>
     </Modal>
 
     <ConfirmDialog :open="deleteUser !== null" title="Delete pending account?" :message="`Delete @${deleteUser?.username ?? ''}? Only accounts pending onboarding can be deleted.`" confirm-label="Delete" :busy="working" @cancel="deleteUser = null" @confirm="doDelete" />

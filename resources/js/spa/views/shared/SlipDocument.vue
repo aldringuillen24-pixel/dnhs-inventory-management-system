@@ -138,8 +138,9 @@
 
       <p v-if="error" class="text-sm text-red-600" role="alert">{{ error }}</p>
 
-      <!-- Footer -->
-      <div class="flex justify-end gap-2 border-t border-gray-100 pt-3 dark:border-white/5">
+    </div>
+    <template #footer>
+      <div class="flex justify-end gap-2">
         <button
           type="button"
           class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
@@ -157,7 +158,7 @@
           {{ primaryLoading ? 'Saving…' : primaryLabel }}
         </button>
       </div>
-    </div>
+    </template>
   </Modal>
 </template>
 

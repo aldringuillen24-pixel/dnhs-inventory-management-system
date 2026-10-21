@@ -14,7 +14,8 @@
       <FieldError :errors="errors" field="notes" />
       <FieldError :errors="errors" field="cancellation_reason" />
     </div>
-    <div class="mt-4 flex justify-end gap-3">
+    <template #footer>
+    <div class="flex justify-end gap-3">
       <button
         type="button"
         class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
@@ -32,6 +33,7 @@
         {{ busy ? (busyLabel || 'Working…') : confirmLabel }}
       </button>
     </div>
+    </template>
   </Modal>
 </template>
 

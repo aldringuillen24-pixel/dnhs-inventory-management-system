@@ -220,32 +220,34 @@
         </div>
     </div>
 
-    <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-gray-800">
-      <p class="text-xs text-gray-500 dark:text-gray-400">
-        Serial- or QR-tracked units are created separately when required by the category.
-      </p>
-      <div class="flex justify-end gap-2">
-        <button
-          type="button"
-          class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5"
-          @click="$emit('close')"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-md hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="saving || !validRows.length"
-          @click="submitBatch"
-        >
-          <svg v-if="saving" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          {{ saving ? 'Saving stock-in…' : `Save ${validRows.length} line(s)` }}
-        </button>
+    <template #footer>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          Serial- or QR-tracked units are created separately when required by the category.
+        </p>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5"
+            @click="$emit('close')"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-md hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="saving || !validRows.length"
+            @click="submitBatch"
+          >
+            <svg v-if="saving" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            {{ saving ? 'Saving stock-in…' : `Save ${validRows.length} line(s)` }}
+          </button>
+        </div>
       </div>
-    </div>
+    </template>
 
     <CategoryManager
       :open="managerOpen"
