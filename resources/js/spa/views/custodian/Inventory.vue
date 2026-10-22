@@ -51,6 +51,18 @@
 
         <button
           type="button"
+          class="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-800 shadow-sm transition-colors hover:bg-sky-50 dark:border-sky-500/30 dark:bg-gray-800 dark:text-sky-300 dark:hover:bg-sky-500/10 sm:w-auto"
+          @click="openRfqPreview"
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14 2v6h6M8 13h8M8 17h8" />
+          </svg>
+          Print RFQ
+        </button>
+
+        <button
+          type="button"
           class="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50 dark:border-blue-500/30 dark:bg-gray-800 dark:text-blue-300 dark:hover:bg-blue-500/10 sm:w-auto"
           @click="openQrPrintModal"
         >
@@ -2608,6 +2620,10 @@ function openQrScanner() {
 
 function printIIRUP() {
   iirupPrintOpen.value = true;
+}
+
+function openRfqPreview() {
+  window.open('/property-custodian/inventory/rfq-pdf', '_blank', 'noopener');
 }
 
 function closeQrScanner() {

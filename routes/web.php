@@ -105,6 +105,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::get('/inventory', fn () => redirect('/spa/inventory'))->name('inventory');
     Route::get('/inventory/export', [PropertyCustodianController::class, 'exportInventory'])->name('inventory.export');
     Route::get('/inventory/export-pdf', [PropertyCustodianController::class, 'exportInventoryPdf'])->name('inventory.export-pdf');
+    Route::get('/inventory/rfq-pdf', [PropertyCustodianController::class, 'previewRfqPdf'])->name('inventory.rfq-pdf');
     Route::post('/inventory/iirup-pdf', [PropertyCustodianController::class, 'generateIirupPdf'])->name('inventory.iirup-pdf');
 
     Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');

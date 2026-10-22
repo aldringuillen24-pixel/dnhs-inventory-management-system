@@ -1523,6 +1523,53 @@ class PropertyCustodianController extends Controller
         return $pdf->download("dnhs_inventory_{$workspace}_" . now()->format('Y-m-d_His') . '.pdf');
     }
 
+    public function previewRfqPdf()
+    {
+        $pdf = Pdf::loadView('pdfs.rfq');
+        $pdf->setPaper('letter', 'portrait');
+        $pdf->render();
+
+        $footerSeal = public_path('images/footer/escalante_city_education_seal.svg');
+        $pdf->getDomPDF()->getCanvas()->page_script(static function ($pageNumber, $pageCount, $canvas, $fontMetrics) use ($footerSeal): void {
+            if ($pageNumber !== $pageCount) {
+                return;
+            }
+
+            $pageWidth = $canvas->get_width();
+            $pageHeight = $canvas->get_height();
+            $leftMargin = 36;
+            $sealSize = 34;
+            $footerTop = $pageHeight - 78;
+            $textX = $leftMargin + $sealSize + 10;
+            $font = $fontMetrics->getFont('Times-Roman', 'normal');
+            $fontSize = 8.5;
+            $lineHeight = 11;
+            $footerLines = [
+                'Escalante City, Negros Occidental, Philippines',
+                'Tel. Nos. - (034) 724-5720, (034) 454-0746',
+                'Escalante.city001@deped.gov.ph',
+                'Depedescalantecity.weebly.com',
+            ];
+            $sealTop = $footerTop + 7 + (($lineHeight * (count($footerLines) - 1) - $sealSize) / 2);
+
+            $canvas->line($leftMargin, $footerTop - 8, $pageWidth - $leftMargin, $footerTop - 8, [0, 0, 0], 0.7);
+            $canvas->image($footerSeal, $leftMargin, $sealTop, $sealSize, $sealSize);
+
+            foreach ($footerLines as $index => $line) {
+                $canvas->text(
+                    $textX,
+                    $footerTop + 7 + ($index * $lineHeight),
+                    $line,
+                    $font,
+                    $fontSize,
+                    [0, 0, 0],
+                );
+            }
+        });
+
+        return $pdf->stream('RFQ-preview.pdf');
+    }
+
     public function generateIirupPdf(Request $request)
     {
         $validated = $request->validate([
