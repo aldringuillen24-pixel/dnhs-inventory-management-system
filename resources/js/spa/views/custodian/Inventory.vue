@@ -256,15 +256,17 @@
           </div>
 
           <!-- Export PDF -->
-          <a
-            :href="exportPdfHref"
+          <button
+            type="button"
             class="shrink-0 inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-[12px] font-semibold text-gray-700 transition-colors hover:bg-gray-50 hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-200 dark:hover:bg-gray-700/60 sm:w-auto"
+            @click="openExportPdfModal"
           >
-            <svg class="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+            <svg class="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
             </svg>
             Export PDF
-          </a>
+          </button>
 
           <!-- Result Counter -->
           <div class="text-[11px] font-medium text-gray-500 dark:text-gray-400 min-[480px]:text-xs sm:ml-auto">
@@ -1794,6 +1796,136 @@
       </template>
     </Modal>
 
+    <Modal
+      :open="exportPdfOpen"
+      title="Export Inventory PDF"
+      subtitle="Choose the inventory filters and ICS numbers to include."
+      max-width="max-w-2xl"
+      @close="closeExportPdfModal"
+    >
+      <div class="space-y-4">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="block space-y-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300">
+            <span>Workspace</span>
+            <select
+              v-model="exportPdfWorkspace"
+              class="w-full rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            >
+              <option v-for="tab in tabs" :key="tab.key" :value="tab.key">{{ tab.label }}</option>
+            </select>
+          </label>
+          <label class="block space-y-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300">
+            <span>Category</span>
+            <select
+              v-model="exportPdfCategory"
+              class="w-full rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            >
+              <option value="">All Categories</option>
+              <option v-for="category in categories" :key="category.category_id" :value="String(category.category_id)">
+                {{ category.category_name }}
+              </option>
+            </select>
+          </label>
+        </div>
+
+        <section class="space-y-2" aria-label="Filter by ICS number">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-xs font-semibold text-gray-700 dark:text-gray-300">ICS numbers</h3>
+              <p class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                {{ exportPdfSelectedIcs.length ? `${exportPdfSelectedIcs.length} selected` : 'No specific ICS selected — all matching ICS numbers will be included.' }}
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-3 text-[11px] font-semibold">
+              <button
+                type="button"
+                class="text-emerald-700 hover:text-emerald-800 dark:text-emerald-300"
+                :disabled="!filteredExportPdfIcs.length"
+                @click="toggleVisibleExportIcs(true)"
+              >
+                Select shown
+              </button>
+              <button
+                type="button"
+                class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                :disabled="!exportPdfSelectedIcs.length"
+                @click="exportPdfSelectedIcs = []"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <input
+            v-model="exportPdfIcsSearch"
+            type="search"
+            placeholder="Find an exact ICS number"
+            aria-label="Search ICS numbers"
+            class="w-full rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+          />
+
+          <div
+            v-if="exportPdfIcsLoading"
+            class="max-h-48 overflow-hidden rounded-md border border-gray-200 dark:border-gray-700"
+            aria-label="Loading ICS numbers"
+            aria-busy="true"
+          >
+            <div
+              v-for="row in 4"
+              :key="row"
+              class="flex items-center gap-2.5 border-b border-gray-100 px-3 py-2 last:border-b-0 dark:border-gray-800"
+            >
+              <div class="h-4 w-4 animate-pulse rounded border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800" />
+              <div class="h-3 w-28 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+            </div>
+          </div>
+          <div v-else-if="exportPdfIcsError" class="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-300">
+            {{ exportPdfIcsError }}
+            <button type="button" class="ml-2 font-semibold underline" @click="loadExportPdfIcs">
+              Try again
+            </button>
+          </div>
+          <div v-else class="max-h-48 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700">
+            <label
+              v-for="icsNumber in filteredExportPdfIcs"
+              :key="icsNumber"
+              class="flex cursor-pointer items-center gap-2.5 border-b border-gray-100 px-3 py-2 text-xs text-gray-700 last:border-b-0 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-white/5"
+            >
+              <input
+                v-model="exportPdfSelectedIcs"
+                type="checkbox"
+                :value="icsNumber"
+                class="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-800"
+              />
+              <span class="font-mono">{{ icsNumber }}</span>
+            </label>
+            <p v-if="!filteredExportPdfIcs.length" class="px-3 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
+              {{ exportPdfIcsOptions.length ? 'No ICS numbers match your search.' : 'No ICS numbers are available.' }}
+            </p>
+          </div>
+        </section>
+      </div>
+      <template #footer>
+        <div class="flex items-center justify-end gap-2 pt-3">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            @click="closeExportPdfModal"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            :disabled="exportPdfIcsLoading || Boolean(exportPdfIcsError) || exportPdfSubmitting"
+            class="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            @click="exportInventoryPdf"
+          >
+            {{ exportPdfSubmitting ? 'Exporting…' : 'Export PDF' }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+
     <IirupPrintModal
       :open="iirupPrintOpen"
       :categories="categories"
@@ -1985,6 +2117,15 @@ const recordGroup = ref(null);
 const selectedPrintItemIds = ref([]);
 // "Print QR Codes" header modal state: lists QR-coded items across the current workspace.
 const qrPrintOpen = ref(false);
+const exportPdfOpen = ref(false);
+const exportPdfWorkspace = ref('all');
+const exportPdfCategory = ref('');
+const exportPdfIcsOptions = ref([]);
+const exportPdfSelectedIcs = ref([]);
+const exportPdfIcsSearch = ref('');
+const exportPdfIcsLoading = ref(false);
+const exportPdfIcsError = ref('');
+const exportPdfSubmitting = ref(false);
 const iirupPrintOpen = ref(false);
 const rfqPrintOpen = ref(false);
 const qrPrintItems = ref([]);
@@ -2103,12 +2244,20 @@ const filteredQrPrintItems = computed(() => {
   );
 });
 
-const exportPdfHref = computed(() => {
+const filteredExportPdfIcs = computed(() => {
+  const query = exportPdfIcsSearch.value.trim().toLowerCase();
+  if (!query) {
+    return exportPdfIcsOptions.value;
+  }
+  return exportPdfIcsOptions.value.filter((icsNumber) => icsNumber.toLowerCase().includes(query));
+});
+
+const exportPdfModalHref = computed(() => {
   const params = new URLSearchParams({
-    workspace: workspace.value ?? 'all',
-    search: search.value.trim(),
-    category_id: categoryFilter.value ? String(categoryFilter.value) : '',
+    workspace: exportPdfWorkspace.value,
+    category_id: exportPdfCategory.value,
   });
+  exportPdfSelectedIcs.value.forEach((icsNumber) => params.append('ics_numbers[]', icsNumber));
 
   return `/property-custodian/inventory/export-pdf?${params.toString()}`;
 });
@@ -2334,6 +2483,78 @@ async function openQrPrintModal() {
   qrPrintError.value = '';
   qrPrintOpen.value = true;
   await loadQrPrintItems();
+}
+
+async function openExportPdfModal() {
+  exportPdfWorkspace.value = workspace.value ?? 'all';
+  exportPdfCategory.value = categoryFilter.value ? String(categoryFilter.value) : '';
+  exportPdfSelectedIcs.value = [];
+  exportPdfIcsSearch.value = '';
+  exportPdfIcsError.value = '';
+  exportPdfSubmitting.value = false;
+  exportPdfOpen.value = true;
+  await loadExportPdfIcs();
+}
+
+function closeExportPdfModal() {
+  exportPdfOpen.value = false;
+}
+
+async function loadExportPdfIcs() {
+  exportPdfIcsLoading.value = true;
+  exportPdfIcsError.value = '';
+  try {
+    const { data } = await api.get('/custodian/inventory/ics-numbers');
+    if (!Array.isArray(data.icsNumbers)) {
+      throw new Error('The server returned an invalid ICS number list.');
+    }
+    exportPdfIcsOptions.value = data.icsNumbers;
+  } catch (requestError) {
+    exportPdfIcsError.value = requestError?.response?.data?.message
+      ?? requestError?.message
+      ?? 'Could not load ICS numbers. Try again before selecting ICS filters.';
+  } finally {
+    exportPdfIcsLoading.value = false;
+  }
+}
+
+async function exportInventoryPdf() {
+  if (exportPdfIcsLoading.value || exportPdfIcsError.value || exportPdfSubmitting.value) {
+    return;
+  }
+  exportPdfSubmitting.value = true;
+  try {
+    const exportUrl = new URL(exportPdfModalHref.value, window.location.origin);
+    const response = await api.get(`/custodian/inventory/export-pdf${exportUrl.search}`, {
+      responseType: 'blob',
+      skipToast: true,
+    });
+    const blobUrl = window.URL.createObjectURL(response.data);
+    const downloadLink = document.createElement('a');
+    const disposition = response.headers['content-disposition'] ?? '';
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+      ?? `dnhs_inventory_${exportPdfWorkspace.value}.pdf`;
+
+    downloadLink.href = blobUrl;
+    downloadLink.download = filename;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+    closeExportPdfModal();
+  } catch (requestError) {
+    console.error('Failed to export inventory PDF', requestError);
+    useToastStore().error('Export failed', 'Could not generate the inventory PDF. Please try again.');
+  } finally {
+    exportPdfSubmitting.value = false;
+  }
+}
+
+function toggleVisibleExportIcs(checked) {
+  const visible = new Set(filteredExportPdfIcs.value);
+  exportPdfSelectedIcs.value = checked
+    ? [...new Set([...exportPdfSelectedIcs.value, ...visible])]
+    : exportPdfSelectedIcs.value.filter((icsNumber) => !visible.has(icsNumber));
 }
 
 function closeQrPrintModal() {

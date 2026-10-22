@@ -573,7 +573,6 @@
                                 <div class="sign-line"></div>
                                 <div class="sign-role-label">Signature over Printed Name of Inspection Officer</div>
                                 <div class="sign-designation">{{ $inspection_designation ?? '' }}</div>
-                                <div class="designation-label">(Designation of Inspection Officer)</div>
                             </div>
                         </td>
                         <td>

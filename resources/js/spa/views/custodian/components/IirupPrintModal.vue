@@ -158,7 +158,6 @@
                 <input v-model="form.inspection_officer_name" required class="iirup-preview-input w-full text-center font-bold" aria-label="Inspection officer name" />
                 <span>Signature over Printed Name of Inspection Officer</span>
                 <input v-model="form.inspection_designation" class="iirup-preview-input iirup-preview-input--plain mt-2 w-full text-center" aria-label="Inspection officer designation" />
-                <span>(Designation of Inspection Officer)</span>
               </div>
               <div class="iirup-signatory">
                 <span class="mb-3 block">
@@ -261,8 +260,30 @@
             </button>
           </header>
 
-          <div v-if="loadingItems" class="p-4 text-xs text-gray-500 dark:text-gray-400">
-            Loading disposal-eligible items…
+          <div
+            v-if="loadingItems"
+            class="min-h-0 flex-1 space-y-2 overflow-hidden p-3 dark:bg-gray-900/5"
+            aria-label="Loading disposal-eligible items"
+            aria-busy="true"
+          >
+            <div
+              v-for="row in 4"
+              :key="row"
+              class="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700"
+            >
+              <div class="flex items-center gap-2 px-3 py-2">
+                <div class="h-3.5 w-3.5 animate-pulse rounded border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800" />
+                <div class="h-3 w-28 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+                <div class="ml-auto h-2.5 w-8 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+              </div>
+              <div class="space-y-2 border-t border-gray-100 px-3 py-2 dark:border-gray-700">
+                <div v-for="itemRow in 2" :key="itemRow" class="flex items-center gap-2">
+                  <div class="h-3.5 w-3.5 animate-pulse rounded border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800" />
+                  <div class="h-2.5 w-24 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+                  <div class="ml-auto h-2.5 w-12 animate-pulse rounded bg-gray-100 dark:bg-gray-800" />
+                </div>
+              </div>
+            </div>
           </div>
           <div v-else-if="eligibleByCategory.length === 0" class="m-4 rounded-md border border-gray-200 bg-gray-50 p-4 text-center text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
             No disposal-eligible items found.

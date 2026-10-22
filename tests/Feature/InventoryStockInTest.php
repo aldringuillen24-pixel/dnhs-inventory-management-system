@@ -6,6 +6,7 @@ use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\StockMovement;
 use App\Models\User;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Database\Seeders\CategorySeeder;
 use Database\Seeders\InventorySeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -931,16 +932,22 @@ test('inventory exportPdf returns filtered groups as a pdf and rejects non-custo
     $response->assertOk()->assertHeader('Content-Type', 'application/pdf');
     expect($response->headers->get('Content-Disposition'))->toContain('dnhs_inventory_all_');
 
+    $sampleGroups = collect([[
+        'item_name' => 'Bond Paper',
+        'ics_no' => null,
+        'category' => 'Consumables',
+        'quantity' => 10,
+        'unit_cost' => 250.0,
+        'total_cost' => 2500.0,
+        'status' => 'Available',
+    ]]);
     $html = view('pdfs.inventory-export', [
-        'groups' => collect([[
-            'item_name' => 'Bond Paper',
+        'icsPages' => collect([[
             'ics_no' => null,
-            'category' => 'Consumables',
-            'quantity' => 10,
-            'unit_cost' => 250.0,
-            'total_cost' => 2500.0,
-            'status' => 'Available',
+            'groups' => $sampleGroups,
+            'total_quantity' => 10,
         ]]),
+        'groups' => $sampleGroups,
         'totalQuantity' => 10,
         'totalValue' => 2500.0,
         'filterSummary' => 'Workspace: all; Search: "bond"',
@@ -951,6 +958,11 @@ test('inventory exportPdf returns filtered groups as a pdf and rejects non-custo
     expect($html)->toContain('Bond Paper')->and($html)->not->toContain('Office Chair');
 
     $emptyHtml = view('pdfs.inventory-export', [
+        'icsPages' => collect([[
+            'ics_no' => null,
+            'groups' => collect(),
+            'total_quantity' => 0,
+        ]]),
         'groups' => collect(),
         'totalQuantity' => 0,
         'totalValue' => 0.0,
@@ -979,4 +991,109 @@ test('inventory exportPdf returns filtered groups as a pdf and rejects non-custo
     ]);
 
     $this->actingAs($endUser)->get(route('propertyCustodian.inventory.export-pdf'))->assertForbidden();
+});
+
+test('inventory PDF export uses stock quantity for available items', function () {
+    $category = Category::create([
+        'category_name' => 'PDF Quantity Test',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Available Test Item',
+        'quantity' => 7,
+        'unit_cost' => 10,
+        'date_acquired' => '2026-10-01',
+        'status' => 'available',
+    ]);
+
+    $capturedViewData = [];
+    $pdf = Mockery::mock(\Barryvdh\DomPDF\PDF::class);
+    $pdf->shouldReceive('setPaper')->once()->with('a4', 'portrait')->andReturnSelf();
+    $pdf->shouldReceive('download')->once()->andReturn(
+        response()->make('pdf', 200, ['Content-Type' => 'application/pdf']),
+    );
+
+    Pdf::shouldReceive('loadView')
+        ->once()
+        ->with('pdfs.inventory-export', Mockery::on(function (array $viewData) use (&$capturedViewData) {
+            $capturedViewData = $viewData;
+
+            return true;
+        }))
+        ->andReturn($pdf);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.inventory.export-pdf', ['workspace' => 'available']))
+        ->assertOk();
+
+    expect($capturedViewData['groups']->first()['quantity'])->toBe(7)
+        ->and($capturedViewData['totalQuantity'])->toBe(7);
+});
+
+test('inventory PDF export filters by selected exact ICS numbers', function () {
+    $category = Category::create([
+        'category_name' => 'PDF ICS Test',
+        'requires_serial_number' => false,
+    ]);
+    foreach ([
+        ['item_name' => 'Selected ICS Item', 'ics_no' => 'ICS-2026-1', 'quantity' => 3],
+        ['item_name' => 'Second Selected ICS Item', 'ics_no' => 'ICS-2026-2', 'quantity' => 5],
+        ['item_name' => 'Similar ICS Item', 'ics_no' => 'ICS-2026-10', 'quantity' => 8],
+    ] as $item) {
+        Inventory::create([
+            'category_id' => $category->category_id,
+            'unit' => 'piece',
+            'user_id' => $this->propertyCustodian->id,
+            'item_name' => $item['item_name'],
+            'ics_no' => $item['ics_no'],
+            'quantity' => $item['quantity'],
+            'unit_cost' => 10,
+            'date_acquired' => '2026-10-01',
+            'status' => 'available',
+        ]);
+    }
+
+    $capturedViewData = [];
+    $pdf = Mockery::mock(\Barryvdh\DomPDF\PDF::class);
+    $pdf->shouldReceive('setPaper')->once()->with('a4', 'portrait')->andReturnSelf();
+    $pdf->shouldReceive('download')->once()->andReturn(
+        response()->make('pdf', 200, ['Content-Type' => 'application/pdf']),
+    );
+
+    Pdf::shouldReceive('loadView')
+        ->once()
+        ->with('pdfs.inventory-export', Mockery::on(function (array $viewData) use (&$capturedViewData) {
+            $capturedViewData = $viewData;
+
+            return true;
+        }))
+        ->andReturn($pdf);
+
+    $this->actingAs($this->propertyCustodian)
+        ->get(route('propertyCustodian.inventory.export-pdf', [
+            'workspace' => 'available',
+            'ics_numbers' => ['ICS-2026-1', 'ICS-2026-2'],
+        ]))
+        ->assertOk();
+
+    expect($capturedViewData['groups'])->toHaveCount(2)
+        ->and($capturedViewData['groups']->pluck('item_name')->all())
+        ->toContain('Selected ICS Item', 'Second Selected ICS Item')
+        ->and($capturedViewData['groups']->pluck('item_name')->all())->not->toContain('Similar ICS Item')
+        ->and($capturedViewData['totalQuantity'])->toBe(8);
+    expect($capturedViewData['icsPages'])->toHaveCount(2)
+        ->and($capturedViewData['icsPages']->pluck('ics_no')->all())->toBe(['ICS-2026-1', 'ICS-2026-2']);
+
+    $pdfHtml = view('pdfs.inventory-export', $capturedViewData)->render();
+    expect(substr_count($pdfHtml, 'class="ics-slip"'))->toBe(2)
+        ->and($pdfHtml)->toContain('ICS-2026-1')
+        ->and($pdfHtml)->toContain('ICS-2026-2')
+        ->and($pdfHtml)->not->toContain('ICS-2026-10');
+
+    $this->getJson(route('api.custodian.inventory.ics-numbers'))
+        ->assertOk()
+        ->assertJsonPath('icsNumbers', ['ICS-2026-1', 'ICS-2026-10', 'ICS-2026-2']);
 });

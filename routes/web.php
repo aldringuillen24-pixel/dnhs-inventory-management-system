@@ -269,6 +269,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
     Route::middleware('role:Property Custodian')->prefix('custodian')->name('custodian.')->group(function () {
         Route::get('/dashboard', [PropertyCustodianController::class, 'dashboard'])->name('dashboard');
         Route::get('/inventory', [PropertyCustodianController::class, 'inventory'])->name('inventory');
+        Route::get('/inventory/ics-numbers', [PropertyCustodianController::class, 'inventoryIcsNumbers'])->name('inventory.ics-numbers');
         Route::get('/inventory/export', [PropertyCustodianController::class, 'exportInventory'])->name('inventory.export');
     Route::get('/inventory/export-pdf', [PropertyCustodianController::class, 'exportInventoryPdf'])->name('inventory.export-pdf');
     Route::post('/inventory/rfq-pdf', [PropertyCustodianController::class, 'generateRfqPdf'])->name('inventory.rfq-pdf');

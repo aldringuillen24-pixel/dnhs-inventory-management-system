@@ -1365,6 +1365,18 @@ class PropertyCustodianController extends Controller
         return response()->stream($callback, 200, $headers);
     }
 
+    public function inventoryIcsNumbers()
+    {
+        $icsNumbers = Inventory::query()
+            ->whereNotNull('ics_no')
+            ->where('ics_no', '<>', '')
+            ->distinct()
+            ->orderBy('ics_no')
+            ->pluck('ics_no');
+
+        return response()->json(['icsNumbers' => $icsNumbers]);
+    }
+
     public function exportInventoryPdf(Request $request)
     {
         $workspace = $request->query('workspace') ?: 'all';
@@ -1380,19 +1392,26 @@ class PropertyCustodianController extends Controller
             [
                 'search' => trim((string) $request->query('search', '')),
                 'category_id' => $request->query('category_id') ?: null,
+                'ics_numbers' => $request->query('ics_numbers', []),
             ],
             [
                 'search' => ['nullable', 'string', 'max:100'],
                 'category_id' => ['nullable', 'integer', 'exists:categories,category_id'],
+                'ics_numbers' => ['nullable', 'array'],
+                'ics_numbers.*' => ['required', 'string', 'max:255', 'distinct'],
             ]
         )->validate();
 
         $search = strtolower($filters['search'] ?? '');
         $categoryId = $filters['category_id'] ?? null;
+        $icsNumbers = $filters['ics_numbers'] ?? [];
 
         $query = Inventory::query()->with('category');
         if ($categoryId) {
             $query->where('category_id', $categoryId);
+        }
+        if ($icsNumbers !== []) {
+            $query->whereIn('ics_no', $icsNumbers);
         }
 
         $inventoryItems = $query->orderBy('item_name')->get();
@@ -1448,11 +1467,9 @@ class PropertyCustodianController extends Controller
                     $itemAssignments = $assignmentsByItem->get($item->item_id, collect());
                     $assignedQuantity = (int) $itemAssignments->sum('quantity');
 
-                    return $item->status === 'available'
+                    return in_array($item->status, ['assigned', 'under_inspection'], true) && $itemAssignments->isNotEmpty()
                         ? $assignedQuantity
-                        : (($item->status === 'assigned' || $item->status === 'under_inspection') && $itemAssignments->isNotEmpty()
-                            ? $assignedQuantity
-                            : (int) $item->quantity);
+                        : (int) $item->quantity;
                 });
                 $costQuantity = (int) $items->sum(function (Inventory $item) use ($assignmentsByItem): int {
                     $itemAssignments = $assignmentsByItem->get($item->item_id, collect());
@@ -1504,11 +1521,42 @@ class PropertyCustodianController extends Controller
             ->sortBy('item_name')
             ->values();
 
+        $icsPages = $icsNumbers !== []
+            ? collect($icsNumbers)->map(function (string $icsNumber) use ($groups): array {
+                $pageGroups = $groups
+                    ->filter(fn (array $group): bool => (string) ($group['ics_no'] ?? '') === $icsNumber)
+                    ->values();
+
+                return [
+                    'ics_no' => $icsNumber,
+                    'groups' => $pageGroups,
+                    'total_quantity' => $pageGroups->sum('quantity'),
+                ];
+            })
+            : $groups
+                ->groupBy(fn (array $group): string => (string) ($group['ics_no'] ?? ''))
+                ->map(fn ($pageGroups, string $icsNumber): array => [
+                    'ics_no' => $icsNumber !== '' ? $icsNumber : null,
+                    'groups' => $pageGroups->values(),
+                    'total_quantity' => $pageGroups->sum('quantity'),
+                ])
+                ->sortBy(fn (array $page): string => $page['ics_no'] ?? "\xFF")
+                ->values();
+
+        if ($icsPages->isEmpty()) {
+            $icsPages = collect([[
+                'ics_no' => $icsNumbers[0] ?? null,
+                'groups' => collect(),
+                'total_quantity' => 0,
+            ]]);
+        }
+
         $filterSummary = "Workspace: {$workspace}"
             . ($search !== '' ? "; Search: \"{$filters['search']}\"" : '')
             . ($categoryId ? '; Category: ' . (Category::find($categoryId)?->category_name ?? $categoryId) : '');
 
         $pdf = Pdf::loadView('pdfs.inventory-export', [
+            'icsPages' => $icsPages,
             'groups' => $groups,
             'totalQuantity' => $groups->sum('quantity'),
             'totalValue' => $groups->sum('total_cost'),
