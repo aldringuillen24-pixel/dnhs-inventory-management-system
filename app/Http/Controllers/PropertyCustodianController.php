@@ -1731,6 +1731,8 @@ class PropertyCustodianController extends Controller
             'inspection_officer_name' => ['required', 'string', 'max:255'],
             'inspection_designation' => ['nullable', 'string', 'max:255'],
             'witness_name' => ['required', 'string', 'max:255'],
+            'witness_disposition_day' => ['nullable', 'string', 'max:20'],
+            'witness_disposition_date' => ['nullable', 'string', 'max:100'],
             'selected_ids' => ['required', 'array', 'min:1'],
             'selected_ids.*' => ['integer', 'exists:inventory,item_id'],
             'overrides' => ['nullable', 'array'],
@@ -1858,6 +1860,8 @@ class PropertyCustodianController extends Controller
             'inspection_officer_name' => $validated['inspection_officer_name'] ?? '',
             'inspection_designation' => $validated['inspection_designation'] ?? '',
             'witness_name' => $validated['witness_name'] ?? '',
+            'witness_disposition_day' => $validated['witness_disposition_day'] ?? '',
+            'witness_disposition_date' => $validated['witness_disposition_date'] ?? '',
         ]);
         $pdf->setPaper('letter', 'landscape');
 

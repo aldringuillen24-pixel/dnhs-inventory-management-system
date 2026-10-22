@@ -4,182 +4,103 @@
     title="Print IIRUP"
     subtitle="Inventory and Inspection Report of Unserviceable Property"
     max-width="max-w-7xl"
+    :fixed-body="true"
     :close-on-escape="!selectionDrawerOpen"
     @close="handleClose"
   >
-    <div class="relative min-w-0 space-y-3" @keydown.esc.window="selectionDrawerOpen = false">
-      <div class="min-w-0 space-y-3">
-        <div class="border-b border-gray-300 pb-3 text-center dark:border-gray-700">
-          <p class="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Appendix 74</p>
-          <h2 class="mt-1 text-sm font-bold uppercase text-gray-900 dark:text-white">
-            Inventory and Inspection Report of Unserviceable Property
-          </h2>
-          <p class="mt-1 text-xs text-gray-600 dark:text-gray-400">Edit the fields below; changes appear in Preview and the PDF.</p>
+    <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-900" @keydown.esc.window="selectionDrawerOpen = false">
+      <main class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4">
+        <div class="mx-auto mb-3 flex max-w-6xl items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+          <span>{{ selectedCount }} item(s) selected for disposal report</span>
+          <span>Edit directly in the report preview</span>
         </div>
 
-        <p class="text-[11px] text-gray-500 dark:text-gray-400">
-          {{ selectedCount }} item(s) selected for disposal report
-        </p>
+        <article class="mx-auto w-full max-w-6xl bg-white p-6 font-serif text-[12px] leading-tight text-black shadow-sm">
+          <header class="mb-3">
+            <p class="text-right italic">Appendix 74</p>
+            <h1 class="mt-1 text-center text-[16px] font-bold uppercase">Inventory and Inspection Report of Unserviceable Property</h1>
+            <p class="mt-1 text-center">
+              As at
+              <input v-model="form.report_date" type="date" class="iirup-preview-input w-36 text-center" aria-label="Report date" />
+            </p>
+          </header>
 
-        <div class="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2">
-          <div class="space-y-0.5">
-            <label for="iirup-report-date" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Report Date
+          <section class="grid grid-cols-[3fr_1fr] gap-4">
+            <label class="iirup-info-line">
+              <strong>Entity Name:</strong>
+              <input v-model="form.entity_name" class="iirup-preview-input flex-1" aria-label="Entity name" />
             </label>
-            <input
-              id="iirup-report-date"
-              v-model="form.report_date"
-              type="date"
-              class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
-
-          <div class="space-y-0.5">
-            <label for="iirup-entity-name" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Entity Name
+            <label class="iirup-info-line">
+              <strong>Fund Cluster:</strong>
+              <input v-model="form.fund_cluster" class="iirup-preview-input flex-1" aria-label="Fund cluster" />
             </label>
-            <input
-              id="iirup-entity-name"
-              v-model="form.entity_name"
-              type="text"
-              class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
+          </section>
 
-          <div class="space-y-0.5">
-            <label for="iirup-fund-cluster" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Fund Cluster
+          <section class="mt-3 grid grid-cols-3 gap-3 text-center">
+            <label class="iirup-officer-field">
+              <input v-model="form.accountable_officer_name" class="iirup-preview-input w-full text-center font-bold" aria-label="Name of accountable officer" />
+              <span>(Name of Accountable Officer)</span>
             </label>
-            <input
-              id="iirup-fund-cluster"
-              v-model="form.fund_cluster"
-              type="text"
-              placeholder="Optional"
-              class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
-
-          <div class="space-y-0.5">
-            <label for="iirup-accountable-officer" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Name of Accountable Officer
+            <label class="iirup-officer-field">
+              <input v-model="form.accountable_officer_designation" class="iirup-preview-input w-full text-center" aria-label="Accountable officer designation" />
+              <span>(Designation)</span>
             </label>
-            <input
-              id="iirup-accountable-officer"
-              v-model="form.accountable_officer_name"
-              type="text"
-              class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
-
-          <div class="space-y-0.5">
-            <label for="iirup-designation" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Designation
+            <label class="iirup-officer-field">
+              <input v-model="form.accountable_officer_station" class="iirup-preview-input w-full text-center" aria-label="Accountable officer station" />
+              <span>(Station)</span>
             </label>
-            <input
-              id="iirup-designation"
-              v-model="form.accountable_officer_designation"
-              type="text"
-              class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
+          </section>
 
-          <div class="space-y-0.5">
-            <label for="iirup-station" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Station
-            </label>
-            <input
-              id="iirup-station"
-              v-model="form.accountable_officer_station"
-              type="text"
-              class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
-        </div>
-
-        <div class="border-t border-gray-200 pt-2 dark:border-gray-700">
-          <p class="mb-1 text-xs font-semibold text-gray-700 dark:text-gray-300">Signatories</p>
-          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <div class="space-y-0.5">
-              <label for="iirup-approving" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-                Approving Official Name <span class="text-rose-500">*</span>
-              </label>
-              <input
-                id="iirup-approving"
-                v-model="form.approving_official_name"
-                type="text"
-                required
-                class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-              />
+          <section class="mt-4" aria-label="Editable IIRUP inventory and inspection details">
+            <h2 class="mb-1 text-center text-[13px] font-bold uppercase">Inventory and Inspection Details</h2>
+            <div v-if="selectedPreviewGroups.length === 0" class="mb-2 border border-dashed border-gray-400 p-3 text-center text-xs text-gray-600">
+              Select items in the left panel to add them to this report.
             </div>
-
-            <div class="space-y-0.5">
-              <label for="iirup-inspection" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-                Inspection Officer Name <span class="text-rose-500">*</span>
-              </label>
-              <input
-                id="iirup-inspection"
-                v-model="form.inspection_officer_name"
-                type="text"
-                required
-                class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-              />
-            </div>
-
-            <div class="space-y-0.5">
-              <label for="iirup-inspection-designation" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-                Inspection Officer Designation
-              </label>
-              <input
-                id="iirup-inspection-designation"
-                v-model="form.inspection_designation"
-                type="text"
-                class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-              />
-            </div>
-
-            <div class="space-y-0.5">
-              <label for="iirup-witness" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-                Witness Name <span class="text-rose-500">*</span>
-              </label>
-              <input
-                id="iirup-witness"
-                v-model="form.witness_name"
-                type="text"
-                required
-                class="w-full rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-              />
-            </div>
-          </div>
-        </div>
-
-        <section class="space-y-2" aria-label="Editable IIRUP item details">
-          <div class="flex items-center justify-between gap-2">
-            <h3 class="text-xs font-bold uppercase tracking-wide text-gray-700 dark:text-gray-300">Inventory and Inspection Details</h3>
-            <span class="text-[10px] text-gray-500 dark:text-gray-400">Scroll horizontally to edit every column</span>
-          </div>
-          <div v-if="selectedPreviewGroups.length === 0" class="rounded-md border border-dashed border-gray-300 p-4 text-center text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-            Select items in the left panel to add them to this report.
-          </div>
-          <div v-for="group in selectedPreviewGroups" :key="group.category_id" class="space-y-1">
-            <h4 class="text-[11px] font-semibold text-gray-700 dark:text-gray-300">{{ group.category_name }}</h4>
-            <div class="overflow-x-auto rounded-md border border-gray-300 dark:border-gray-700">
-              <table class="min-w-[1900px] table-fixed border-collapse text-left text-[10px]">
-                <thead class="bg-gray-50 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            <div v-for="group in selectedPreviewGroups" :key="group.category_id" class="mb-2 overflow-x-auto">
+              <p class="mb-1 text-xs font-bold">{{ group.category_name }}</p>
+              <table class="min-w-[1900px] table-fixed border-collapse text-xs">
+                <thead>
                   <tr>
-                    <th v-for="column in previewColumns" :key="column.key" class="border border-gray-300 px-1 py-1 text-center dark:border-gray-700" :style="{ width: column.width }">
-                      {{ column.label }}
-                    </th>
-                    <th class="border border-gray-300 px-1 py-1 text-center dark:border-gray-700">Reset</th>
+                    <th colspan="10" class="iirup-preview-th">INVENTORY</th>
+                    <th colspan="8" class="iirup-preview-th">INSPECTION AND DISPOSAL</th>
+                    <th rowspan="4" class="iirup-preview-th w-9" aria-hidden="true"></th>
+                  </tr>
+                  <tr>
+                    <th rowspan="2" class="iirup-preview-th">Date Acquired</th>
+                    <th rowspan="2" class="iirup-preview-th">Particulars / Articles</th>
+                    <th rowspan="2" class="iirup-preview-th">Property No.</th>
+                    <th rowspan="2" class="iirup-preview-th">Qty</th>
+                    <th rowspan="2" class="iirup-preview-th">Unit Cost</th>
+                    <th rowspan="2" class="iirup-preview-th">Total Cost</th>
+                    <th rowspan="2" class="iirup-preview-th">Accumulated Depreciation</th>
+                    <th rowspan="2" class="iirup-preview-th">Accumulated Impairment Losses</th>
+                    <th rowspan="2" class="iirup-preview-th">Carrying Amount</th>
+                    <th rowspan="2" class="iirup-preview-th">Remarks</th>
+                    <th colspan="5" class="iirup-preview-th">DISPOSAL</th>
+                    <th rowspan="2" class="iirup-preview-th">Appraised Value</th>
+                    <th colspan="2" class="iirup-preview-th">RECORD OF SALES</th>
+                  </tr>
+                  <tr>
+                    <th class="iirup-preview-th">Sale</th>
+                    <th class="iirup-preview-th">Transfer</th>
+                    <th class="iirup-preview-th">Destruction</th>
+                    <th class="iirup-preview-th">Others (Specify)</th>
+                    <th class="iirup-preview-th">Total</th>
+                    <th class="iirup-preview-th">OR No.</th>
+                    <th class="iirup-preview-th">Amount</th>
+                  </tr>
+                  <tr>
+                    <th v-for="(column, index) in previewColumns" :key="column.key" class="iirup-preview-th font-normal">({{ index + 1 }})</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="item in group.items" :key="item.item_id" class="bg-white dark:bg-gray-900">
-                    <td v-for="column in previewColumns" :key="column.key" class="border border-gray-300 p-1 align-top dark:border-gray-700">
+                  <tr v-for="item in group.items" :key="item.item_id">
+                    <td v-for="column in previewColumns" :key="column.key" class="iirup-preview-td" :style="{ width: column.width }">
                       <textarea
                         v-if="column.type === 'textarea'"
                         v-model="editableRows[item.item_id][column.key]"
                         rows="2"
-                        class="w-full min-w-[90px] resize-y rounded border border-gray-200 bg-white p-1 text-[10px] text-gray-900 focus:border-purple-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                        class="iirup-preview-input min-w-[90px]"
                         :aria-label="`${column.label} for ${item.item_name}`"
                       />
                       <input
@@ -188,32 +109,80 @@
                         :type="column.type"
                         :min="column.type === 'number' ? 0 : undefined"
                         :step="column.type === 'number' ? 'any' : undefined"
-                        class="w-full min-w-[70px] rounded border border-gray-200 bg-white px-1 py-1 text-[10px] text-gray-900 focus:border-purple-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                        class="iirup-preview-input min-w-[70px]"
                         :aria-label="`${column.label} for ${item.item_name}`"
                       />
                     </td>
-                    <td class="border border-gray-300 p-1 text-center align-top dark:border-gray-700">
-                      <button type="button" class="whitespace-nowrap rounded border border-gray-200 px-2 py-1 text-[10px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5" @click="resetItem(item.item_id)">
-                        Reset
+                    <td class="iirup-preview-td text-center">
+                      <button
+                        type="button"
+                        class="inline-flex h-6 w-6 items-center justify-center rounded text-gray-500 hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500 dark:text-gray-400 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+                        :aria-label="`Remove ${item.item_name} from report`"
+                        title="Remove item"
+                        @click="toggleItem(item.item_id, false)"
+                      >
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6L6 18" />
+                        </svg>
                       </button>
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <p v-if="error" class="text-xs text-rose-600 dark:text-rose-400">{{ error }}</p>
-      </div>
+          <section class="mt-5 grid grid-cols-2 gap-4 border border-black p-3 text-xs">
+            <div>
+              <p class="mb-4">I HEREBY request inspection and disposition, pursuant to Section 79 of PD 1445, of the property enumerated above.</p>
+              <div class="grid grid-cols-2 gap-4">
+                <div class="iirup-signatory">
+                  <span class="mb-2 block">Requested by:</span>
+                  <input v-model="form.accountable_officer_name" class="iirup-preview-input w-full text-center font-bold" aria-label="Requested by name" />
+                  <span>Signature over Printed Name of Accountable Officer</span>
+                  <input v-model="form.accountable_officer_designation" class="iirup-preview-input mt-2 w-full text-center" aria-label="Requested by designation" />
+                  <span>(Designation of Accountable Officer)</span>
+                </div>
+                <div class="iirup-signatory">
+                  <span class="mb-2 block">Approved by:</span>
+                  <input v-model="form.approving_official_name" required class="iirup-preview-input w-full text-center font-bold" aria-label="Approving official name" />
+                  <span>Signature over Printed Name of Authorized Official</span>
+                  <input v-model="form.approving_official_designation" class="iirup-preview-input mt-2 w-full text-center" aria-label="Approving official designation" />
+                  <span>(Designation of Authorized Official)</span>
+                </div>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="iirup-signatory">
+                <span class="mb-3 block">I CERTIFY that I have inspected each and every article enumerated in this report, and that the disposition made thereof was, in my judgment, the best for the public interest.</span>
+                <input v-model="form.inspection_officer_name" required class="iirup-preview-input w-full text-center font-bold" aria-label="Inspection officer name" />
+                <span>Signature over Printed Name of Inspection Officer</span>
+                <input v-model="form.inspection_designation" class="iirup-preview-input iirup-preview-input--plain mt-2 w-full text-center" aria-label="Inspection officer designation" />
+                <span>(Designation of Inspection Officer)</span>
+              </div>
+              <div class="iirup-signatory">
+                <span class="mb-3 block">
+                  I CERTIFY that I have witnessed the disposition of the articles enumerated on this report this
+                  <input v-model="form.witness_disposition_day" class="iirup-preview-input iirup-certification-day" aria-label="Witnessed disposition day" />
+                  day of
+                  <input v-model="form.witness_disposition_date" class="iirup-preview-input iirup-certification-date" aria-label="Witnessed disposition date" />.
+                </span>
+                <input v-model="form.witness_name" required class="iirup-preview-input w-full text-center font-bold" aria-label="Witness name" />
+                <span>Signature over Printed Name of Witness</span>
+              </div>
+            </div>
+          </section>
+        </article>
 
+        <p v-if="error" class="mx-auto mt-3 max-w-6xl text-xs text-rose-600 dark:text-rose-400">{{ error }}</p>
+      </main>
     </div>
 
     <template #footer>
     <div class="flex justify-end gap-2">
       <button
         type="button"
-        class="rounded-md border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+        class="rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
         :disabled="generating || previewing"
         @click="handleClose"
       >
@@ -221,7 +190,7 @@
       </button>
       <button
         type="button"
-        class="rounded-md border border-purple-200 bg-white px-4 py-2 text-sm font-semibold text-purple-700 shadow-sm hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10"
+        class="rounded-md border border-purple-200 bg-white px-3 py-2 text-xs font-semibold text-purple-700 shadow-sm hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10"
         :disabled="generating || previewing || !canGenerate"
         @click="previewIIRUP"
       >
@@ -229,7 +198,7 @@
       </button>
       <button
         type="submit"
-        class="rounded-md border border-purple-200 bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-500/30 dark:hover:bg-purple-700/80"
+        class="rounded-md border border-purple-200 bg-purple-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-500/30 dark:hover:bg-purple-700/80"
         :disabled="generating || previewing || !canGenerate"
         @click="submit"
       >
@@ -427,6 +396,8 @@ const form = ref({
   inspection_officer_name: '',
   inspection_designation: '',
   witness_name: '',
+  witness_disposition_day: '',
+  witness_disposition_date: '',
 });
 
 const previewColumns = [
@@ -668,6 +639,8 @@ async function generatePdfBlob() {
     inspection_officer_name: form.value.inspection_officer_name,
     inspection_designation: form.value.inspection_designation,
     witness_name: form.value.witness_name,
+    witness_disposition_day: form.value.witness_disposition_day,
+    witness_disposition_date: form.value.witness_disposition_date,
     selected_ids: internalSelectedIds.value,
     overrides: Object.fromEntries(internalSelectedIds.value.map((itemId) => [
       itemId,
@@ -750,6 +723,85 @@ async function submit() {
 </script>
 
 <style scoped>
+.iirup-preview-input {
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid #000;
+  border-radius: 0;
+  background: transparent;
+  padding: 1px 3px;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+
+.iirup-preview-input:focus {
+  border-bottom-color: #7c3aed;
+  outline: none;
+  box-shadow: 0 1px 0 #7c3aed;
+}
+
+.iirup-preview-input--plain,
+.iirup-preview-input--plain:focus {
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+
+.iirup-certification-day {
+  display: inline-block;
+  width: 3.5em;
+  text-align: center;
+}
+
+.iirup-certification-date {
+  display: inline-block;
+  width: 10em;
+  text-align: center;
+}
+
+.iirup-info-line {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.iirup-officer-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.iirup-officer-field span,
+.iirup-signatory > span {
+  font-size: 12px;
+  font-style: italic;
+}
+
+.iirup-preview-th,
+.iirup-preview-td {
+  border: 1px solid #000;
+  padding: 2px;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.iirup-preview-th {
+  text-align: center;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.iirup-preview-td .iirup-preview-input {
+  width: 100%;
+  font-size: 11px;
+}
+
+.iirup-signatory {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+}
+
 .iirup-drawer-enter-active,
 .iirup-drawer-leave-active {
   transition: transform 0.3s ease;

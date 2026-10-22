@@ -578,7 +578,7 @@
                         </td>
                         <td>
                             <div class="certification-text">
-                                I CERTIFY that I have witnessed the disposition of the articles enumerated on this report this _____ day of ____________________.
+                                I CERTIFY that I have witnessed the disposition of the articles enumerated on this report this {{ $witness_disposition_day ?? '_____' }} day of {{ $witness_disposition_date ?? '____________________' }}.
                             </div>
                             <div class="sign-block">
                                 <div class="sign-name">{{ $witness_name ?? '' }}</div>

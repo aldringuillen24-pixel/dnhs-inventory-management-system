@@ -106,6 +106,8 @@ test('IIRUP PDF generation uses item overrides without recalculating edited valu
             'inspection_officer_name' => 'Inspector Test',
             'inspection_designation' => 'Inspection Officer',
             'witness_name' => 'Witness Test',
+            'witness_disposition_day' => '22nd',
+            'witness_disposition_date' => 'October 2026',
             'selected_ids' => [$this->item->item_id],
             'overrides' => [
                 $this->item->item_id => [
@@ -136,6 +138,8 @@ test('IIRUP PDF generation uses item overrides without recalculating edited valu
         'entity_name' => 'Edited School Name',
         'fund_cluster' => 'Edited Fund',
         'inspection_designation' => 'Inspection Officer',
+        'witness_disposition_day' => '22nd',
+        'witness_disposition_date' => 'October 2026',
     ]);
 });
 

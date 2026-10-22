@@ -3,7 +3,7 @@
     :open="open"
     title="Print RFQ"
     subtitle="Select disposal-eligible items and edit the request before previewing or downloading the PDF."
-    max-width="max-w-[1500px]"
+    max-width="max-w-7xl"
     :fixed-body="true"
     :close-on-escape="!selectionDrawerOpen"
     @close="handleClose"
