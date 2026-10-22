@@ -1801,6 +1801,11 @@
       :selected-count="selection.length"
       @close="iirupPrintOpen = false"
     />
+    <RfqPrintModal
+      :open="rfqPrintOpen"
+      :selected-ids="selection"
+      @close="rfqPrintOpen = false"
+    />
 
     <!-- Modals -->
     <StockInModal :open="stockInOpen" :categories="categories" @close="stockInOpen = false" @saved="onStockInSaved" @categories-updated="categories = $event" />
@@ -1908,6 +1913,7 @@ import StockInModal from './StockInModal.vue';
 import InventoryItemLogDrawer from './InventoryItemLogDrawer.vue';
 import EditInventoryModal from './EditInventoryModal.vue';
 import IirupPrintModal from './components/IirupPrintModal.vue';
+import RfqPrintModal from './components/RfqPrintModal.vue';
 
 const STATUSES = ['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
 const ITEM_ICONS = [
@@ -1980,6 +1986,7 @@ const selectedPrintItemIds = ref([]);
 // "Print QR Codes" header modal state: lists QR-coded items across the current workspace.
 const qrPrintOpen = ref(false);
 const iirupPrintOpen = ref(false);
+const rfqPrintOpen = ref(false);
 const qrPrintItems = ref([]);
 const qrPrintSelected = ref([]);
 const qrPrintSearch = ref('');
@@ -2623,7 +2630,7 @@ function printIIRUP() {
 }
 
 function openRfqPreview() {
-  window.open('/property-custodian/inventory/rfq-pdf', '_blank', 'noopener');
+  rfqPrintOpen.value = true;
 }
 
 function closeQrScanner() {

@@ -1523,9 +1523,156 @@ class PropertyCustodianController extends Controller
         return $pdf->download("dnhs_inventory_{$workspace}_" . now()->format('Y-m-d_His') . '.pdf');
     }
 
-    public function previewRfqPdf()
+    public function generateRfqPdf(Request $request)
     {
-        $pdf = Pdf::loadView('pdfs.rfq');
+        $validated = $request->validate([
+            'selected_ids' => ['required', 'array', 'min:1'],
+            'selected_ids.*' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
+            'quotation_no' => ['nullable', 'string', 'max:255'],
+            'rfq_date' => ['nullable', 'date'],
+            'procurement_mode' => ['nullable', 'string', 'max:255'],
+            'project_name' => ['nullable', 'string', 'max:1000'],
+            'bac_chair_name' => ['nullable', 'string', 'max:255'],
+            'bac_chair_title' => ['nullable', 'string', 'max:255'],
+            'bac_contact_numbers' => ['nullable', 'string', 'max:255'],
+            'submission_deadline' => ['nullable', 'string', 'max:255'],
+            'secretariat_contact' => ['nullable', 'string', 'max:255'],
+            'verification_contact' => ['nullable', 'string', 'max:255'],
+            'inspection_schedule' => ['nullable', 'string', 'max:1000'],
+            'auction_schedule' => ['nullable', 'string', 'max:1000'],
+            'pullout_schedule' => ['nullable', 'string', 'max:1000'],
+            'supplier_name' => ['nullable', 'string', 'max:255'],
+            'supplier_tin' => ['nullable', 'string', 'max:255'],
+            'supplier_address' => ['nullable', 'string', 'max:1000'],
+            'supplier_phone' => ['nullable', 'string', 'max:255'],
+            'supplier_fax' => ['nullable', 'string', 'max:255'],
+            'supplier_email' => ['nullable', 'email', 'max:255'],
+            'representative_signature' => ['nullable', 'string', 'max:255'],
+            'representative_date' => ['nullable', 'string', 'max:255'],
+            'total' => ['nullable', 'numeric', 'min:0'],
+            'floor_price' => ['nullable', 'numeric', 'min:0'],
+            'requirements' => ['nullable', 'array', 'max:50'],
+            'requirements.*' => ['array'],
+            'requirements.*.description' => ['required', 'string', 'max:1000'],
+            'requirements.*.compliance' => ['nullable', 'string', 'max:255'],
+            'terms' => ['nullable', 'array'],
+            'terms.*' => ['nullable', 'string', 'max:5000'],
+            'overrides' => ['nullable', 'array'],
+            'overrides.*' => ['array'],
+            'overrides.*.description' => ['nullable', 'string', 'max:1000'],
+            'overrides.*.unit' => ['nullable', 'string', 'max:100'],
+            'overrides.*.quantity' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.unit_price' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.price_offered' => ['nullable', 'numeric', 'min:0'],
+            'overrides.*.compliance' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $ids = $validated['selected_ids'];
+        $selectedItems = Inventory::query()
+            ->with('category')
+            ->whereIn('item_id', $ids)
+            ->whereIn('status', ['ready_to_dispose', 'disposed'])
+            ->get()
+            ->keyBy('item_id');
+
+        if ($selectedItems->count() !== count($ids)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'selected_ids' => 'Only items marked ready to dispose or disposed can be added to an RFQ.',
+            ]);
+        }
+
+        $overrides = $validated['overrides'] ?? [];
+        $items = collect($ids)->map(function ($itemId) use ($selectedItems, $overrides): array {
+            $item = $selectedItems->get($itemId);
+            $row = [
+                'item_id' => $item->item_id,
+                'description' => $item->item_name,
+                'unit' => $item->unit ?? '',
+                'quantity' => (float) ($item->quantity ?? 0),
+                'unit_price' => (float) ($item->unit_cost ?? 0),
+                'price_offered' => '',
+                'compliance' => '',
+            ];
+
+            foreach (($overrides[$itemId] ?? []) as $key => $value) {
+                if (array_key_exists($key, $row) && $key !== 'item_id') {
+                    $row[$key] = $value;
+                }
+            }
+
+            return $row;
+        })->values();
+
+        $calculatedTotal = $items->sum(fn (array $item): float => (float) $item['quantity'] * (float) $item['unit_price']);
+        $total = array_key_exists('total', $validated) ? (float) $validated['total'] : $calculatedTotal;
+        $floorPrice = array_key_exists('floor_price', $validated) ? (float) $validated['floor_price'] : $calculatedTotal;
+        $defaults = [
+            'quotation_no' => 'RFQ-' . now()->format('Y-m-d'),
+            'rfq_date' => now()->toDateString(),
+            'procurement_mode' => 'Public Bidding',
+            'project_name' => 'Public Bidding for one (1) Lot of Disposal of various unserviceable properties',
+            'bac_chair_name' => 'LILIBETH L. CASTRO',
+            'bac_chair_title' => 'Chair, Bids and Awards Committee',
+            'bac_contact_numbers' => '(034) 724-5720, (034) 454-0746',
+            'submission_deadline' => '',
+            'secretariat_contact' => '(09483841228)',
+            'verification_contact' => '(09097148630)',
+            'inspection_schedule' => '',
+            'auction_schedule' => '',
+            'pullout_schedule' => '',
+            'supplier_name' => '',
+            'supplier_tin' => '',
+            'supplier_address' => '',
+            'supplier_phone' => '',
+            'supplier_fax' => '',
+            'supplier_email' => '',
+            'representative_signature' => '',
+            'representative_date' => '',
+        ];
+        $metadata = array_replace($defaults, array_intersect_key($validated, $defaults));
+        $requirements = $validated['requirements'] ?? [
+            ['description' => 'Updated/Valid PHILGEPS Certificate of registration', 'compliance' => ''],
+            ['description' => 'Quotation sheet shall include the terms of payment, price validity, company TIN.', 'compliance' => ''],
+            ['description' => 'Business/Mayor’s Permit or Official Receipt as proof of renewal upon post-qualification', 'compliance' => ''],
+        ];
+        $defaultTerms = [
+            'submission_address' => '1. Quotations and other requirements stated below shall be addressed to the Bids and Awards Committee (BAC) Chairperson c/o BAC Secretariat at Escalante City, Negros Occidental, Philippines. If quotation is sealed, please indicate in the envelope the quotation number and name of bidder.',
+            'submission_documents_intro' => '2. In addition, you are required to submit the following necessary documents:',
+            'document_mayors_permit_post_qualification' => 'a. Present valid Mayor’s Permit or Official Receipt as proof of renewal upon post-qualification; and,',
+            'document_mayors_permit_payment' => 'b. Present valid Mayor’s Permit prior to payment.',
+            'document_philgeps' => 'c. PhilGEPS Registration Number',
+            'document_dole' => 'd. Certification re: Compliance to DOLE Rules and Regulations as to employee compensation',
+            'previous_submission_note' => '(Note: Supplier who already submitted their documents in the previous procurement/s may no longer submit the necessary documents mentioned above.)',
+            'price_validity' => 'Price should be valid thirty (30) calendar days after the deadline of submission of quotation.',
+            'ocular_inspection' => 'The BAC, if necessary, may order the conduct of an ocular inspection prior to award and/or conduct of the event.',
+            'award' => 'The provider who submitted the lowest calculated responsive quotation and who passed post qualification conducted by the BAC and end-user shall be awarded the contract.',
+            'award_tie_break' => 'In case of tie of two or more Bidders whose bids are determined and declared as the Lowest Calculated and Responsive Bids (LCRB) having been Post-Qualified, the method to be used to break the tie is “draw lots” which is non-discretionary and non discriminatory.',
+            'award_absent_bidder' => 'In case of non-appearance of one party, it waives the right to participate in the drawing of lots but not in the acceptance of award if declared as winner.',
+            'delivery' => 'Delivery of Goods/s shall be on the date specified in the Request for Quotation (RFQ) or in the Purchase Order. In case the service/s shall be moved by the end-user within the validity period (30 days) the service provider is responsible to accommodate the request. On the other hand, the service provider may reject the award if the new schedule is beyond the validity period.',
+            'evaluation_intro' => 'Quotation shall be compared and evaluated on the basis of the following criteria:',
+            'evaluation_price' => '1. Price Quotation;',
+            'evaluation_compliance' => '2. Compliance with Items & Description',
+            'evaluation_documents' => '3. Completeness of documents submitted',
+            'evaluation_note' => 'Note: (Validation of the submitted documents is done during post-qualification.)',
+            'instruction_sources' => '1. Provider shall be responsible for the source(s) of its goods/services/equipment, which shall provide in accordance with the schedule, and specifications of the RFQ or contract. Failure of the provider to comply with this provision shall be ground for cancellation of the award or purchase order/contract issued to the provider.',
+            'instruction_failure' => '2. Provider who accepted a contract but failed to deliver the required goods/services/equipment within the time called for in the contract shall be disqualified from participating in DepEd or any of the DepEd units’ future procurement activities. This is without prejudice to the imposition of other sanctions prescribed under R.A. 9184 and its revised IRR against the supplier.',
+            'instruction_taxes' => '3. All duties, excise, and other taxes and revenue charges shall be paid by the provider.',
+            'instruction_withholding' => '4. All transactions are subject to withholding of credible Value Added Tax and/or Expanded Value Added Tax per revenue regulation(s) of the Bureau of Internal Revenue.',
+            'liquidated_damages' => 'A penalty of one-tenth of one percent (0.001) of the total value of the undelivered goods/services/equipment shall be charged as liquidated damages for every day of delay of the delivery of the purchased Goods.',
+            'warranty' => 'Supplier warrants that all goods/services/equipment to be provided are of acceptable industry standard.',
+            'payment' => 'One Hundred Percent (100%) may be paid to the Provider’s Account less Government Taxes after the complete delivery/ies; based on the actual completed Delivery of the Goods/Services.',
+            'reservation' => 'The DepEd Escalante City-Bids and Awards Committee reserves the right to accept or reject any bid, to annul the bidding process, and to reject all bids at any time prior to contract award, without thereby incurring any liability to the affected bidder or bidders.',
+        ];
+        $terms = array_replace($defaultTerms, $validated['terms'] ?? []);
+
+        $pdf = Pdf::loadView('pdfs.rfq', [
+            'metadata' => $metadata,
+            'items' => $items,
+            'total' => $total,
+            'floorPrice' => $floorPrice,
+            'requirements' => $requirements,
+            'terms' => $terms,
+        ]);
         $pdf->setPaper('letter', 'portrait');
         $pdf->render();
 
@@ -1567,7 +1714,7 @@ class PropertyCustodianController extends Controller
             }
         });
 
-        return $pdf->stream('RFQ-preview.pdf');
+        return $pdf->stream('RFQ-' . now()->format('Y-m-d') . '.pdf');
     }
 
     public function generateIirupPdf(Request $request)
