@@ -1798,12 +1798,47 @@
 
     <Modal
       :open="exportPdfOpen"
-      title="Export Inventory PDF"
-      subtitle="Choose the inventory filters and ICS numbers to include."
-      max-width="max-w-2xl"
+      :title="exportPdfPreviewOpen ? 'Review Inventory Report' : 'Export Inventory PDF'"
+      :subtitle="exportPdfPreviewOpen ? 'Preview the report before exporting the PDF.' : 'Choose the inventory filters and ICS numbers to include.'"
+      :max-width="exportPdfPreviewOpen ? 'max-w-7xl' : 'max-w-2xl'"
+      :fixed-body="exportPdfPreviewOpen"
       @close="closeExportPdfModal"
     >
-      <div class="space-y-4">
+      <div v-if="exportPdfPreviewOpen" class="flex min-h-0 flex-1 flex-col">
+        <div class="h-[65vh] min-h-[50vh] max-h-[65vh] min-w-0 flex-none overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-900">
+          <div
+            v-if="exportPdfPreviewLoading"
+            class="flex h-full items-center justify-center text-sm text-gray-500 dark:text-gray-400"
+            role="status"
+          >
+            Loading report preview…
+          </div>
+          <div
+            v-else-if="exportPdfPreviewError"
+            class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
+            role="alert"
+          >
+            <p class="text-sm text-rose-700 dark:text-rose-300">{{ exportPdfPreviewError }}</p>
+            <button
+              type="button"
+              class="rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+              @click="reviewInventoryReport"
+            >
+              Try again
+            </button>
+          </div>
+          <iframe
+            v-else
+            ref="exportPdfPreviewFrame"
+            :srcdoc="exportPdfPreviewHtml"
+            class="h-full w-full"
+            title="Inventory report preview"
+            sandbox="allow-same-origin"
+            @load="exportPdfPreviewReady = true"
+          />
+        </div>
+      </div>
+      <div v-else class="space-y-4">
         <div class="grid gap-3 sm:grid-cols-2">
           <label class="block space-y-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300">
             <span>Workspace</span>
@@ -1906,7 +1941,24 @@
         </section>
       </div>
       <template #footer>
-        <div class="flex items-center justify-end gap-2 pt-3">
+        <div v-if="exportPdfPreviewOpen" class="flex items-center justify-between gap-2 pt-3">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            @click="backToExportFilters"
+          >
+            Back to Filters
+          </button>
+          <button
+            type="button"
+            :disabled="exportPdfPreviewLoading || !exportPdfPreviewReady || Boolean(exportPdfPreviewError) || exportPdfSubmitting"
+            class="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            @click="exportInventoryPdf"
+          >
+            {{ exportPdfSubmitting ? 'Exporting…' : 'Export PDF' }}
+          </button>
+        </div>
+        <div v-else class="flex items-center justify-end gap-2 pt-3">
           <button
             type="button"
             class="rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
@@ -1916,11 +1968,11 @@
           </button>
           <button
             type="button"
-            :disabled="exportPdfIcsLoading || Boolean(exportPdfIcsError) || exportPdfSubmitting"
+            :disabled="exportPdfIcsLoading || Boolean(exportPdfIcsError) || exportPdfSubmitting || exportPdfPreviewLoading"
             class="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-            @click="exportInventoryPdf"
+            @click="reviewInventoryReport"
           >
-            {{ exportPdfSubmitting ? 'Exporting…' : 'Export PDF' }}
+            {{ exportPdfPreviewLoading ? 'Loading…' : 'Review Report' }}
           </button>
         </div>
       </template>
@@ -2048,6 +2100,14 @@ import IirupPrintModal from './components/IirupPrintModal.vue';
 import RfqPrintModal from './components/RfqPrintModal.vue';
 
 const STATUSES = ['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
+const EXPORT_PDF_SIGNATURE_FIELDS = [
+  'received_from_name',
+  'received_from_position',
+  'received_from_date',
+  'received_by_name',
+  'received_by_role',
+  'received_by_date',
+];
 const ITEM_ICONS = [
   { terms: ['bond paper', 'coupon bond', 'copy paper', 'ream', 'paper', 'envelope', 'folder', 'notepad', 'notebook', 'index card', 'cartolina', 'manila paper', 'parchment', 'sticky note'], icon: FileStack },
   { terms: ['document camera', 'camera'], icon: Camera },
@@ -2126,6 +2186,14 @@ const exportPdfIcsSearch = ref('');
 const exportPdfIcsLoading = ref(false);
 const exportPdfIcsError = ref('');
 const exportPdfSubmitting = ref(false);
+const exportPdfPreviewOpen = ref(false);
+const exportPdfPreviewLoading = ref(false);
+const exportPdfPreviewError = ref('');
+const exportPdfPreviewHtml = ref('');
+const exportPdfPreviewFrame = ref(null);
+const exportPdfPreviewReady = ref(false);
+const exportPdfSignatureValues = ref({});
+let exportPdfPreviewRequestId = 0;
 const iirupPrintOpen = ref(false);
 const rfqPrintOpen = ref(false);
 const qrPrintItems = ref([]);
@@ -2486,18 +2554,44 @@ async function openQrPrintModal() {
 }
 
 async function openExportPdfModal() {
+  exportPdfPreviewRequestId += 1;
   exportPdfWorkspace.value = workspace.value ?? 'all';
   exportPdfCategory.value = categoryFilter.value ? String(categoryFilter.value) : '';
   exportPdfSelectedIcs.value = [];
   exportPdfIcsSearch.value = '';
   exportPdfIcsError.value = '';
   exportPdfSubmitting.value = false;
+  exportPdfPreviewOpen.value = false;
+  exportPdfPreviewLoading.value = false;
+  exportPdfPreviewError.value = '';
+  exportPdfPreviewHtml.value = '';
   exportPdfOpen.value = true;
+  exportPdfSignatureValues.value = {};
   await loadExportPdfIcs();
 }
 
 function closeExportPdfModal() {
+  exportPdfPreviewRequestId += 1;
   exportPdfOpen.value = false;
+  exportPdfPreviewOpen.value = false;
+  exportPdfPreviewLoading.value = false;
+  exportPdfPreviewHtml.value = '';
+  exportPdfPreviewError.value = '';
+  exportPdfPreviewReady.value = false;
+}
+
+function backToExportFilters() {
+  try {
+    exportPdfSignatureValues.value = readExportPdfSignatureFields();
+  } catch (error) {
+    console.error('Failed to preserve inventory report signature fields', error);
+    useToastStore().error('Could not save edits', 'Keep the report preview open and try again.');
+    return;
+  }
+  exportPdfPreviewRequestId += 1;
+  exportPdfPreviewOpen.value = false;
+  exportPdfPreviewLoading.value = false;
+  exportPdfPreviewReady.value = false;
 }
 
 async function loadExportPdfIcs() {
@@ -2519,12 +2613,18 @@ async function loadExportPdfIcs() {
 }
 
 async function exportInventoryPdf() {
-  if (exportPdfIcsLoading.value || exportPdfIcsError.value || exportPdfSubmitting.value) {
+  if (exportPdfIcsLoading.value || exportPdfIcsError.value || exportPdfSubmitting.value
+    || exportPdfPreviewLoading.value || !exportPdfPreviewReady.value || exportPdfPreviewError.value) {
     return;
   }
   exportPdfSubmitting.value = true;
   try {
     const exportUrl = new URL(exportPdfModalHref.value, window.location.origin);
+    const signatureValues = readExportPdfSignatureFields();
+    Object.entries(signatureValues).forEach(([field, value]) => {
+      exportUrl.searchParams.set(field, value);
+    });
+
     const response = await api.get(`/custodian/inventory/export-pdf${exportUrl.search}`, {
       responseType: 'blob',
       skipToast: true,
@@ -2548,6 +2648,67 @@ async function exportInventoryPdf() {
   } finally {
     exportPdfSubmitting.value = false;
   }
+}
+
+async function reviewInventoryReport() {
+  if (exportPdfIcsLoading.value || exportPdfIcsError.value || exportPdfPreviewLoading.value) {
+    return;
+  }
+
+  exportPdfPreviewOpen.value = true;
+  exportPdfPreviewLoading.value = true;
+  exportPdfPreviewError.value = '';
+  exportPdfPreviewHtml.value = '';
+  exportPdfPreviewReady.value = false;
+  const requestId = ++exportPdfPreviewRequestId;
+
+  try {
+    const exportUrl = new URL(exportPdfModalHref.value, window.location.origin);
+    const params = new URLSearchParams(exportUrl.search);
+    params.set('preview', '1');
+    Object.entries(exportPdfSignatureValues.value).forEach(([field, value]) => {
+      params.set(field, value);
+    });
+    const { data } = await api.get(`/custodian/inventory/export-pdf?${params.toString()}`, {
+      responseType: 'text',
+      skipToast: true,
+    });
+
+    if (requestId !== exportPdfPreviewRequestId) {
+      return;
+    }
+
+    if (typeof data !== 'string' || !data.includes('<html')) {
+      throw new Error('The server returned an invalid report preview.');
+    }
+
+    exportPdfPreviewHtml.value = data;
+  } catch (requestError) {
+    if (requestId !== exportPdfPreviewRequestId) {
+      return;
+    }
+    console.error('Failed to load inventory report preview', requestError);
+    exportPdfPreviewError.value = 'Could not load the inventory report preview. Please try again.';
+  } finally {
+    if (requestId === exportPdfPreviewRequestId) {
+      exportPdfPreviewLoading.value = false;
+    }
+  }
+}
+
+function readExportPdfSignatureFields() {
+  const previewDocument = exportPdfPreviewFrame.value?.contentDocument;
+  if (!previewDocument) {
+    throw new Error('The report preview is not available to read.');
+  }
+
+  return Object.fromEntries(EXPORT_PDF_SIGNATURE_FIELDS.map((field) => {
+    const input = previewDocument.querySelector(`[data-report-field="${field}"]`);
+    if (!input || !('value' in input)) {
+      throw new Error(`The report preview is missing the ${field} field.`);
+    }
+    return [field, input.value];
+  }));
 }
 
 function toggleVisibleExportIcs(checked) {

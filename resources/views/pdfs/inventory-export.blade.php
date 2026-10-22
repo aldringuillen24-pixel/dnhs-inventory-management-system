@@ -14,13 +14,37 @@
             line-height: 1.2;
             color: #111;
         }
+        @media screen {
+            html {
+                background: #e5e7eb;
+            }
+            body {
+                margin: 0;
+                padding: 16px;
+            }
+            .ics-slip {
+                box-sizing: border-box;
+                width: 10.75in;
+                max-width: 100%;
+                min-height: 8.27in;
+                margin: 0 auto 16px;
+                padding: 10mm;
+                background: #fff;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+            }
+        }
         .heading {
             position: relative;
             margin-bottom: 12px;
             text-align: center;
         }
-        .ics-slip + .ics-slip {
-            page-break-before: always;
+        @media screen {
+            .ics-slip.has-next {
+                page-break-after: auto;
+            }
+        }
+        .ics-slip.has-next {
+            page-break-after: always;
         }
         .heading h1 {
             margin: 0;
@@ -145,6 +169,9 @@
             margin: 30px auto 3px;
             border-bottom: 1px solid #111;
         }
+        .signature-line.received {
+            margin-top: 2px;
+        }
         .signature-role {
             text-align: center;
             font-weight: bold;
@@ -152,6 +179,57 @@
         }
         .signature-note {
             text-align: center;
+        }
+        .signature-name {
+            margin-top: 18px;
+            text-align: center;
+        }
+        .signature-edit {
+            box-sizing: border-box;
+            width: 100%;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            color: #111;
+            font: inherit;
+            text-align: center;
+        }
+        .signature-edit:focus {
+            outline: 1px dashed #059669;
+            outline-offset: 2px;
+        }
+        .signature-field-line .signature-edit {
+            height: 16px;
+        }
+        .signature-name .signature-edit,
+        .signature-role .signature-edit {
+            display: block;
+        }
+        .signature-date-line {
+            min-height: 16px;
+            text-align: center;
+        }
+        .signature-date-line .signature-edit {
+            height: 16px;
+        }
+        .signature-fields {
+            width: 80%;
+            margin: 8px auto 0;
+            text-align: center;
+            font-size: 10pt;
+        }
+        .signature-field {
+            margin-top: 3px;
+        }
+        .signature-field-line {
+            width: 65%;
+            margin: 8px auto 0;
+            min-height: 16px;
+            border-bottom: 1px solid #111;
+        }
+        .signature-field-label {
+            margin-top: 1px;
         }
         .date-line {
             width: 38%;
@@ -162,7 +240,7 @@
 </head>
 <body>
     @foreach ($icsPages as $icsPage)
-        <div class="ics-slip">
+        <div class="ics-slip{{ !$loop->last ? ' has-next' : '' }}">
             <div class="heading">
                 <span class="appendix">Appendix 59</span>
                 <h1>INVENTORY CUSTODIAN SLIP</h1>
@@ -170,7 +248,7 @@
 
             <table class="form-fields">
                 <tr>
-                    <td><strong>Entity Name:</strong> <span class="field-line"></span></td>
+                    <td><strong>Entity Name:</strong> <span class="field-line">Dian-ay National High School</span></td>
                     <td class="ics-field" style="text-align: right;"><strong>ICS No.:</strong> <span class="field-line short">{{ $icsPage['ics_no'] ?? '' }}</span></td>
                 </tr>
                 <tr>
@@ -220,7 +298,9 @@
                                 @endif
                             </td>
                             <td></td>
-                            <td></td>
+                            <td class="center">
+                                {{ $group['lifespan_years'] !== null ? number_format($group['lifespan_years']) . ' years' : '' }}
+                            </td>
                         </tr>
                     @empty
                         <tr>
@@ -233,28 +313,69 @@
                     <tr class="blank-row">
                         <td colspan="7"><span class="form-label">Source of Fund:</span></td>
                     </tr>
-                    @if ($icsPage['groups']->isNotEmpty())
-                        <tr>
-                            <td colspan="7" class="form-label">
-                                Total quantity: {{ number_format($icsPage['total_quantity']) }}
-                            </td>
-                        </tr>
-                    @endif
                     <tr>
                         <td colspan="7" class="signature-cell">
                             <table class="signatures">
                                 <tr>
                                     <td>
                                         Received from:
-                                        <div class="signature-line"></div>
-                                        <div class="signature-role">Property Custodian</div>
-                                        <div class="signature-note">Prepared by &nbsp;&middot;&nbsp; {{ $preparedBy }}</div>
+                                        <div class="signature-fields">
+                                            <div class="signature-field">
+                                                <div class="signature-field-line">
+                                                    @if ($isPreview)
+                                                        <input class="signature-edit" type="text" maxlength="255" data-report-field="received_from_name" value="{{ $receivedFromName }}" aria-label="Received from signature name">
+                                                    @else
+                                                        {{ $receivedFromName }}
+                                                    @endif
+                                                </div>
+                                                <div class="signature-field-label">Signature Over Printed Name</div>
+                                            </div>
+                                            <div class="signature-field">
+                                                <div class="signature-field-line">
+                                                    @if ($isPreview)
+                                                        <input class="signature-edit" type="text" maxlength="255" data-report-field="received_from_position" value="{{ $receivedFromPosition }}" aria-label="Received from position or office">
+                                                    @else
+                                                        {{ $receivedFromPosition }}
+                                                    @endif
+                                                </div>
+                                                <div class="signature-field-label">Position/Office</div>
+                                            </div>
+                                            <div class="signature-field">
+                                                <div class="signature-field-line">
+                                                    @if ($isPreview)
+                                                        <input class="signature-edit" type="text" maxlength="255" data-report-field="received_from_date" value="{{ $receivedFromDate }}" aria-label="Received from date">
+                                                    @else
+                                                        {{ $receivedFromDate }}
+                                                    @endif
+                                                </div>
+                                                <div class="signature-field-label">Date</div>
+                                            </div>
+                                        </div>
                                     </td>
                                     <td>
                                         Received by:
-                                        <div class="signature-line"></div>
-                                        <div class="signature-role">Recipient</div>
-                                        <div class="date-line"></div>
+                                        <div class="signature-name">
+                                            @if ($isPreview)
+                                                <input class="signature-edit" type="text" maxlength="255" data-report-field="received_by_name" value="{{ $preparedBy }}" aria-label="Received by name">
+                                            @else
+                                                {{ $preparedBy }}
+                                            @endif
+                                        </div>
+                                        <div class="signature-line received"></div>
+                                        <div class="signature-role">
+                                            @if ($isPreview)
+                                                <input class="signature-edit" type="text" maxlength="255" data-report-field="received_by_role" value="{{ $receivedByRole }}" aria-label="Received by role">
+                                            @else
+                                                {{ $receivedByRole }}
+                                            @endif
+                                        </div>
+                                        <div class="date-line signature-date-line">
+                                            @if ($isPreview)
+                                                <input class="signature-edit" type="text" maxlength="255" data-report-field="received_by_date" value="{{ $receivedByDate }}" aria-label="Received by date">
+                                            @else
+                                                {{ $receivedByDate }}
+                                            @endif
+                                        </div>
                                         <div class="signature-note">Date</div>
                                     </td>
                                 </tr>

@@ -1402,6 +1402,25 @@ class PropertyCustodianController extends Controller
             ]
         )->validate();
 
+        $signatureFields = Validator::make(
+            [
+                'received_from_name' => $request->query('received_from_name'),
+                'received_from_position' => $request->query('received_from_position'),
+                'received_from_date' => $request->query('received_from_date'),
+                'received_by_name' => $request->query('received_by_name'),
+                'received_by_role' => $request->query('received_by_role'),
+                'received_by_date' => $request->query('received_by_date'),
+            ],
+            [
+                'received_from_name' => ['nullable', 'string', 'max:255'],
+                'received_from_position' => ['nullable', 'string', 'max:255'],
+                'received_from_date' => ['nullable', 'string', 'max:255'],
+                'received_by_name' => ['nullable', 'string', 'max:255'],
+                'received_by_role' => ['nullable', 'string', 'max:255'],
+                'received_by_date' => ['nullable', 'string', 'max:255'],
+            ]
+        )->validate();
+
         $search = strtolower($filters['search'] ?? '');
         $categoryId = $filters['category_id'] ?? null;
         $icsNumbers = $filters['ics_numbers'] ?? [];
@@ -1444,6 +1463,7 @@ class PropertyCustodianController extends Controller
                 (string) $item->unit,
                 (string) ($item->status ?? ''),
                 (string) ($item->ics_no ?? ''),
+                (string) ($item->lifespan_years ?? ''),
             ]))
             ->map(function ($items) use ($assignmentsByItem) {
                 $itemAssignments = $items
@@ -1495,6 +1515,7 @@ class PropertyCustodianController extends Controller
                     'category' => $items->first()->category?->category_name ?? 'Uncategorized',
                     'description' => $items->max('description') ?? '',
                     'unit' => $items->first()->unit,
+                    'lifespan_years' => $items->first()->lifespan_years,
                     'quantity' => $displayQuantity,
                     'unit_cost' => $costQuantity > 0 ? $totalCost / $costQuantity : (float) $items->avg('unit_cost'),
                     'total_cost' => $totalCost,
@@ -1555,7 +1576,10 @@ class PropertyCustodianController extends Controller
             . ($search !== '' ? "; Search: \"{$filters['search']}\"" : '')
             . ($categoryId ? '; Category: ' . (Category::find($categoryId)?->category_name ?? $categoryId) : '');
 
-        $pdf = Pdf::loadView('pdfs.inventory-export', [
+        $preparedBy = trim($request->user()->first_name . ' ' . $request->user()->last_name)
+            ?: $request->user()->username;
+        $isPreview = $request->boolean('preview');
+        $viewData = [
             'icsPages' => $icsPages,
             'groups' => $groups,
             'totalQuantity' => $groups->sum('quantity'),
@@ -1563,10 +1587,26 @@ class PropertyCustodianController extends Controller
             'filterSummary' => $filterSummary,
             'workspace' => $workspace,
             'generatedAt' => now()->format('F j, Y g:i A'),
-            'preparedBy' => trim($request->user()->first_name . ' ' . $request->user()->last_name)
-                ?: $request->user()->username,
-        ]);
-        $pdf->setPaper('a4', 'portrait');
+            'preparedBy' => $request->query->has('received_by_name')
+                ? ($signatureFields['received_by_name'] ?? '')
+                : $preparedBy,
+            'receivedFromName' => $signatureFields['received_from_name'] ?? '',
+            'receivedFromPosition' => $signatureFields['received_from_position'] ?? '',
+            'receivedFromDate' => $signatureFields['received_from_date'] ?? '',
+            'receivedByRole' => $request->query->has('received_by_role')
+                ? ($signatureFields['received_by_role'] ?? '')
+                : 'Property Custodian',
+            'receivedByDate' => $signatureFields['received_by_date'] ?? '',
+            'isPreview' => $isPreview,
+        ];
+
+        if ($request->boolean('preview')) {
+            return response()->view('pdfs.inventory-export', $viewData);
+        }
+
+        $pdf = Pdf::loadView('pdfs.inventory-export', $viewData);
+        $pdf->setOption('defaultMediaType', 'print');
+        $pdf->setPaper('a4', 'landscape');
 
         return $pdf->download("dnhs_inventory_{$workspace}_" . now()->format('Y-m-d_His') . '.pdf');
     }
