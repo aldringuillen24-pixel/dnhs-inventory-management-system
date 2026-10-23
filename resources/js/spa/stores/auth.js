@@ -23,7 +23,7 @@ export const useAuthStore = defineStore('auth', () => {
         'Property Custodian': '/dashboard',
         'End User': '/end-user/dashboard',
         'School Head': '/school-head/dashboard',
-        Inspector: '/inspector/inventory',
+        Inspector: '/inspector/arrival-inspections',
         Administrator: '/admin/dashboard',
     };
 

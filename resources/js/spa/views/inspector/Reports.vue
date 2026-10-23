@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="mb-4">
-      <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Inspection Reports</h1>
+      <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Reports</h1>
       <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Read-only inventory movement and value summary.</p>
     </div>
 

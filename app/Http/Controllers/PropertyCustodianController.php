@@ -3869,40 +3869,6 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.inventory')->with('success', $successMessage);
     }
 
-    public function sendToInspection(Request $request, $itemId)
-    {
-        $validated = $request->validate([
-            'inventory_ids' => ['sometimes', 'array', 'min:1'],
-            'inventory_ids.*' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
-            'reason' => ['nullable', 'string', 'max:500'],
-        ]);
-
-        $actorId = (int) $request->user()->id;
-        $reason = isset($validated['reason']) && $validated['reason'] !== ''
-            ? $validated['reason']
-            : null;
-
-        if (isset($validated['inventory_ids'])) {
-            $itemIds = array_map('intval', $validated['inventory_ids']);
-            if (! in_array((int) $itemId, $itemIds, true)) {
-                return redirect()->back()->with('error', 'The selected inventory records do not match the requested action.');
-            }
-
-            $error = $this->inventoryOperations->sendItemsToInspection($itemIds, $actorId, $reason);
-            $successMessage = count($itemIds) . ' inventory item(s) sent for inspection.';
-        } else {
-            $inventory = Inventory::findOrFail($itemId);
-            $error = $this->inventoryOperations->sendToInspection($inventory->item_id, $actorId, $reason);
-            $successMessage = 'Item sent for inspection.';
-        }
-
-        if ($error !== null) {
-            return redirect()->back()->with('error', $error);
-        }
-
-        return redirect()->route('propertyCustodian.inventory')->with('success', $successMessage);
-    }
-
     public function markRepaired(Request $request, $itemId)
     {
         $validated = $request->validate([

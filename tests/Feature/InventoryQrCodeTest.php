@@ -185,12 +185,12 @@ test('qr lookup includes the assignee and return details for an assigned item', 
         ->assertJsonPath('return_assignments.0.inventory_id', $item->item_id);
 });
 
-test('qr lookup reports the real quantity for an item flagged while assigned', function () {
+test('qr lookup reports the real quantity for an assigned item', function () {
     // Reported as "0 piece" on the scan panel for a unit that plainly exists.
-    // inventory.quantity is 0 for a fully issued record, and flagging it for
-    // inspection does not change that — the quantity lives on the transaction.
+    // Inventory quantity is 0 for a fully issued record; the quantity lives
+    // on the assignment transaction.
     $category = qrCategory();
-    $token = 'dnhs_qr_flagged_custody_tok';
+    $token = 'dnhs_qr_assigned_custody_tok';
     $item = seedInventoryItem($this->custodian, $category, $token);
     $item->update([
         'quantity' => 0,
@@ -206,10 +206,7 @@ test('qr lookup reports the real quantity for an item flagged while assigned', f
         'status' => 'assigned',
     ]);
 
-    app(\App\Services\InventoryOperationService::class)
-        ->sendToInspection($item->item_id, $this->custodian->id, 'Lamp out');
-
-    expect($item->fresh()->status)->toBe('under_inspection')
+    expect($item->fresh()->status)->toBe('assigned')
         ->and((int) $item->fresh()->quantity)->toBe(0);
 
     $this->actingAs($this->custodian)

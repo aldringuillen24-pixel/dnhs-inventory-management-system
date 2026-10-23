@@ -209,14 +209,15 @@ test('school head audit logs api returns paginated JSON', function () {
         ->assertJsonStructure(['title', 'logs' => ['data']]);
 });
 
-test('inspector inventory and reports api are read only and role scoped', function () {
-    $this->actingAs($this->inspector)->getJson(route('api.inspector.inventory.overview'))
-        ->assertOk()
-        ->assertJsonStructure(['title', 'metrics', 'categories']);
-
+test('inspector reports remain available while inspection api is removed', function () {
     $this->actingAs($this->inspector)->getJson(route('api.inspector.reports'))
         ->assertOk()
         ->assertJsonStructure(['title', 'metrics', 'categoryData', 'statusData', 'recentTransactions']);
+
+    $this->actingAs($this->inspector)->getJson('/api/inspector/inspection/queue')->assertNotFound();
+    $this->actingAs($this->inspector)->getJson('/api/inspector/inspection/qr-lookup?token=unused')->assertNotFound();
+    $this->actingAs($this->inspector)->postJson('/api/inspector/inspection/1/mark-inspected')->assertNotFound();
+    $this->actingAs($this->inspector)->getJson('/api/inspector/inventory/overview')->assertNotFound();
 
     $this->actingAs($this->inspector)->getJson(route('api.school-head.inventory.overview'))
         ->assertForbidden();

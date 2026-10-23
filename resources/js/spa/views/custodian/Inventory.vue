@@ -610,18 +610,6 @@
                           <path stroke-linecap="round" stroke-linejoin="round" d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-7 7a2.1 2.1 0 0 1-3-3l7-7a6 6 0 0 1 7.9-7.9z" />
                         </svg>
                       </button>
-                      <button
-                        v-if="isInspectable(row.status) && hasInspectableItems(row)"
-                        type="button"
-                        class="rounded-md p-1.5 text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-500/10"
-                        title="Send selected items for inspection"
-                        aria-label="Send items for inspection"
-                        @click="openInspectionModal(row)"
-                      >
-                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" />
-                        </svg>
-                      </button>
                       <template v-if="row.status === 'under_repair'">
                         <button
                           type="button"
@@ -793,14 +781,6 @@
               @click="openMaintenanceModal(recordGroup)"
             >
               Send for Repair
-            </button>
-            <button
-              v-if="isInspectable(recordGroup.status) && hasInspectableItems(recordGroup)"
-              type="button"
-              class="rounded-md border border-sky-200 px-2.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-50 dark:border-sky-500/30 dark:text-sky-300 dark:hover:bg-sky-500/10"
-              @click="openInspectionModal(recordGroup)"
-            >
-              Send to Inspection
             </button>
             <template v-if="recordGroup.status === 'under_repair'">
               <button
@@ -1130,100 +1110,6 @@
             @click="sendSelectedToMaintenance"
           >
             {{ sendingToMaintenance ? 'Sending…' : `Send ${maintenanceItemIds.length} for Repair` }}
-          </button>
-        </div>
-      </template>
-    </Modal>
-
-    <Modal
-      :open="inspectionGroup !== null"
-      :title="inspectionGroup ? `Send ${inspectionGroup.item_name} for inspection` : 'Send items for inspection'"
-      subtitle="Flag the selected records so the inspector can verify them, then mark each one inspected."
-      max-width="max-w-xl"
-      fixed-body
-      @close="closeInspectionModal"
-    >
-      <div v-if="inspectionGroup" class="flex min-h-0 flex-1 flex-col space-y-3">
-        <p
-          v-if="inspectionError"
-          role="alert"
-          class="shrink-0 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200"
-        >
-          {{ inspectionError }}
-        </p>
-
-        <div class="min-h-[6rem] max-h-[38vh] shrink divide-y divide-gray-100 overflow-y-auto rounded-md border border-gray-200 dark:divide-white/5 dark:border-gray-700">
-          <label
-            v-for="source in inspectableItems"
-            :key="source.item_id"
-            class="flex cursor-pointer flex-wrap items-center justify-between gap-3 p-3 hover:bg-gray-50 dark:hover:bg-white/5"
-          >
-            <span class="flex min-w-0 items-center gap-3">
-              <input
-                v-model="inspectionItemIds"
-                :value="source.item_id"
-                type="checkbox"
-                :disabled="sendingToInspection"
-                class="h-4 w-4 rounded-md border-gray-300 text-sky-600 focus:ring-sky-500 disabled:cursor-not-allowed dark:border-gray-700 dark:bg-gray-800"
-              />
-              <span class="min-w-0">
-                <span class="block font-mono text-sm font-semibold text-gray-900 dark:text-white">
-                  {{ source.inventory_item_no ?? `#${source.item_id}` }}
-                </span>
-                <span class="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-                  {{ source.serial_number ? `Serial: ${source.serial_number}` : 'No serial number' }}
-                </span>
-              </span>
-            </span>
-            <span class="flex items-center gap-2 text-xs">
-              <span>{{ format(sourceQuantity(source)) }} {{ source.unit }}</span>
-              <span class="rounded-md bg-sky-50 px-2 py-1 font-medium capitalize text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
-                {{ (source.status ?? '').replace(/_/g, ' ') }}
-              </span>
-            </span>
-          </label>
-          <p v-if="!inspectableItems.length" class="p-4 text-sm text-gray-500">
-            This group has no records that can be flagged for inspection.
-          </p>
-        </div>
-
-        <p class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
-          {{ inspectionItemIds.length }} item record(s) selected.
-        </p>
-
-        <div class="shrink-0 space-y-1.5">
-          <label for="inspection-reason" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-            Reason for inspection <span class="font-normal text-gray-500">(optional)</span>
-          </label>
-          <textarea
-            id="inspection-reason"
-            v-model="inspectionReason"
-            rows="2"
-            maxlength="500"
-            :disabled="sendingToInspection"
-            placeholder="e.g. Quarterly verification, reported defect, custody audit"
-            class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          />
-        </div>
-
-      </div>
-      <template #footer>
-        <div class="flex justify-end gap-3">
-          <button
-            type="button"
-            class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
-            :disabled="sendingToInspection"
-            @click="closeInspectionModal"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-            :disabled="sendingToInspection || inspectionItemIds.length === 0"
-            @click="sendSelectedToInspection"
-          >
-            {{ sendingToInspection ? 'Sending…' : `Flag ${inspectionItemIds.length} for Inspection` }}
           </button>
         </div>
       </template>
@@ -2165,11 +2051,6 @@ const qrScannerOpen = ref(false);
 const qrLookupLoading = ref(false);
 const qrError = ref('');
 const qrResult = ref(null);
-const inspectionGroup = ref(null);
-const inspectionItemIds = ref([]);
-const inspectionReason = ref('');
-const inspectionError = ref('');
-const sendingToInspection = ref(false);
 const editItemId = ref(null);
 const confirmBulk = ref(false);
 const selection = ref([]);
@@ -2259,11 +2140,6 @@ const paginator = computed(() =>
 const rows = computed(() => paginator.value.data ?? []);
 const maintenanceEligibleItems = computed(() => (maintenanceGroup.value?.sourceItems ?? [])
   .filter((source) => source.status === 'available' && isMaintenanceEligible(source)));
-// Mirrors InventoryOperationService::INSPECTABLE_STATUSES. Unlike maintenance this is
-// not gated on the category, because inspection verifies rather than repairs.
-const INSPECTABLE_STATUSES = ['available', 'assigned', 'under_repair', 'ready_to_dispose'];
-const inspectableItems = computed(() => (inspectionGroup.value?.sourceItems ?? [])
-  .filter((source) => INSPECTABLE_STATUSES.includes(source.status)));
 const maintenanceActionItems = computed(() => (maintenanceActionGroup.value?.sourceItems ?? [])
   .filter((source) => source.status === 'under_repair'));
 // Zero-stock rows are still issued out, so they cannot be completed here.
@@ -3167,10 +3043,6 @@ function hasMaintenanceEligibleItems(row) {
   );
 }
 
-function isInspectable(status) {
-  return INSPECTABLE_STATUSES.includes(status);
-}
-
 // Change 1: partially issued stock reads in the Assigned tab. A row is shown
 // as assigned when it is fully assigned, or when the Assigned workspace lists
 // an `available` record that still has units issued out (its remainder stays
@@ -3199,67 +3071,6 @@ function isPartialAssigned(row) {
 
 function displayStatus(row) {
   return isPartialAssigned(row) ? 'assigned' : row?.status;
-}
-
-function hasInspectableItems(row) {
-  return (row?.sourceItems ?? []).some((source) => INSPECTABLE_STATUSES.includes(source.status));
-}
-
-function openInspectionModal(row) {
-  inspectionGroup.value = row;
-  inspectionItemIds.value = [];
-  inspectionReason.value = '';
-  inspectionError.value = '';
-}
-
-function closeInspectionModal() {
-  if (sendingToInspection.value) return;
-  inspectionGroup.value = null;
-  inspectionItemIds.value = [];
-  inspectionReason.value = '';
-  inspectionError.value = '';
-}
-
-async function sendSelectedToInspection() {
-  const selectedSources = inspectableItems.value.filter((source) =>
-    inspectionItemIds.value.includes(source.item_id),
-  );
-
-  if (!selectedSources.length || sendingToInspection.value) {
-    inspectionError.value = 'Select at least one eligible item record.';
-    sendingToInspection.value = false;
-    return;
-  }
-
-  sendingToInspection.value = true;
-  inspectionError.value = '';
-
-  try {
-    await api.post(
-      `/custodian/inventory/${selectedSources[0].item_id}/send-to-inspection`,
-      {
-        inventory_ids: selectedSources.map((source) => source.item_id),
-        reason: inspectionReason.value.trim() || null,
-      },
-      // This handler raises its own confirmation below. Without skipToast the
-      // interceptor would add a second, generic "Success" toast for the same action.
-      { skipToast: true },
-    );
-    inspectionGroup.value = null;
-    inspectionItemIds.value = [];
-    inspectionReason.value = '';
-    forgetPageCache();
-    await load();
-    useToastStore().success(
-      'Sent for inspection',
-      `${selectedSources.length} item record(s) are now awaiting inspection.`,
-    );
-  } catch (requestError) {
-    inspectionError.value = requestError?.response?.data?.message
-      ?? 'Could not flag the selected items for inspection. Refresh the inventory and try again.';
-  } finally {
-    sendingToInspection.value = false;
-  }
 }
 
 function openMaintenanceModal(row) {

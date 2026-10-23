@@ -39,7 +39,7 @@ test('spa history subpaths resolve to the shell for the client router', function
         ->assertSee('<div id="app"></div>', false);
 });
 
-test('inspector receives the read-only inventory and reports SPA pages', function () {
+test('inspector is directed to arrival inspections and legacy inspection page redirects', function () {
     $inspectorRole = Role::create(['role_name' => 'Inspector']);
     $inspector = User::create([
         'role_id' => $inspectorRole->role_id,
@@ -53,6 +53,10 @@ test('inspector receives the read-only inventory and reports SPA pages', functio
 
     $this->actingAs($inspector)
         ->get('/spa/inspector/inventory')
+        ->assertRedirect('/spa/inspector/arrival-inspections');
+
+    $this->actingAs($inspector)
+        ->get('/spa/inspector/arrival-inspections')
         ->assertOk()
         ->assertSee('<div id="app"></div>', false);
 
@@ -63,7 +67,7 @@ test('inspector receives the read-only inventory and reports SPA pages', functio
 
     $this->actingAs($inspector)
         ->get('/')
-        ->assertRedirect('/spa/inspector/inventory');
+        ->assertRedirect('/spa/inspector/arrival-inspections');
 
     $this->actingAs($this->custodian)
         ->get('/spa/inspector/inventory')

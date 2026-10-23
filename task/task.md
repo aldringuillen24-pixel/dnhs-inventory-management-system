@@ -1,79 +1,59 @@
+# Inspector Arrival Inspection and IAR Workflow
 
-# Tasks
-<!-- 1. CRUD for categories 
+## Goal
 
-2. Record with existing records to other components should not be deleted 
-    a. The same with other modules 
+When goods physically arrive, the Inspector records and inspects them in one workflow. Accepted items produce an Inspection and Acceptance Report (IAR). Do not create a separate Incoming Delivery module.
 
-3. Lock the stock quantity after encoding in the edit modal, inside the 
-    a. can edit but recorded in the new log module or add it inside the audit ledger inside the transaciton? -->
+## Tasks
 
-<!-- 4. Add damage/return/adjustment management feature 
-    a. return to supplier --> //inspector will inspect it
+1. **Acceptance and inventory-posting rules — decided**
+   - For partial acceptance, generate the IAR for accepted items only; record rejected quantities and findings as part of the inspection.
+   - For fully rejected deliveries, save the inspection and rejection findings, but do not generate an IAR.
+   - When the Inspector finalizes the IAR, post accepted quantities to inventory immediately. Do not require a separate custodian confirmation as a posting gate.
+   - The IAR must include three inspection committee confirmation/signature lines and a separate School Property Custodian acceptance signature. The custodian signature is part of the IAR document and does not delay inventory posting.
 
-<!-- 5. Enchance stockout module 
-    a. Allow the user to assign multiple items to recipient -->
+2. **Define arrival inspection and item data — implemented**
+   - Added separate arrival-inspection and item-line data structures, independent of the old workflow for flagging existing inventory.
+   - The inspection stores IAR header, inspection and acceptance details, status, creator/completer, posting timestamp, and the three committee plus custodian printed names/designations. Handwritten signatures are added to the printed document.
+   - Each IAR item line stores only Stock/Property No., description, unit, and quantity. The IAR header includes Entity Name, Fund Cluster, Supplier, Contract Title, Requisitioning Office/Department, Responsibility Center Code, IAR No./Date, Invoice No./Date, Inspection Date, Date Received, acceptance, and remarks.
+   - IAR numbers are unique; fully rejected inspections can be stored without an IAR number. UI validation, IAR numbering, and idempotent inventory posting remain in later tasks.
 
-6. Print multiple qrcode 
+3. **Build the Inspector workflow — implemented**
+   - Added an Inspector-only Arrival Inspections page and New Inspection entry point; Inspector Reports and Profile remain available.
+   - Inspectors can save drafts, reopen their own drafts, record the IAR header and item columns, then record inspection/acceptance details with inspector identity and timestamp.
+   - For partial acceptance, enter accepted quantity in the IAR item quantity and record rejected quantities/findings in acceptance remarks.
+   - Recorded inspection results can be reviewed and corrected until IAR finalization; finalized records are read-only. IAR generation/finalization and inventory posting remain in Tasks 4–5.
 
-7. Asset transfer module
-    a. Transfer Slip
+4. **Generate the IAR — in progress**
+   - Open New Inspection and Review in an IIRUP-style modal with the HTML IAR preview as the initial view; edit data directly in the preview document.
+   - Keep all IAR fields and item lines editable in place until finalization.
+   - Generate and preview a printable IAR PDF from saved inspection data and the supplied form.
+   - Include accepted item quantities, rejected quantities/findings in acceptance remarks, and the inspection/acceptance results.
+   - Include three inspection committee confirmation/signature lines and a separate School Property Custodian acceptance signature.
+   - Verify the PDF renders as a letter-size document and gate it to eligible, owned inspections with an IAR number.
+   - Use a text-only letterhead until an appropriate Cebu Province logo asset is available; do not use the unrelated Escalante City header artwork.
 
-<!-- 8. Add API key management feature for the end user 
-    a. Guide how to configure  -->
+5. **Handle accepted items in inventory**
+   - Implement immediate inventory posting by the Inspector when the IAR is finalized.
+   - Add only accepted quantities; never add rejected quantities.
+   - Record inventory movements and preserve a link to the originating inspection/IAR.
 
-9. Include all possible report format of the client
-    a. Request to Quotation Disposal
-    b. INVENTORY AND INSPECTION REPORT OF UNSERVICEABLE PROPERTY
-    c. 
+6. **Retire the old inspection workflow safely**
+   - Remove the old Inspector queue, QR inspection lookup, and mark-inspected actions.
+   - Remove custodian controls and endpoints that only serve the old flag-existing-inventory and repair-recommendation flow.
+   - Preserve unrelated inventory repair, end-user issue reporting, and normal QR lookup behavior.
+   - Reconcile the Inspector navigation, routes, and landing page with the new arrival inspection flow.
 
+7. **Reconcile existing inspection records**
+   - Review the proposed cleanup migration before deployment.
+   - Restore open flagged items to their saved prior status and close those old records as agreed.
+   - Decline pending repair recommendations and restore the prior item status, preserving an audit trail.
+   - Test the cleanup migration for repeatability and verify that it does not alter unrelated or already-resolved records.
+   - Do not run this cleanup against production until its record counts and effects have been reviewed and approved.
 
-## RFQ
-
-## Page 1
-Confirm the source details: Resolve the deadline mismatch (April 28, 2025 vs. April 28, 2026), and verify the project name, contact numbers, and procurement mode.
-
-Institutional header: Already included using the DepEd SVG.
-
-
-3 BAC and project information: Add the BAC heading, project name, school/location details, email, and website.
-
-4 RFQ identification: Add the “Request for Quotation” title, date, quotation number, and procurement mode.
-
-5 Recipient and instructions: Add the addressee and quotation submission instructions.
-
-6 BAC chair details: Add the chair’s name and title.
-
-7 Inspection and bidding schedule: Add the inspection date, auction schedule, award-item schedule, and floor price.
-
-8 Supplier section: Add the quotation statement, supplier contact fields, and authorized representative signature/date area.
-
-9 Start of the item table: Add the column headings and the project/lot row, then the first-page item entries. In the workbook, page 1 ends at row 70, partway through the item list.
-
-
-
-
-
-
-## Page 2
-
-1. Continue the item table with the remaining property entries (rows 71-90); decide whether the column headings should repeat at the top of this page.
-2. Add the item total and end marker (rows 91-92).
-3. Add the documentary-requirements compliance table, including the three required documents and supplier compliance column.
-4. Add Terms and Conditions A: Submission of Requirements (rows 99-111), including the required-document list and note.
-5. Add Terms and Conditions B-D (rows 113-127): Price Validity, Ocular Inspection, Award, tie-breaking, and non-appearance.
-6. Add Terms and Conditions E-F (rows 128-138): Delivery of Service and Evaluation of Quotations.
-7. Add Terms and Conditions G: Instructions (rows 139-149), preserving the four numbered instructions.
-
-
-
-
-
-
-
-## Page 3
-
-1. Add Terms and Conditions H-J (rows 151-159): Liquidated Damages, Warranty, and Payment.
-2. Add the closing BAC reservation statement (rows 160-162).
-3. Add the closing contact block (rows 164-167) and Escalante City education seal using the RFQ footer component.
-4. Verify the page break, footer placement, and that the closing text fits on the final page.
+8. **Verify the complete workflow**
+   - Test role access and validation for inspection lines and quantities.
+   - Test pass, partial acceptance, and rejection cases.
+   - Test IAR numbering, report contents, printing, and duplicate-submission protection.
+   - Test immediate inventory posting, including quantity and movement history.
+   - Confirm Inspector Reports/Profile, existing inventory, and unrelated repair and issue-report workflows remain functional.

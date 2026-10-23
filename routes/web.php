@@ -3,7 +3,6 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AdminDashboardController;
-use App\Http\Controllers\InspectorController;
 use App\Http\Controllers\SchoolHeadController;
 use App\Http\Controllers\PropertyCustodianController;
 use App\Http\Controllers\EndUserController;
@@ -13,6 +12,7 @@ use App\Http\Controllers\Auth\OnboardingController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\AdminSettingsController;
 use App\Http\Controllers\AiAssistantController;
+use App\Http\Controllers\ArrivalInspectionController;
 use App\Http\Controllers\Auth\PasswordResetController;
 
 // Authentication Routes
@@ -90,7 +90,7 @@ Route::middleware('auth')->group(function () {
         }
 
         if ($user->role && strtolower($user->role->role_name) === 'inspector') {
-            return redirect('/spa/inspector/inventory');
+            return redirect('/spa/inspector/arrival-inspections');
         }
     });
 });
@@ -144,8 +144,6 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::post('/inventory/receive-return', [PropertyCustodianController::class, 'receiveReturn'])->name('inventory.receive-return');
 
     Route::post('/inventory/{itemId}/send-to-maintenance', [PropertyCustodianController::class, 'sendToMaintenance'])->name('inventory.send-to-maintenance');
-
-    Route::post('/inventory/{itemId}/send-to-inspection', [PropertyCustodianController::class, 'sendToInspection'])->name('inventory.send-to-inspection');
 
     Route::post('/inventory/{itemId}/mark-repaired', [PropertyCustodianController::class, 'markRepaired'])->name('inventory.mark-repaired');
 
@@ -287,7 +285,6 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::patch('/inventory/{inventory}', [PropertyCustodianController::class, 'updateInventory'])->name('inventory.update');
         Route::delete('/inventory/{inventory}', [PropertyCustodianController::class, 'destroyInventory'])->name('inventory.destroy');
         Route::post('/inventory/{itemId}/send-to-maintenance', [PropertyCustodianController::class, 'sendToMaintenance'])->name('inventory.send-to-maintenance');
-        Route::post('/inventory/{itemId}/send-to-inspection', [PropertyCustodianController::class, 'sendToInspection'])->name('inventory.send-to-inspection');
         Route::post('/inventory/{itemId}/mark-repaired', [PropertyCustodianController::class, 'markRepaired'])->name('inventory.mark-repaired');
         Route::post('/inventory/{itemId}/mark-ready-to-dispose', [PropertyCustodianController::class, 'markReadyToDispose'])->name('inventory.mark-ready-to-dispose');
         Route::post('/inspection/{inspectionId}/approve-repair', [PropertyCustodianController::class, 'approveRepairRecommendation'])->name('inspection.approve-repair');
@@ -359,11 +356,13 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
     });
 
     Route::middleware('role:Inspector')->prefix('inspector')->name('inspector.')->group(function () {
-        Route::get('/inventory/overview', [SchoolHeadController::class, 'inventoryOverview'])->name('inventory.overview');
+        Route::get('/arrival-inspections', [ArrivalInspectionController::class, 'index'])->name('arrival-inspections.index');
+        Route::post('/arrival-inspections', [ArrivalInspectionController::class, 'store'])->name('arrival-inspections.store');
+        Route::get('/arrival-inspections/{arrivalInspection}/pdf', [ArrivalInspectionController::class, 'pdf'])->name('arrival-inspections.pdf');
+        Route::get('/arrival-inspections/{arrivalInspection}', [ArrivalInspectionController::class, 'show'])->name('arrival-inspections.show');
+        Route::patch('/arrival-inspections/{arrivalInspection}', [ArrivalInspectionController::class, 'update'])->name('arrival-inspections.update');
+        Route::delete('/arrival-inspections/{arrivalInspection}', [ArrivalInspectionController::class, 'destroy'])->name('arrival-inspections.destroy');
         Route::get('/reports', [SchoolHeadController::class, 'reports'])->name('reports');
-        Route::get('/inspection/queue', [InspectorController::class, 'inspectionQueue'])->name('inspection.queue');
-        Route::get('/inspection/qr-lookup', [InspectorController::class, 'qrLookup'])->name('inspection.qr-lookup');
-        Route::post('/inspection/{inspectionId}/mark-inspected', [InspectorController::class, 'markInspected'])->name('inspection.mark-inspected');
     });
 
     Route::middleware('role:Administrator')->prefix('admin')->name('admin.')->group(function () {
@@ -407,6 +406,7 @@ Route::middleware('auth')->get('/spa/onboarding', $spaShell)->name('spa.onboardi
 
 Route::middleware(['auth', 'role:Administrator'])->get('/spa/admin/{any?}', $spaShell)->where('any', '.*');
 Route::middleware(['auth', 'role:School Head'])->get('/spa/school-head/{any?}', $spaShell)->where('any', '.*');
+Route::middleware(['auth', 'role:Inspector'])->get('/spa/inspector/inventory', fn () => redirect('/spa/inspector/arrival-inspections'));
 Route::middleware(['auth', 'role:Inspector'])->get('/spa/inspector/{any?}', $spaShell)->where('any', '.*');
 Route::middleware(['auth', 'role:End User'])->get('/spa/end-user/{any?}', $spaShell)->where('any', '.*');
 
