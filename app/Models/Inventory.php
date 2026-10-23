@@ -77,21 +77,8 @@ class Inventory extends Model
     ];
 
     /**
-     * Statuses in which a record's units are still issued out to someone.
-     *
-     * `status` carries two independent meanings: custody and condition. Flagging
-     * an assigned item for inspection rewrites `status` to `under_inspection`
-     * (InventoryOperationService::sendToInspection) without releasing the units —
-     * `assigned_to_user_id` is untouched and markInspected() later restores
-     * `status_before`. So `under_inspection` overlays custody rather than replacing
-     * it. A status equality filter against 'assigned' therefore hides an item that
-     * is still in someone's hands.
-     *
-     * A status alone is not sufficient to prove custody: stock flagged straight
-     * from `available` also reads `under_inspection` but has no holder. Pair this
-     * with an active assignment transaction to tell the two apart — a manual issue
-     * has a transaction but no `assigned_to_user_id`, since its recipient is not a
-     * user record.
+     * Assignment-bearing statuses include `under_inspection` only for legacy
+     * records awaiting the inspection cleanup migration.
      */
     public const CUSTODY_STATUSES = ['assigned', 'under_inspection'];
 

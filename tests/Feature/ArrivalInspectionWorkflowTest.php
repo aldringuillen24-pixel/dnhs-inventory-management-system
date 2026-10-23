@@ -106,6 +106,51 @@ it('saves the inspection verification checkbox state', function () {
     ]);
 });
 
+it('accepts a complete delivery and validates submitted item descriptions, units, and positive quantities', function () {
+    $inspector = inspectorUser();
+    $completePayload = arrivalInspectionPayload([
+        'acceptance_status' => 'complete',
+        'acceptance_remarks' => null,
+    ]);
+
+    $this->actingAs($inspector)
+        ->postJson('/api/inspector/arrival-inspections', $completePayload)
+        ->assertCreated()
+        ->assertJsonPath('inspection.acceptance_status', 'complete');
+
+    $invalidPayload = arrivalInspectionPayload([
+        'iar_number' => 'IAR-INVALID-ITEMS',
+        'items' => [[
+            'stock_property_number' => null,
+            'description' => null,
+            'unit' => null,
+            'quantity' => 0,
+        ]],
+    ]);
+
+    $this->actingAs($inspector)
+        ->postJson('/api/inspector/arrival-inspections', $invalidPayload)
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors([
+            'items.0.description',
+            'items.0.unit',
+            'items.0.quantity',
+        ]);
+});
+
+it('rejects duplicate IAR numbers through the Inspector API', function () {
+    $inspector = inspectorUser();
+    ArrivalInspection::query()->create([
+        'iar_number' => 'IAR-2026-0001',
+        'created_by' => $inspector->id,
+    ]);
+
+    $this->actingAs($inspector)
+        ->postJson('/api/inspector/arrival-inspections', arrivalInspectionPayload())
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('iar_number');
+});
+
 it('allows saving an IAR draft before inspection details are complete', function () {
     $inspector = inspectorUser();
     $payload = arrivalInspectionPayload([
@@ -347,6 +392,41 @@ it('offers approved unposted IARs as Stock In sources', function () {
     $this->actingAs($inspector)
         ->getJson('/api/custodian/inventory/stock-in/approved-iars')
         ->assertForbidden();
+});
+
+it('prevents Stock In from an IAR before custodian approval', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'inspected',
+        'acceptance_status' => 'complete',
+        'iar_number' => 'IAR-NOT-APPROVED',
+        'created_by' => $inspector->id,
+    ]);
+    $inspectionItem = $inspection->items()->create([
+        'description' => 'Unapproved desk',
+        'unit' => 'UNIT',
+        'quantity' => 2,
+    ]);
+    $category = Category::query()->create([
+        'category_name' => 'Unapproved IAR Furniture',
+        'requires_serial_number' => false,
+        'requires_qr_code' => false,
+    ]);
+
+    $this->actingAs($custodian)
+        ->postJson('/api/custodian/inventory/stock-in/approved-iar', [
+            'arrival_inspection_id' => $inspection->id,
+            'rows' => [[
+                'arrival_inspection_item_id' => $inspectionItem->id,
+                'category_id' => $category->category_id,
+                'unit_cost' => 100,
+            ]],
+        ])
+        ->assertStatus(409);
+
+    expect(Inventory::query()->where('arrival_inspection_id', $inspection->id)->exists())->toBeFalse()
+        ->and($inspection->fresh()->status)->toBe('inspected');
 });
 
 it('stocks every accepted item from an approved IAR once and links inventory back to the IAR', function () {

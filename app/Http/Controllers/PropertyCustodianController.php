@@ -8,11 +8,14 @@ use App\Models\Category;
 use App\Models\InventoryItemLog;
 use App\Models\User;
 use App\Services\AuditLedgerService;
+use App\Services\IncidentLifecycleService;
+use App\Services\IncidentProcessingService;
 use App\Models\Transaction;
 use App\Models\Inventory;
 
-use App\Models\InspectionRecord;
 use App\Models\MaintenanceRecord;
+use App\Models\MaintenanceRecordEvent;
+use App\Models\MaintenanceRecordEvidence;
 use App\Models\StockMovement;
 use App\Services\Forecasting\ForecastAiRecommendationService;
 use App\Services\ForecastDecisionSupportService;
@@ -794,12 +797,8 @@ class PropertyCustodianController extends Controller
         // Performance: a single GROUP BY status aggregate serves the tab badges
         // and the metric cards. Previously each status ran its own full-table
         // GROUP BY scan plus PHP-side summation (13 aggregate queries).
-        // Performance: a single GROUP BY status aggregate serves the tab badges and the
-        // metric cards. Custody-based statuses (assigned, and items flagged for
-        // inspection while still with a user) read the assignment transaction
-        // because inventory.quantity is 0 once units are issued out. Deriving both
-        // from the same join keeps Assigned and Under Inspection mutually exclusive,
-        // so nothing is double counted in the total.
+        // Historical inspection-flagged records continue to read assignment
+        // quantities from active transactions until the cleanup migration runs.
         $activeAssignmentsForTotals = Transaction::query()
             ->select('item_id')
             ->selectRaw('SUM(quantity) as active_assigned_quantity')
@@ -816,15 +815,8 @@ class PropertyCustodianController extends Controller
             ->pluck('total_quantity', 'status');
         $quantityForStatus = fn (string $status): int => (int) ($statusQuantities[$status] ?? 0);
 
-        // Flagged records whose units are still issued out. They belong to both the
-        // Assigned workspace and the Under Inspection workspace, so the Assigned
-        // figures add them on top of the plain `assigned` quantity. They are also
-        // already inside the per-status `under_inspection` quantity used for
-        // `attention`, and `total` remains the de-duplicated sum of statuses.
-        //
-        // "Still issued out" is an active assignment transaction, not
-        // `assigned_to_user_id`: a manual issue is assigned to an external
-        // recipient with no users row, so it has a transaction but a null holder.
+        // Keep legacy flagged records readable as assigned until the cleanup
+        // migration restores their previous statuses.
         $custodyFlaggedInspectionQuantity = (int) (Inventory::query()
             ->leftJoinSub($activeAssignmentsForTotals, 'active_assignments', function ($join): void {
                 $join->on('inventory.item_id', '=', 'active_assignments.item_id');
@@ -840,29 +832,20 @@ class PropertyCustodianController extends Controller
             'assigned' => (int) ($statusQuantities['assigned'] ?? 0) + $custodyFlaggedInspectionQuantity,
             'attention' => (int) ($statusQuantities['under_inspection'] ?? 0) + (int) ($statusQuantities['under_repair'] ?? 0),
         ];
-        $statuses = ['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
+        $statuses = ['available', 'assigned', 'under_repair', 'ready_to_dispose', 'disposed'];
         // Legacy bookmark support: the workspace used to be called
         // under_maintenance. Map it so saved links keep working.
         $requestedWorkspace = $request->query('workspace', 'all') === 'under_maintenance'
             ? 'under_repair'
             : $request->query('workspace', 'all');
-        $activeWorkspace = in_array($requestedWorkspace, ['all', 'available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'], true)
+        $activeWorkspace = in_array($requestedWorkspace, ['all', 'available', 'assigned', 'under_repair', 'ready_to_dispose', 'disposed'], true)
             ? $requestedWorkspace
             : 'all';
-        // A record flagged for inspection while its units are still issued out is both
-        // assigned and awaiting inspection. Flagging only rewrites `status`, so a
-        // plain status equality filter drops it out of the Assigned workspace and
-        // the holder appears to have lost the item. Assigned therefore also matches
-        // flagged records that still carry an active assignment transaction, which
-        // is what separates "flagged while assigned" from "flagged from stock" —
-        // the latter has no transaction and stays in Under Inspection only. Under
-        // Inspection keeps every flagged record, so the item stays visible in both
-        // workspaces until markInspected() restores `status_before`. Totals are still
-        // derived per status, so nothing is double counted in the overall total.
+        // Historical under_inspection rows remain readable until the cleanup
+        // migration runs; there is no longer a workspace for creating or processing them.
         $workspaceStatuses = [
             'available' => ['available'],
             'under_repair' => ['under_repair'],
-            'under_inspection' => ['under_inspection'],
             'ready_to_dispose' => ['ready_to_dispose'],
             'disposed' => ['disposed'],
         ];
@@ -920,11 +903,10 @@ class PropertyCustodianController extends Controller
                 $query = $buildInventoryQuery();
 
                 if ($status === 'assigned') {
-                    // Custody: either a plain assigned record, or a flagged one whose
-                    // units are still issued out on an active assignment transaction.
-                    // Partially issued stock also appears here: an `available`
-                    // record carrying active assignments shows its issued portion
-                    // in this tab while its remainder stays under Available.
+                    // Partially issued stock appears here: an `available` record
+                    // carrying active assignments shows its issued portion while
+                    // its remainder stays under Available. Legacy flagged rows
+                    // remain included until the cleanup migration runs.
                     $query->where(function ($scope): void {
                         $scope->whereIn('inventory.status', Inventory::CUSTODY_STATUSES)
                             ->orWhere(function ($partial): void {
@@ -964,7 +946,7 @@ class PropertyCustodianController extends Controller
             ->value('total_quantity') ?? 0);
         $inventoryStatusCounts['assigned'] = (int) $inventoryStatusCounts['assigned'] + $partiallyIssuedAssignedQuantity;
         // Performance: hydrate source rows only for the groups actually rendered
-        // on this page (the 7 paginators above), instead of the entire inventory
+        // on this page (the 6 paginators above), instead of the entire inventory
         // table with 5 eager relations each. Group membership is an OR of
         // (item_name, category_id, unit, status, ics_no) tuples taken from
         // the page rows — per-unit serials stay inside the group's sourceItems.
@@ -985,7 +967,7 @@ class PropertyCustodianController extends Controller
             ]))
             ->values();
         $sourceItemsByGroup = Inventory::query()
-            ->with(['category:category_id,category_name,is_maintenance_eligible,requires_serial_number', 'assignedTo', 'latestMaintenance', 'latestMaintenance.reportedBy:id,first_name,last_name,username', 'latestStockMovement', 'latestDisposalMovement'])
+            ->with(['category:category_id,category_name,is_maintenance_eligible,requires_serial_number', 'assignedTo', 'latestMaintenance', 'latestMaintenance.reportedBy:id,first_name,last_name,username', 'latestMaintenance.evidence:id,maintenance_record_id,original_filename', 'latestStockMovement', 'latestDisposalMovement'])
             ->orderBy('item_name')
             ->orderBy('item_id')
             ->where(function ($query) use ($displayedGroups): void {
@@ -1089,23 +1071,6 @@ class PropertyCustodianController extends Controller
 
         $activeAssignments = $activeAssignmentsQuery->get()->groupBy('item_id');
 
-        // Pending repair recommendations (inspector asked for repair, custodian
-        // has not decided yet), scoped to the same displayed source rows.
-        $repairRecommendations = InspectionRecord::query()
-            ->with([
-                'flaggedBy:id,first_name,last_name,username',
-                'inspectedBy:id,first_name,last_name,username',
-            ])
-            ->where('status', 'repair_recommended')
-            ->when(
-                $scopedSourceIds->isNotEmpty(),
-                fn ($query) => $query->whereIn('inventory_id', $scopedSourceIds),
-                fn ($query) => $query->whereRaw('0 = 1'),
-            )
-            ->latest('id')
-            ->get()
-            ->groupBy('inventory_id');
-
         // Pending holds for the Available/All tabs: requests in
         // `waiting for approval` promise units the stock rows still show as
         // available (deduction happens at approval). Unallocated `draft`
@@ -1125,8 +1090,8 @@ class PropertyCustodianController extends Controller
             ->groupBy('item_id')
             ->pluck('hold_quantity', 'item_id');
 
-        $attachGroupDetails = function ($collection) use ($sourceItemsByGroup, $activeAssignments, $repairRecommendations, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
-            $collection->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup, $activeAssignments, $repairRecommendations, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
+        $attachGroupDetails = function ($collection) use ($sourceItemsByGroup, $activeAssignments, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
+            $collection->each(function (Inventory $inventoryItem) use ($sourceItemsByGroup, $activeAssignments, $groupKey, $holdItemTypeRequests, $holdByItemId): void {
                 $matchedSourceItems = $sourceItemsByGroup->get(
                     $groupKey(
                         $inventoryItem->item_name,
@@ -1140,12 +1105,12 @@ class PropertyCustodianController extends Controller
 
                 if ($matchedSourceItems->isEmpty() && $inventoryItem->source_item_id) {
                     $fallbackSource = Inventory::query()
-                        ->with(['assignedTo', 'latestMaintenance', 'latestMaintenance.reportedBy:id,first_name,last_name,username', 'latestStockMovement', 'latestDisposalMovement'])
+                        ->with(['assignedTo', 'latestMaintenance', 'latestMaintenance.reportedBy:id,first_name,last_name,username', 'latestMaintenance.evidence:id,maintenance_record_id,original_filename', 'latestStockMovement', 'latestDisposalMovement'])
                         ->find($inventoryItem->source_item_id);
                     $matchedSourceItems = $fallbackSource ? collect([$fallbackSource]) : collect();
                 }
 
-                $matchedSourceItems->each(function (Inventory $sourceItem) use ($activeAssignments, $repairRecommendations): void {
+                $matchedSourceItems->each(function (Inventory $sourceItem) use ($activeAssignments): void {
                     $itemAssignments = $activeAssignments->get($sourceItem->item_id, collect());
                     $sourceItem->latestAssignment = $itemAssignments->first();
                     $sourceItem->assigned_quantity = (int) $itemAssignments->sum('quantity');
@@ -1204,19 +1169,6 @@ class PropertyCustodianController extends Controller
                         ->implode(', ');
                     $sourceItem->latestMovement = $sourceItem->latestStockMovement;
                     $sourceItem->disposalMovement = $sourceItem->latestDisposalMovement;
-                    $recommendation = $repairRecommendations->get($sourceItem->item_id)?->first();
-                    $sourceItem->repairRecommendation = $recommendation ? [
-                        'inspection_id' => $recommendation->id,
-                        'reason' => $recommendation->finding_notes,
-                        'status_before' => $recommendation->status_before,
-                        'flagged_by' => $recommendation->flaggedBy
-                            ? (trim(($recommendation->flaggedBy->first_name ?? '') . ' ' . ($recommendation->flaggedBy->last_name ?? '')) ?: $recommendation->flaggedBy->username)
-                            : 'Unknown',
-                        'inspected_by' => $recommendation->inspectedBy
-                            ? (trim(($recommendation->inspectedBy->first_name ?? '') . ' ' . ($recommendation->inspectedBy->last_name ?? '')) ?: $recommendation->inspectedBy->username)
-                            : 'Unknown',
-                        'inspected_at' => $recommendation->inspected_at?->toDateTimeString(),
-                    ] : null;
                 });
 
                 $inventoryItem->sourceItems = $matchedSourceItems;
@@ -1384,7 +1336,7 @@ class PropertyCustodianController extends Controller
         if ($workspace === 'under_maintenance') {
             $workspace = 'under_repair';
         }
-        $workspaces = ['all', 'available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
+        $workspaces = ['all', 'available', 'assigned', 'under_repair', 'ready_to_dispose', 'disposed'];
         if (! in_array($workspace, $workspaces, true)) {
             $workspace = 'all';
         }
@@ -4029,7 +3981,12 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.inventory')->with('success', $successMessage);
     }
 
-    public function markRepaired(Request $request, $itemId)
+    public function markRepaired(
+        Request $request,
+        $itemId,
+        IncidentProcessingService $incidentProcessing,
+        IncidentLifecycleService $incidentLifecycle,
+    )
     {
         $validated = $request->validate([
             'inventory_ids' => ['sometimes', 'array', 'min:1'],
@@ -4037,47 +3994,123 @@ class PropertyCustodianController extends Controller
             'repair_notes' => ['nullable', 'string', 'max:1000'],
             'maintenance_cost' => ['nullable', 'numeric', 'min:0'],
         ]);
+        $selectedItemIds = isset($validated['inventory_ids'])
+            ? array_map('intval', $validated['inventory_ids'])
+            : [(int) $itemId];
 
-        if (isset($validated['inventory_ids'])) {
-            $itemIds = array_map('intval', $validated['inventory_ids']);
-            if (! in_array((int) $itemId, $itemIds, true)) {
-                return redirect()->back()->with('error', 'The selected inventory records do not match the requested action.');
-            }
-
-            $error = $this->inventoryOperations->markItemsRepaired(
-                $itemIds,
-                (int) $request->user()->id,
-                $validated['repair_notes'] ?? null,
-                isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
-            );
-            $successMessage = count($itemIds) . ' item(s) marked as repaired and returned to inventory.';
-        } else {
-            $error = $this->inventoryOperations->markRepaired(
-                (int) $itemId,
-                (int) $request->user()->id,
-                $validated['repair_notes'] ?? null,
-                isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
-            );
-            $successMessage = 'Item marked as repaired and returned to inventory.';
+        if (isset($validated['inventory_ids']) && ! in_array((int) $itemId, $selectedItemIds, true)) {
+            return redirect()->back()->with('error', 'The selected inventory records do not match the requested action.');
         }
 
+        foreach ($selectedItemIds as $selectedItemId) {
+            $incident = $incidentProcessing->linkedReportForProcessingInventory($selectedItemId);
+            if ($incident && blank($validated['repair_notes'] ?? null)) {
+                $incidentProcessing->recordBlockedAction(
+                    $incident,
+                    (int) $request->user()->id,
+                    'Repair completion requires a recorded repair result.',
+                    'repair_completion',
+                );
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'repair_notes' => 'Record the repair result before completing this incident repair.',
+                ]);
+            }
+        }
+
+        $successMessage = isset($validated['inventory_ids'])
+            ? count($selectedItemIds) . ' item(s) marked as repaired and returned to inventory.'
+            : 'Item marked as repaired and returned to inventory.';
+        $error = DB::transaction(function () use (
+            $validated,
+            $selectedItemIds,
+            $itemId,
+            $request,
+            $incidentProcessing,
+            $incidentLifecycle,
+        ): ?string {
+            if (isset($validated['inventory_ids'])) {
+                $operationError = $this->inventoryOperations->markItemsRepaired(
+                    $selectedItemIds,
+                    (int) $request->user()->id,
+                    $validated['repair_notes'] ?? null,
+                    isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
+                );
+            } else {
+                $operationError = $this->inventoryOperations->markRepaired(
+                    (int) $itemId,
+                    (int) $request->user()->id,
+                    $validated['repair_notes'] ?? null,
+                    isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
+                );
+            }
+
+            if ($operationError !== null) {
+                return $operationError;
+            }
+
+            foreach ($selectedItemIds as $processingInventoryId) {
+                $incident = $incidentProcessing->linkedReportForProcessingInventory($processingInventoryId);
+                if ($incident) {
+                    $incidentProcessing->resolveRepairedInventory(
+                        $incident,
+                        $processingInventoryId,
+                        (int) $request->user()->id,
+                        $validated['repair_notes'] ?? 'Repair completed.',
+                        isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
+                        $incidentLifecycle,
+                    );
+                }
+            }
+
+            return null;
+        });
+
         if ($error !== null) {
+            foreach ($selectedItemIds as $selectedItemId) {
+                $incident = $incidentProcessing->linkedReportForProcessingInventory($selectedItemId);
+                if ($incident) {
+                    $incidentProcessing->recordBlockedAction(
+                        $incident,
+                        (int) $request->user()->id,
+                        $error,
+                        'repair_completion',
+                    );
+                }
+            }
+
             return redirect()->back()->with('error', $error);
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['status' => 'success', 'message' => $successMessage]);
         }
 
         return redirect()->route('propertyCustodian.inventory')->with('success', $successMessage);
     }
 
-    public function markReadyToDispose(Request $request, $itemId)
+    public function markReadyToDispose(Request $request, $itemId, IncidentProcessingService $incidentProcessing)
     {
         $validated = $request->validate([
             'inventory_ids' => ['sometimes', 'array', 'min:1'],
             'inventory_ids.*' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
             'notes' => ['required', 'string', 'max:500'],
         ]);
+        $selectedItemIds = isset($validated['inventory_ids'])
+            ? array_map('intval', $validated['inventory_ids'])
+            : [(int) $itemId];
+
+        foreach ($selectedItemIds as $selectedItemId) {
+            if ($incidentProcessing->linkedReportForProcessingInventory($selectedItemId)) {
+                $message = 'Use the incident review queue to record why these reported units are not repairable.';
+
+                return $request->expectsJson()
+                    ? response()->json(['message' => $message], 422)
+                    : redirect()->back()->with('error', $message);
+            }
+        }
 
         if (isset($validated['inventory_ids'])) {
-            $itemIds = array_map('intval', $validated['inventory_ids']);
+            $itemIds = $selectedItemIds;
             if (! in_array((int) $itemId, $itemIds, true)) {
                 return redirect()->back()->with('error', 'The selected inventory records do not match the requested action.');
             }
@@ -4104,56 +4137,597 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.inventory')->with('success', $successMessage);
     }
 
-    public function approveRepairRecommendation(Request $request, $inspectionId)
+    public function incidentReports()
     {
-        $error = $this->inventoryOperations->approveRepairRecommendation(
-            (int) $inspectionId,
-            (int) $request->user()->id,
-        );
+        $reports = MaintenanceRecord::query()
+            ->with([
+                'inventory:item_id,item_name,inventory_item_no,unit',
+                'reportedBy:id,first_name,last_name,username',
+                'evidence:id,maintenance_record_id,original_filename',
+                'events.actor:id,first_name,last_name,username',
+            ])
+            ->whereIn('diagnosis', MaintenanceRecord::INCIDENT_TYPES)
+            ->whereIn('incident_status', [
+                'reported',
+                'under_review',
+                'awaiting_reporter',
+                'processing_repair',
+                'processing_disposal',
+                'under_investigation',
+            ])
+            ->latest('created_at')
+            ->get()
+            ->map(function (MaintenanceRecord $record): array {
+                $inspection = $record->events
+                    ->where('event_type', 'physical_inspection_recorded')
+                    ->last();
+                $handover = $record->events
+                    ->where('event_type', 'incident_handover_confirmed')
+                    ->last();
 
-        if ($error !== null) {
-            return redirect()->back()->with('error', $error);
-        }
+                return [
+                    'id' => $record->id,
+                    'item' => [
+                        'id' => $record->inventory?->item_id,
+                        'name' => $record->inventory?->item_name ?? 'Unknown item',
+                        'inventory_item_no' => $record->inventory?->inventory_item_no,
+                        'unit' => $record->inventory?->unit,
+                    ],
+                    'reporter' => [
+                        'id' => $record->reportedBy?->id,
+                        'name' => $record->reportedBy
+                            ? ($record->reportedBy->full_name ?: $record->reportedBy->username)
+                            : 'Unknown reporter',
+                    ],
+                    'type' => $record->diagnosis,
+                    'quantity' => $record->quantity,
+                    'details' => $record->issue_description,
+                    'status' => $record->incident_status,
+                    'submitted_at' => $record->created_at,
+                    'inspection' => $inspection ? [
+                        'findings' => $inspection->details,
+                        'repairability' => $inspection->metadata['repairability'] ?? null,
+                        'inspected_at' => $inspection->created_at,
+                        'inspector' => $inspection->actor
+                            ? ($inspection->actor->full_name ?: $inspection->actor->username)
+                            : null,
+                    ] : null,
+                    'handover' => $handover ? [
+                        'confirmed' => true,
+                        'details' => $handover->details,
+                        'confirmed_at' => $handover->created_at,
+                        'processing_inventory_id' => $handover->metadata['processing_inventory_id'] ?? null,
+                    ] : null,
+                    'evidence' => $record->evidence->map(fn ($file): array => [
+                        'id' => $file->id,
+                        'filename' => $file->original_filename,
+                        'download_url' => route('api.incident-evidence.download', $file->id),
+                    ])->values(),
+                    'timeline' => $record->events->map(fn ($event): array => [
+                        'id' => $event->id,
+                        'event_type' => $event->event_type,
+                        'from_status' => $event->from_status,
+                        'to_status' => $event->to_status,
+                        'details' => $event->details,
+                        'metadata' => $event->metadata,
+                        'actor_id' => $event->actor_id,
+                        'actor' => $event->actor
+                            ? ($event->actor->full_name ?: $event->actor->username)
+                            : null,
+                        'created_at' => $event->created_at,
+                    ])->values(),
+                ];
+            })
+            ->values();
 
-        return redirect()->route('propertyCustodian.inventory')->with('success', 'Repair recommendation approved. The item is now under repair.');
+        return response()->json(['reports' => $reports]);
     }
 
-    public function declineRepairRecommendation(Request $request, $inspectionId)
+    public function startIncidentInvestigation(Request $request, $id, IncidentLifecycleService $incidentLifecycle)
     {
-        $error = $this->inventoryOperations->declineRepairRecommendation(
-            (int) $inspectionId,
+        $record = MaintenanceRecord::query()->findOrFail($id);
+        if (! in_array($record->diagnosis, ['lost', 'stolen'], true)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'type' => 'Only Lost or Stolen reports can enter investigation.',
+            ]);
+        }
+
+        $record = $incidentLifecycle->transition(
+            $record,
+            'under_investigation',
+            (int) $request->user()->id,
+            'Lost/Stolen investigation started.',
+            ['investigation_started_at' => now()->toISOString()],
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'incident_status' => $record->incident_status,
+            'message' => 'Investigation started. Inventory and assignment quantities are unchanged.',
+        ]);
+    }
+
+    public function recordIncidentInvestigationAction(
+        Request $request,
+        $id,
+        IncidentProcessingService $incidentProcessing,
+    ) {
+        $validated = $request->validate([
+            'details' => ['required', 'string', 'min:3', 'max:2000'],
+            'evidence' => ['nullable', 'array', 'max:5'],
+            'evidence.*' => ['file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+        ]);
+        $record = MaintenanceRecord::query()->findOrFail($id);
+        $files = $validated['evidence'] ?? [];
+        $storedPaths = [];
+
+        try {
+            $event = DB::transaction(function () use ($record, $request, $validated, $files, $incidentProcessing, &$storedPaths): MaintenanceRecordEvent {
+                $record = MaintenanceRecord::query()->lockForUpdate()->findOrFail($record->id);
+                $incidentProcessing->assertActiveInvestigation($record);
+                $evidenceIds = [];
+
+                foreach ($files as $file) {
+                    $path = $file->store("incident-evidence/{$record->id}", 'local');
+                    if (! is_string($path) || $path === '') {
+                        throw new \RuntimeException('Investigation evidence could not be stored.');
+                    }
+                    $storedPaths[] = $path;
+
+                    $evidence = $record->evidence()->create([
+                        'uploaded_by' => $request->user()->id,
+                        'disk' => 'local',
+                        'path' => $path,
+                        'original_filename' => mb_substr(basename($file->getClientOriginalName()), 0, 255),
+                        'mime_type' => $file->getMimeType() ?? 'application/octet-stream',
+                        'size' => $file->getSize(),
+                    ]);
+                    $evidenceIds[] = (int) $evidence->id;
+                }
+
+                return $incidentProcessing->recordInvestigationAction(
+                    $record,
+                    (int) $request->user()->id,
+                    $validated['details'],
+                    $evidenceIds,
+                );
+            });
+        } catch (\Throwable $exception) {
+            foreach ($storedPaths as $path) {
+                \Illuminate\Support\Facades\Storage::disk('local')->delete($path);
+            }
+
+            throw $exception;
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Investigation update and evidence were added to the report history.',
+            'event_id' => $event->id,
+        ]);
+    }
+
+    public function resolveIncidentInvestigation(
+        Request $request,
+        $id,
+        IncidentProcessingService $incidentProcessing,
+        IncidentLifecycleService $incidentLifecycle,
+    ) {
+        $validated = $request->validate([
+            'outcome' => ['required', 'in:recovered,confirmed_lost_stolen,unsubstantiated'],
+            'details' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $record = MaintenanceRecord::query()->findOrFail($id);
+        $outcome = $validated['outcome'];
+        $details = trim($validated['details'] ?? '');
+
+        $metadata = DB::transaction(function () use (
+            $record,
+            $request,
+            $outcome,
+            $details,
+            $incidentProcessing,
+            $incidentLifecycle,
+        ): array {
+            $record = MaintenanceRecord::query()->lockForUpdate()->findOrFail($record->id);
+            $incidentProcessing->assertActiveInvestigation($record);
+            $metadata = [
+                'outcome' => $outcome,
+                'affected_quantity' => (int) $record->quantity,
+                'assignment_transaction_id' => $record->assignment_transaction_id,
+            ];
+
+            if ($outcome === 'confirmed_lost_stolen') {
+                $loss = $this->inventoryOperations->recordIncidentLoss(
+                    (int) $record->inventory_id,
+                    (int) $record->reported_by,
+                    $record->assignment_transaction_id ? (int) $record->assignment_transaction_id : null,
+                    (int) $record->quantity,
+                    (int) $request->user()->id,
+                    (int) $record->id,
+                    (string) $record->diagnosis,
+                    $details !== '' ? $details : 'Confirmed missing during investigation.',
+                );
+                if (is_string($loss)) {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['outcome' => $loss]);
+                }
+                $metadata['inventory_effect'] = $loss;
+            } else {
+                $metadata['inventory_effect'] = $outcome === 'recovered'
+                    ? 'Affected quantity remains assigned to the reporter.'
+                    : 'Inventory and assignment quantities were not changed.';
+            }
+
+            $resolutionDetails = $details !== ''
+                ? $details
+                : match ($outcome) {
+                    'recovered' => 'Affected units were confirmed recovered and remain assigned to the reporter.',
+                    'confirmed_lost_stolen' => 'Affected units were confirmed lost or stolen.',
+                    default => 'The report was unsubstantiated; inventory and assignment were unchanged.',
+                };
+
+            $incidentLifecycle->transition(
+                $record,
+                'resolved',
+                (int) $request->user()->id,
+                $resolutionDetails,
+                $metadata,
+            );
+
+            return $metadata;
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'incident_status' => 'resolved',
+            'incident_outcome' => $outcome,
+            'inventory_effect' => $metadata['inventory_effect'],
+            'message' => 'Investigation closed with the confirmed outcome.',
+        ]);
+    }
+
+    public function reviewIncidentReport(Request $request, $id, IncidentLifecycleService $incidentLifecycle)
+    {
+        $record = MaintenanceRecord::query()->findOrFail($id);
+        $incidentLifecycle->transition(
+            $record,
+            'under_review',
             (int) $request->user()->id,
         );
 
-        if ($error !== null) {
-            return redirect()->back()->with('error', $error);
+        return response()->json(['status' => 'success', 'message' => 'Incident accepted for custodian review.']);
+    }
+
+    public function requestIncidentInformation(Request $request, $id, IncidentLifecycleService $incidentLifecycle)
+    {
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+        $record = MaintenanceRecord::query()->findOrFail($id);
+        $incidentLifecycle->transition(
+            $record,
+            'awaiting_reporter',
+            (int) $request->user()->id,
+            $validated['reason'],
+        );
+
+        return response()->json(['status' => 'success', 'message' => 'More information requested from the reporter.']);
+    }
+
+    public function recordIncidentInspection(Request $request, $id, IncidentProcessingService $incidentProcessing)
+    {
+        $validated = $request->validate([
+            'findings' => ['required', 'string', 'min:3', 'max:2000'],
+            'repairability' => ['required', 'in:repairable,not_repairable,pending'],
+        ]);
+        $record = MaintenanceRecord::query()->findOrFail($id);
+        $event = $incidentProcessing->recordInspection(
+            $record,
+            (int) $request->user()->id,
+            $validated['findings'],
+            $validated['repairability'],
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Physical inspection recorded. Inventory and assignment quantities are unchanged.',
+            'inspection' => [
+                'findings' => $event->details,
+                'repairability' => $event->metadata['repairability'],
+            ],
+        ]);
+    }
+
+    public function confirmIncidentHandover(
+        Request $request,
+        $id,
+        IncidentProcessingService $incidentProcessing,
+        IncidentLifecycleService $incidentLifecycle,
+    ) {
+        $validated = $request->validate([
+            'details' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+        $record = MaintenanceRecord::query()->findOrFail($id);
+
+        try {
+            $result = DB::transaction(function () use ($record, $request, $validated, $incidentProcessing, $incidentLifecycle): array {
+            $handover = $incidentProcessing->confirmHandover(
+                $record,
+                (int) $request->user()->id,
+                $validated['details'],
+                $this->inventoryOperations,
+            );
+            $inspection = $incidentProcessing->latestInspection($record);
+            $repairability = $inspection?->metadata['repairability'] ?? null;
+            $message = 'Handover recorded. Only the reported quantity has been isolated.';
+
+            if ($repairability === 'not_repairable') {
+                $notes = trim(($inspection?->details ?? '')."\n".$validated['details']);
+                $error = $this->inventoryOperations->markIncidentReadyToDispose(
+                    (int) $handover['inventory']->item_id,
+                    (int) $record->quantity,
+                    (int) $request->user()->id,
+                    (int) $record->id,
+                    $notes,
+                );
+                if ($error !== null) {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['handover' => $error]);
+                }
+
+                $incidentLifecycle->transition(
+                    $record,
+                    'processing_disposal',
+                    (int) $request->user()->id,
+                    'Inspection confirmed the affected units are not repairable; units are ready for disposal review.',
+                    [
+                        'inspection_findings' => $inspection?->details,
+                        'repairability' => 'not_repairable',
+                        'handover_confirmed' => true,
+                        'processing_inventory_id' => (int) $handover['inventory']->item_id,
+                    ],
+                );
+                $message = 'Affected units are now ready for the existing disposal process.';
+            }
+
+            return [
+                'message' => $message,
+                'incident_status' => $repairability === 'not_repairable' ? 'processing_disposal' : 'under_review',
+                'processing_inventory_id' => (int) $handover['inventory']->item_id,
+            ];
+            });
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            if ($record->isIncidentReport() && $record->incident_status === 'under_review') {
+                $message = collect($exception->errors())->flatten()->first();
+                $incidentProcessing->recordBlockedAction(
+                    $record,
+                    (int) $request->user()->id,
+                    (string) ($message ?? 'Handover could not be completed.'),
+                    'handover',
+                );
+            }
+
+            throw $exception;
         }
 
-        return redirect()->route('propertyCustodian.inventory')->with('success', 'Repair recommendation declined. The item was returned to its previous status.');
+        return response()->json(['status' => 'success'] + $result);
+    }
+
+    public function startIncidentRepair(
+        Request $request,
+        $id,
+        IncidentProcessingService $incidentProcessing,
+        IncidentLifecycleService $incidentLifecycle,
+    ) {
+        $validated = $request->validate([
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $record = MaintenanceRecord::query()->findOrFail($id);
+        $inspection = $incidentProcessing->latestInspection($record);
+        $handover = $incidentProcessing->latestHandover($record);
+
+        if (
+            $record->incident_status !== 'under_review'
+            || ! $inspection
+            || ($inspection->metadata['repairability'] ?? null) !== 'repairable'
+            || ! $handover
+        ) {
+            if ($record->isIncidentReport() && $record->incident_status === 'under_review') {
+                $incidentProcessing->recordBlockedAction(
+                    $record,
+                    (int) $request->user()->id,
+                    'Repair cannot start until inspection confirms repairability and affected units are handed over.',
+                    'repair_start',
+                );
+            }
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'inspection' => 'A repairable inspection and confirmed handover are required before starting repair.',
+            ]);
+        }
+
+        $processingInventoryId = (int) ($handover->metadata['processing_inventory_id'] ?? 0);
+        $issue = $validated['notes'] ?? $inspection->details;
+        $error = DB::transaction(function () use (
+            $record,
+            $inspection,
+            $request,
+            $incidentLifecycle,
+            $processingInventoryId,
+            $issue,
+        ): ?string {
+            $error = $this->inventoryOperations->sendToMaintenance(
+                $processingInventoryId,
+                (int) $request->user()->id,
+                $record->issue_description ?? 'Incident repair',
+                $issue,
+            );
+            if ($error !== null) {
+                return $error;
+            }
+
+            $repairRecord = MaintenanceRecord::query()
+                ->where('inventory_id', $processingInventoryId)
+                ->whereNull('diagnosis')
+                ->where('reported_by', $request->user()->id)
+                ->latest('id')
+                ->firstOrFail();
+
+            MaintenanceRecordEvent::create([
+                'maintenance_record_id' => $record->id,
+                'actor_id' => $request->user()->id,
+                'event_type' => 'incident_repair_started',
+                'from_status' => 'under_review',
+                'to_status' => 'processing_repair',
+                'details' => $issue,
+                'metadata' => [
+                    'processing_inventory_id' => $processingInventoryId,
+                    'maintenance_record_id' => (int) $repairRecord->id,
+                ],
+            ]);
+
+            $incidentLifecycle->transition(
+                $record,
+                'processing_repair',
+                (int) $request->user()->id,
+                'Repair started after physical inspection and handover.',
+                [
+                    'inspection_findings' => $inspection->details,
+                    'repairability' => 'repairable',
+                    'handover_confirmed' => true,
+                    'processing_inventory_id' => $processingInventoryId,
+                    'maintenance_record_id' => (int) $repairRecord->id,
+                ],
+            );
+
+            return null;
+        });
+        if ($error !== null) {
+            $incidentProcessing->recordBlockedAction(
+                $record,
+                (int) $request->user()->id,
+                $error,
+                'repair_start',
+            );
+            throw \Illuminate\Validation\ValidationException::withMessages(['repair' => $error]);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Repair started for the isolated affected units.',
+        ]);
+    }
+
+    public function confirmIncidentRepairNotViable(
+        Request $request,
+        $id,
+        IncidentProcessingService $incidentProcessing,
+        IncidentLifecycleService $incidentLifecycle,
+    ) {
+        $validated = $request->validate([
+            'findings' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+        $record = MaintenanceRecord::query()->findOrFail($id);
+        $handover = $incidentProcessing->latestHandover($record);
+        if ($record->incident_status !== 'processing_repair' || ! $handover) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'status' => 'This report must have an active repair and confirmed handover.',
+            ]);
+        }
+
+        $processingInventoryId = (int) ($handover->metadata['processing_inventory_id'] ?? 0);
+        $error = DB::transaction(function () use (
+            $record,
+            $request,
+            $validated,
+            $processingInventoryId,
+            $incidentLifecycle,
+        ): ?string {
+            $error = $this->inventoryOperations->markReadyToDispose(
+                $processingInventoryId,
+                (int) $request->user()->id,
+                $validated['findings'],
+            );
+            if ($error !== null) {
+                return $error;
+            }
+
+            MaintenanceRecordEvent::create([
+                'maintenance_record_id' => $record->id,
+                'actor_id' => $request->user()->id,
+                'event_type' => 'incident_repairability_reassessed',
+                'from_status' => 'processing_repair',
+                'to_status' => 'processing_disposal',
+                'details' => $validated['findings'],
+                'metadata' => [
+                    'repairability' => 'not_repairable',
+                    'handover_confirmed' => true,
+                    'processing_inventory_id' => $processingInventoryId,
+                    'affected_quantity' => (int) $record->quantity,
+                ],
+            ]);
+
+            $incidentLifecycle->transition(
+                $record,
+                'processing_disposal',
+                (int) $request->user()->id,
+                'Repair could not proceed; affected units are ready for disposal review.',
+                [
+                    'inspection_findings' => $validated['findings'],
+                    'repairability' => 'not_repairable',
+                    'handover_confirmed' => true,
+                    'processing_inventory_id' => $processingInventoryId,
+                ],
+            );
+
+            return null;
+        });
+
+        if ($error !== null) {
+            $incidentProcessing->recordBlockedAction(
+                $record,
+                (int) $request->user()->id,
+                $error,
+                'repairability_reassessment',
+            );
+            throw \Illuminate\Validation\ValidationException::withMessages(['findings' => $error]);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Affected units are now ready for the existing disposal process.',
+        ]);
     }
 
     /**
-     * Triage closer for an end-user damage/loss report. Only reports (records
-     * carrying a diagnosis from the report flow) can be declined this way;
-     * custodian repair-pipeline records close through the repair actions.
+     * Triage closer for an end-user incident report. Repair-pipeline records
+     * without an incident type continue to close through repair actions.
      */
-    public function declineMaintenanceReport(Request $request, $id)
+    public function declineMaintenanceReport(Request $request, $id, IncidentLifecycleService $incidentLifecycle)
     {
         $record = MaintenanceRecord::whereKey($id)->firstOrFail();
 
-        if (! in_array($record->status, ['reported', 'in_progress'], true) || $record->diagnosis === null) {
+        if (! in_array($record->status, ['reported', 'in_progress'], true) || ! $record->isIncidentReport()) {
             return redirect()->back()->with('error', 'This report has already been processed.');
         }
 
-        $record->update([
-            'status' => 'cancelled',
-            'completed_at' => now(),
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'min:3', 'max:1000'],
         ]);
+
+        $incidentLifecycle->transition(
+            $record,
+            'declined',
+            (int) $request->user()->id,
+            $validated['reason'],
+        );
+
+        if ($request->expectsJson()) {
+            return response()->json(['status' => 'success', 'message' => 'Issue report declined.']);
+        }
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Issue report declined.');
     }
 
-    public function disposeInventory(Request $request, $itemId)
+    public function disposeInventory(Request $request, $itemId, IncidentProcessingService $incidentProcessing)
     {
         $validated = $request->validate([
             'inventory_ids' => ['sometimes', 'array', 'min:1'],
@@ -4166,24 +4740,45 @@ class PropertyCustodianController extends Controller
             if (! in_array((int) $itemId, $itemIds, true)) {
                 return redirect()->back()->with('error', 'The selected inventory records do not match the requested action.');
             }
+            $successMessage = count($itemIds) . ' inventory item(s) disposed successfully.';
+        } else {
+            $itemIds = [(int) $itemId];
+            $successMessage = 'Item disposed successfully.';
+        }
 
-            $error = $this->inventoryOperations->disposeItems(
+        $error = DB::transaction(function () use ($validated, $itemIds, $request, $incidentProcessing, $itemId): ?string {
+            if (isset($validated['inventory_ids'])) {
+                $operationError = $this->inventoryOperations->disposeItems(
+                    $itemIds,
+                    (int) $request->user()->id,
+                    $validated['notes'] ?? null,
+                );
+            } else {
+                $operationError = $this->inventoryOperations->dispose(
+                    (int) $itemId,
+                    (int) $request->user()->id,
+                    $validated['notes'] ?? null,
+                );
+            }
+            if ($operationError !== null) {
+                return $operationError;
+            }
+
+            $incidentProcessing->resolveDisposedInventory(
                 $itemIds,
                 (int) $request->user()->id,
                 $validated['notes'] ?? null,
             );
-            $successMessage = count($itemIds) . ' inventory item(s) disposed successfully.';
-        } else {
-            $error = $this->inventoryOperations->dispose(
-                (int) $itemId,
-                (int) $request->user()->id,
-                $validated['notes'] ?? null,
-            );
-            $successMessage = 'Item disposed successfully.';
-        }
+
+            return null;
+        });
 
         if ($error !== null) {
             return redirect()->back()->with('error', $error);
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['status' => 'success', 'message' => $successMessage]);
         }
 
         return redirect()->route('propertyCustodian.inventory')->with('success', $successMessage);

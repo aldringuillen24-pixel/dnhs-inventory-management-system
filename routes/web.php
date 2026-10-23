@@ -149,10 +149,16 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/inventory/{itemId}/mark-ready-to-dispose', [PropertyCustodianController::class, 'markReadyToDispose'])->name('inventory.mark-ready-to-dispose');
 
-    Route::post('/inspection/{inspectionId}/approve-repair', [PropertyCustodianController::class, 'approveRepairRecommendation'])->name('inspection.approve-repair');
-
-    Route::post('/inspection/{inspectionId}/decline-repair', [PropertyCustodianController::class, 'declineRepairRecommendation'])->name('inspection.decline-repair');
-
+    Route::get('/incident-reports', [PropertyCustodianController::class, 'incidentReports'])->name('incident-reports.index');
+    Route::post('/incident-reports/{id}/review', [PropertyCustodianController::class, 'reviewIncidentReport'])->name('incident-reports.review');
+    Route::post('/incident-reports/{id}/request-information', [PropertyCustodianController::class, 'requestIncidentInformation'])->name('incident-reports.request-information');
+    Route::post('/incident-reports/{id}/inspection', [PropertyCustodianController::class, 'recordIncidentInspection'])->name('incident-reports.inspection');
+    Route::post('/incident-reports/{id}/start-investigation', [PropertyCustodianController::class, 'startIncidentInvestigation'])->name('incident-reports.start-investigation');
+    Route::post('/incident-reports/{id}/investigation-actions', [PropertyCustodianController::class, 'recordIncidentInvestigationAction'])->name('incident-reports.investigation-actions');
+    Route::post('/incident-reports/{id}/resolve-investigation', [PropertyCustodianController::class, 'resolveIncidentInvestigation'])->name('incident-reports.resolve-investigation');
+    Route::post('/incident-reports/{id}/handover', [PropertyCustodianController::class, 'confirmIncidentHandover'])->name('incident-reports.handover');
+    Route::post('/incident-reports/{id}/start-repair', [PropertyCustodianController::class, 'startIncidentRepair'])->name('incident-reports.start-repair');
+    Route::post('/incident-reports/{id}/repair-not-viable', [PropertyCustodianController::class, 'confirmIncidentRepairNotViable'])->name('incident-reports.repair-not-viable');
     Route::post('/maintenance/{id}/decline', [PropertyCustodianController::class, 'declineMaintenanceReport'])->name('maintenance.decline');
 
     Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
@@ -254,6 +260,9 @@ Route::middleware(['auth', 'role:Property Custodian'])
 // authority; `api.redirect` converts Blade redirects into JSON so the
 // existing web controllers serve both clients without duplication.
 Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group(function () {
+    Route::get('/incident-evidence/{evidence}', [EndUserController::class, 'downloadIncidentEvidence'])
+        ->name('incident-evidence.download');
+
     Route::get('/me', function (Request $request) {
         $user = $request->user()->load('role');
 
@@ -292,8 +301,16 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/inventory/{itemId}/send-to-maintenance', [PropertyCustodianController::class, 'sendToMaintenance'])->name('inventory.send-to-maintenance');
         Route::post('/inventory/{itemId}/mark-repaired', [PropertyCustodianController::class, 'markRepaired'])->name('inventory.mark-repaired');
         Route::post('/inventory/{itemId}/mark-ready-to-dispose', [PropertyCustodianController::class, 'markReadyToDispose'])->name('inventory.mark-ready-to-dispose');
-        Route::post('/inspection/{inspectionId}/approve-repair', [PropertyCustodianController::class, 'approveRepairRecommendation'])->name('inspection.approve-repair');
-        Route::post('/inspection/{inspectionId}/decline-repair', [PropertyCustodianController::class, 'declineRepairRecommendation'])->name('inspection.decline-repair');
+        Route::get('/incident-reports', [PropertyCustodianController::class, 'incidentReports'])->name('incident-reports.index');
+        Route::post('/incident-reports/{id}/review', [PropertyCustodianController::class, 'reviewIncidentReport'])->name('incident-reports.review');
+        Route::post('/incident-reports/{id}/request-information', [PropertyCustodianController::class, 'requestIncidentInformation'])->name('incident-reports.request-information');
+        Route::post('/incident-reports/{id}/inspection', [PropertyCustodianController::class, 'recordIncidentInspection'])->name('incident-reports.inspection');
+        Route::post('/incident-reports/{id}/start-investigation', [PropertyCustodianController::class, 'startIncidentInvestigation'])->name('incident-reports.start-investigation');
+        Route::post('/incident-reports/{id}/investigation-actions', [PropertyCustodianController::class, 'recordIncidentInvestigationAction'])->name('incident-reports.investigation-actions');
+        Route::post('/incident-reports/{id}/resolve-investigation', [PropertyCustodianController::class, 'resolveIncidentInvestigation'])->name('incident-reports.resolve-investigation');
+        Route::post('/incident-reports/{id}/handover', [PropertyCustodianController::class, 'confirmIncidentHandover'])->name('incident-reports.handover');
+        Route::post('/incident-reports/{id}/start-repair', [PropertyCustodianController::class, 'startIncidentRepair'])->name('incident-reports.start-repair');
+        Route::post('/incident-reports/{id}/repair-not-viable', [PropertyCustodianController::class, 'confirmIncidentRepairNotViable'])->name('incident-reports.repair-not-viable');
         Route::post('/maintenance/{id}/decline', [PropertyCustodianController::class, 'declineMaintenanceReport'])->name('maintenance.decline');
         Route::post('/inventory/{itemId}/dispose', [PropertyCustodianController::class, 'disposeInventory'])->name('inventory.dispose');
         Route::get('/transactions', [PropertyCustodianController::class, 'transactions'])->name('transactions');
@@ -349,6 +366,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');
         Route::post('/inventory/{itemId}/cancel-return', [EndUserController::class, 'cancelReturnRequest'])->name('inventory.cancel-return');
         Route::post('/inventory/{itemId}/report', [EndUserController::class, 'reportIssue'])->name('inventory.report');
+        Route::post('/incident-reports/{id}/information-response', [EndUserController::class, 'respondToIncidentInformation'])->name('incident-reports.respond');
         Route::patch('/profile', [EndUserController::class, 'updateProfile'])->name('profile.update');
     });
 
@@ -411,7 +429,6 @@ Route::middleware('auth')->get('/spa/onboarding', $spaShell)->name('spa.onboardi
 
 Route::middleware(['auth', 'role:Administrator'])->get('/spa/admin/{any?}', $spaShell)->where('any', '.*');
 Route::middleware(['auth', 'role:School Head'])->get('/spa/school-head/{any?}', $spaShell)->where('any', '.*');
-Route::middleware(['auth', 'role:Inspector'])->get('/spa/inspector/inventory', fn () => redirect('/spa/inspector/arrival-inspections'));
 Route::middleware(['auth', 'role:Inspector'])->get('/spa/inspector/{any?}', $spaShell)->where('any', '.*');
 Route::middleware(['auth', 'role:End User'])->get('/spa/end-user/{any?}', $spaShell)->where('any', '.*');
 

@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\AssignmentRequest;
 use App\Models\AssignmentReturn;
 use App\Models\Category;
-use App\Models\InspectionRecord;
 use App\Models\Inventory;
 use App\Models\InventoryItemLog;
 use App\Models\MaintenanceRecord;
@@ -1618,6 +1617,145 @@ class InventoryOperationService
         return $recipientIds->count() === 1 ? (int) $recipientIds->first() : null;
     }
 
+    /**
+     * Remove only the confirmed missing quantity from the reporter's active
+     * assignment. Assigned units are represented by transactions, not by the
+     * inventory row's on-hand quantity, so the stock ledger records the
+     * combined on-hand and assigned total before and after the loss.
+     *
+     * @return array{assignment_changes: array<int, array{transaction_id: int, quantity_before: int, quantity_after: int}>, quantity_before: int, quantity_after: int}|string
+     */
+    public function recordIncidentLoss(
+        int $inventoryId,
+        int $reporterId,
+        ?int $assignmentTransactionId,
+        int $quantity,
+        int $actorId,
+        int $incidentId,
+        string $incidentType,
+        string $notes,
+    ): array|string {
+        try {
+            return DB::transaction(function () use (
+                $inventoryId,
+                $reporterId,
+                $assignmentTransactionId,
+                $quantity,
+                $actorId,
+                $incidentId,
+                $incidentType,
+                $notes,
+            ): array {
+                $inventory = Inventory::query()->whereKey($inventoryId)->lockForUpdate()->firstOrFail();
+                $activeAssignments = Transaction::query()
+                    ->where('item_id', $inventoryId)
+                    ->where('status', 'assigned')
+                    ->where('quantity', '>', 0)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
+                $reporterAssignments = $activeAssignments
+                    ->where('user_id', $reporterId)
+                    ->when(
+                        $assignmentTransactionId !== null,
+                        fn ($assignments) => $assignments->where('id', $assignmentTransactionId),
+                    )
+                    ->values();
+
+                if ($quantity < 1 || $reporterAssignments->sum('quantity') < $quantity) {
+                    throw new \DomainException('The reporter no longer has an active assignment covering the affected quantity.');
+                }
+
+                $quantityBefore = (int) $inventory->quantity + (int) $activeAssignments->sum('quantity');
+                $remainingToRemove = $quantity;
+                $assignmentChanges = [];
+                $now = now();
+
+                foreach ($reporterAssignments as $transaction) {
+                    if ($remainingToRemove === 0) {
+                        break;
+                    }
+
+                    $transactionQuantity = (int) $transaction->quantity;
+                    $removed = min($transactionQuantity, $remainingToRemove);
+                    $quantityAfter = $transactionQuantity - $removed;
+                    $assignment = AssignmentRequest::query()
+                        ->where('transaction_id', $transaction->id)
+                        ->where('item_id', $inventoryId)
+                        ->where('target_user_id', $reporterId)
+                        ->whereIn('status', ['approved', 'accepted'])
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($assignment && (int) $assignment->quantity !== $transactionQuantity) {
+                        throw new \DomainException('The assignment and transaction quantities do not match. Review the assignment before resolving this report.');
+                    }
+
+                    $transaction->update([
+                        'quantity' => $quantityAfter,
+                        'status' => $quantityAfter === 0 ? 'lost' : 'assigned',
+                        'return_date' => $quantityAfter === 0 ? $now->toDateString() : null,
+                    ]);
+                    if ($assignment) {
+                        $assignment->update([
+                            'quantity' => $quantityAfter,
+                            'status' => $quantityAfter === 0 ? 'lost' : $assignment->status,
+                            'responded_at' => $quantityAfter === 0 ? $now : $assignment->responded_at,
+                        ]);
+                    }
+
+                    $assignmentChanges[] = [
+                        'transaction_id' => (int) $transaction->id,
+                        'assignment_request_id' => $assignment?->id,
+                        'quantity_before' => $transactionQuantity,
+                        'quantity_after' => $quantityAfter,
+                    ];
+                    $remainingToRemove -= $removed;
+                }
+
+                if ($remainingToRemove !== 0) {
+                    throw new \DomainException('The affected quantity could not be fully matched to the active assignment.');
+                }
+
+                $remainingAssigned = (int) Transaction::query()
+                    ->where('item_id', $inventoryId)
+                    ->where('status', 'assigned')
+                    ->where('quantity', '>', 0)
+                    ->sum('quantity');
+                $inventory->update([
+                    'status' => (int) $inventory->quantity > 0 || $remainingAssigned === 0
+                        ? 'available'
+                        : 'assigned',
+                    'assigned_to_user_id' => (int) $inventory->quantity > 0 || $remainingAssigned === 0
+                        ? null
+                        : $this->remainingInventoryAssignee($inventoryId),
+                ]);
+
+                $quantityAfter = $quantityBefore - $quantity;
+                $movement = $this->recordMovement(
+                    $inventoryId,
+                    $actorId,
+                    'incident_loss',
+                    $quantity,
+                    $quantityBefore,
+                    $quantityAfter,
+                    'incident_report',
+                    $incidentId,
+                    "{$incidentType} outcome: {$notes}",
+                );
+
+                return [
+                    'assignment_changes' => $assignmentChanges,
+                    'quantity_before' => $quantityBefore,
+                    'quantity_after' => $quantityAfter,
+                    'stock_movement_id' => (int) $movement->id,
+                ];
+            });
+        } catch (\DomainException $exception) {
+            return $exception->getMessage();
+        }
+    }
+
     public function stockIn(array $attributes): Inventory
     {
         return DB::transaction(function () use ($attributes): Inventory {
@@ -2009,6 +2147,165 @@ class InventoryOperationService
         return null;
     }
 
+    public function isolateIncidentQuantity(
+        int $inventoryId,
+        int $quantity,
+        int $actorId,
+        int $incidentId,
+        string $notes,
+    ): Inventory {
+        return DB::transaction(function () use ($inventoryId, $quantity, $actorId, $incidentId, $notes): Inventory {
+            $source = Inventory::query()->whereKey($inventoryId)->lockForUpdate()->firstOrFail();
+            $stockBefore = (int) $source->quantity;
+            if ($quantity < 1 || $quantity > $stockBefore) {
+                throw new \DomainException('The received stock no longer covers the reported affected quantity.');
+            }
+
+            $sourceBefore = $this->itemLogState($source);
+            $category = $source->category;
+            if ($category?->requires_serial_number && ($quantity !== 1 || blank($source->serial_number))) {
+                throw new \DomainException('Serialized assets must be isolated as their exact single reported unit.');
+            }
+
+            $serialNumber = $source->serial_number;
+            if ($serialNumber !== null && $quantity !== $stockBefore) {
+                throw new \DomainException('An individually serialized asset cannot be split from a larger inventory quantity.');
+            }
+            $source->update([
+                'quantity' => $stockBefore - $quantity,
+                'serial_number' => $quantity === $stockBefore ? null : $serialNumber,
+            ]);
+
+            $remainingAssigneeId = $this->remainingInventoryAssignee($source->item_id);
+            $source->update([
+                'status' => (int) $source->quantity > 0 || ! $remainingAssigneeId ? 'available' : 'assigned',
+                'assigned_to_user_id' => (int) $source->quantity > 0 ? null : $remainingAssigneeId,
+            ]);
+
+            $isolated = Inventory::create([
+                'category_id' => $source->category_id,
+                'unit' => $source->unit,
+                'user_id' => $source->user_id,
+                'assigned_to_user_id' => null,
+                'item_name' => $source->item_name,
+                'description' => $source->description,
+                'building' => $source->building,
+                'room' => $source->room,
+                'quantity' => $quantity,
+                'unit_cost' => $source->unit_cost,
+                'ics_no' => $source->ics_no,
+                'serial_number' => $serialNumber,
+                'status' => 'available',
+                'date_acquired' => $source->date_acquired,
+                'lifespan_years' => $source->lifespan_years,
+                'expected_end_date' => $source->expected_end_date,
+            ]);
+
+            $qrCode = null;
+            if ($category?->requires_qr_code) {
+                do {
+                    $qrCode = 'dnhs_qr_'.Str::lower(Str::random(24));
+                } while (Inventory::query()->where('qr_code', $qrCode)->exists());
+            }
+            $isolated->update([
+                'inventory_item_no' => sprintf('INV-%06d', $isolated->item_id),
+                'qr_code' => $qrCode,
+            ]);
+
+            $this->recordItemDiff(
+                $source->refresh(),
+                $actorId,
+                $sourceBefore,
+                "Isolated incident #{$incidentId}: {$notes}",
+            );
+            $this->recordItemLog([
+                'item_id' => $isolated->item_id,
+                'inventory_item_no' => $isolated->inventory_item_no,
+                'item_name' => $isolated->item_name,
+                'category_id' => $isolated->category_id,
+                'status' => $isolated->status,
+                'action' => InventoryItemLog::ACTION_CREATED,
+                'changes' => $this->itemLogState($isolated),
+                'reason' => "Isolated affected units for incident #{$incidentId}: {$notes}",
+                'user_id' => $actorId,
+            ]);
+            $this->recordMovement(
+                $source->item_id,
+                $actorId,
+                'incident_split_out',
+                $quantity,
+                $stockBefore,
+                (int) $source->quantity,
+                'incident_report',
+                $incidentId,
+                $notes,
+            );
+            $this->recordMovement(
+                $isolated->item_id,
+                $actorId,
+                'incident_split_in',
+                $quantity,
+                0,
+                $quantity,
+                'incident_report',
+                $incidentId,
+                $notes,
+            );
+
+            return $isolated->fresh();
+        });
+    }
+
+    public function markIncidentReadyToDispose(
+        int $itemId,
+        int $quantity,
+        int $actorId,
+        int $incidentId,
+        string $notes,
+    ): ?string {
+        return DB::transaction(function () use ($itemId, $quantity, $actorId, $incidentId, $notes): ?string {
+            $inventory = Inventory::query()->whereKey($itemId)->lockForUpdate()->firstOrFail();
+            if ($inventory->status !== 'available' || (int) $inventory->quantity !== $quantity || $quantity < 1) {
+                return 'The isolated incident quantity is no longer available for disposal review.';
+            }
+
+            if (Transaction::query()
+                ->where('item_id', $itemId)
+                ->where('status', 'assigned')
+                ->where('quantity', '>', 0)
+                ->exists()) {
+                return 'Affected units must be fully handed over before disposal review.';
+            }
+
+            $inventory->update(['status' => 'ready_to_dispose']);
+            $inventory->refresh();
+            $this->recordItemLog([
+                'item_id' => $inventory->item_id,
+                'inventory_item_no' => $inventory->inventory_item_no,
+                'item_name' => $inventory->item_name,
+                'category_id' => $inventory->category_id,
+                'status' => $inventory->status,
+                'action' => InventoryItemLog::ACTION_UPDATED,
+                'changes' => ['status' => ['old' => 'available', 'new' => 'ready_to_dispose']],
+                'reason' => "Incident #{$incidentId}: {$notes}",
+                'user_id' => $actorId,
+            ]);
+            $this->recordMovement(
+                $inventory->item_id,
+                $actorId,
+                'ready_to_dispose',
+                $quantity,
+                $quantity,
+                $quantity,
+                'incident_report',
+                $incidentId,
+                $notes,
+            );
+
+            return null;
+        });
+    }
+
     public function dispose(int $itemId, int $actorId, ?string $notes): ?string
     {
         return DB::transaction(function () use ($itemId, $actorId, $notes): ?string {
@@ -2068,252 +2365,6 @@ class InventoryOperationService
         }
 
         return null;
-    }
-
-    /**
-     * Statuses a custodian may flag for inspection. Unlike repair this is not
-     * gated on the category, because inspection is a verification step rather than
-     * a repair.
-     */
-    public const INSPECTABLE_STATUSES = [
-        'available',
-        'assigned',
-        'under_repair',
-        'ready_to_dispose',
-    ];
-
-    public function sendToInspection(int $itemId, int $actorId, ?string $reason): ?string
-    {
-        return DB::transaction(function () use ($itemId, $actorId, $reason): ?string {
-            $inventory = Inventory::query()->whereKey($itemId)->lockForUpdate()->firstOrFail();
-            if (! in_array($inventory->status, self::INSPECTABLE_STATUSES, true)) {
-                return 'Only available, assigned, under repair, or ready to dispose items can be sent to inspection.';
-            }
-
-            $statusBefore = $inventory->status;
-            $quantity = $inventory->effectiveQuantity();
-
-            $inspection = InspectionRecord::create([
-                'inventory_id' => $inventory->item_id,
-                'flagged_by' => $actorId,
-                'status_before' => $statusBefore,
-                'status' => 'flagged',
-                'finding_notes' => $reason,
-                'flagged_at' => now(),
-            ]);
-
-            $inventory->update(['status' => 'under_inspection']);
-
-            $this->recordMovement(
-                $inventory->item_id,
-                $actorId,
-                'inspection',
-                $quantity,
-                $quantity,
-                $quantity,
-                'inspection_record',
-                $inspection->id,
-                $reason,
-            );
-
-            return null;
-        });
-    }
-
-    public function sendItemsToInspection(array $itemIds, int $actorId, ?string $reason): ?string
-    {
-        try {
-            DB::transaction(function () use ($itemIds, $actorId, $reason): void {
-                foreach (array_values(array_unique(array_map('intval', $itemIds))) as $itemId) {
-                    $error = $this->sendToInspection($itemId, $actorId, $reason);
-                    if ($error !== null) {
-                        throw new \DomainException($error);
-                    }
-                }
-            });
-        } catch (\DomainException $exception) {
-            return $exception->getMessage();
-        }
-
-        return null;
-    }
-
-    /**
-     * Inspection outcomes an inspector may record. `needs_repair` keeps the
-     * item under inspection and hands the decision to the custodian instead
-     * of restoring the previous status.
-     */
-    public const INSPECTION_OUTCOMES = ['passed', 'needs_repair'];
-
-    public function markInspected(int $inspectionId, int $actorId, ?string $notes, string $outcome = 'passed'): ?string
-    {
-        if (! in_array($outcome, self::INSPECTION_OUTCOMES, true)) {
-            return 'Unknown inspection outcome.';
-        }
-
-        return DB::transaction(function () use ($inspectionId, $actorId, $notes, $outcome): ?string {
-            $inspection = InspectionRecord::query()->whereKey($inspectionId)->lockForUpdate()->firstOrFail();
-            if ($inspection->status !== 'flagged') {
-                return 'This inspection record has already been completed.';
-            }
-
-            $inventory = Inventory::query()->whereKey($inspection->inventory_id)->lockForUpdate()->firstOrFail();
-            if ($inventory->status !== 'under_inspection') {
-                return 'This item is no longer awaiting inspection.';
-            }
-
-            if ($outcome === 'needs_repair') {
-                $inspection->update([
-                    'status' => 'repair_recommended',
-                    'outcome' => 'needs_repair',
-                    'inspected_by' => $actorId,
-                    'finding_notes' => $notes ?? $inspection->finding_notes,
-                    'inspected_at' => now(),
-                ]);
-
-                $this->recordMovement(
-                    $inventory->item_id,
-                    $actorId,
-                    'inspection',
-                    $inventory->effectiveQuantity(),
-                    $inventory->effectiveQuantity(),
-                    $inventory->effectiveQuantity(),
-                    'inspection_record',
-                    $inspection->id,
-                    $notes ? "Recommended for repair: {$notes}" : 'Recommended for repair after inspection',
-                );
-
-                return null;
-            }
-
-            $statusBefore = in_array($inspection->status_before, self::INSPECTABLE_STATUSES, true)
-                ? $inspection->status_before
-                : 'available';
-
-            $inventory->update(['status' => $statusBefore]);
-
-            $inspection->update([
-                'status' => 'inspected',
-                'outcome' => 'passed',
-                'inspected_by' => $actorId,
-                'finding_notes' => $notes ?? $inspection->finding_notes,
-                'inspected_at' => now(),
-            ]);
-
-            $quantity = $inventory->effectiveQuantity();
-            $this->recordMovement(
-                $inventory->item_id,
-                $actorId,
-                'inspection',
-                $quantity,
-                $quantity,
-                $quantity,
-                'inspection_record',
-                $inspection->id,
-                $notes,
-            );
-
-            return null;
-        });
-    }
-
-    /**
-     * Custodian approves an inspector's repair recommendation. The item moves
-     * straight to under_repair so it never reads as available mid-flow.
-     */
-    public function approveRepairRecommendation(int $inspectionId, int $actorId): ?string
-    {
-        return DB::transaction(function () use ($inspectionId, $actorId): ?string {
-            $inspection = InspectionRecord::query()->whereKey($inspectionId)->lockForUpdate()->firstOrFail();
-            if ($inspection->status !== 'repair_recommended') {
-                return 'This repair recommendation has already been decided.';
-            }
-
-            $inventory = Inventory::query()->with('category')->whereKey($inspection->inventory_id)->lockForUpdate()->firstOrFail();
-            if ($inventory->status !== 'under_inspection') {
-                return 'This item is no longer awaiting inspection.';
-            }
-            if ($inventory->category?->is_maintenance_eligible === false) {
-                return 'Items in this category are not eligible for repair.';
-            }
-
-            $quantity = (int) $inventory->quantity;
-            $inventory->update(['status' => 'under_repair']);
-            $maintenanceRecord = MaintenanceRecord::create([
-                'inventory_id' => $inventory->item_id,
-                'reported_by' => $inspection->inspected_by ?? $actorId,
-                'status' => 'reported',
-                'issue_description' => $inspection->finding_notes ?? 'Recommended for repair after inspection',
-                'started_at' => now(),
-            ]);
-            $this->recordMovement(
-                $inventory->item_id,
-                $actorId,
-                'maintenance',
-                $quantity,
-                $quantity,
-                $quantity,
-                'maintenance_record',
-                $maintenanceRecord->id,
-                "Repair approved after inspection: {$maintenanceRecord->issue_description}",
-            );
-
-            $inspection->update([
-                'status' => 'inspected',
-                'repair_decision' => 'approved',
-                'repair_decided_by' => $actorId,
-                'repair_decided_at' => now(),
-            ]);
-
-            return null;
-        });
-    }
-
-    /**
-     * Custodian declines an inspector's repair recommendation. The item
-     * returns to the status it held before inspection.
-     */
-    public function declineRepairRecommendation(int $inspectionId, int $actorId): ?string
-    {
-        return DB::transaction(function () use ($inspectionId, $actorId): ?string {
-            $inspection = InspectionRecord::query()->whereKey($inspectionId)->lockForUpdate()->firstOrFail();
-            if ($inspection->status !== 'repair_recommended') {
-                return 'This repair recommendation has already been decided.';
-            }
-
-            $inventory = Inventory::query()->whereKey($inspection->inventory_id)->lockForUpdate()->firstOrFail();
-            if ($inventory->status !== 'under_inspection') {
-                return 'This item is no longer awaiting inspection.';
-            }
-
-            $statusBefore = in_array($inspection->status_before, self::INSPECTABLE_STATUSES, true)
-                ? $inspection->status_before
-                : 'available';
-
-            $inventory->update(['status' => $statusBefore]);
-
-            $inspection->update([
-                'status' => 'inspected',
-                'repair_decision' => 'declined',
-                'repair_decided_by' => $actorId,
-                'repair_decided_at' => now(),
-            ]);
-
-            $quantity = $inventory->effectiveQuantity();
-            $this->recordMovement(
-                $inventory->item_id,
-                $actorId,
-                'inspection',
-                $quantity,
-                $quantity,
-                $quantity,
-                'inspection_record',
-                $inspection->id,
-                'Repair recommendation declined after inspection',
-            );
-
-            return null;
-        });
     }
 
     /**

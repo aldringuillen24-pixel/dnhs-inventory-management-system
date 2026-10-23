@@ -115,10 +115,6 @@ const router = createRouter({
             meta: { roles: ['School Head'], title: 'Audit Logs' },
         },
         {
-            path: '/inspector/inventory',
-            redirect: { name: 'inspector-arrival-inspections' },
-        },
-        {
             path: '/inspector/arrival-inspections',
             name: 'inspector-arrival-inspections',
             component: () => import('../views/inspector/ArrivalInspections.vue'),

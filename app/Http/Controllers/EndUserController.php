@@ -6,16 +6,20 @@ use Illuminate\Http\Request;
 use App\Models\AssignmentRequest;
 use App\Models\Category;
 use App\Models\MaintenanceRecord;
+use App\Models\MaintenanceRecordEvidence;
 use App\Models\Transaction;
 use App\Models\Inventory;
 use App\Models\User;
+use App\Services\IncidentLifecycleService;
 use App\Services\InventoryOperationService;
 use App\Support\RequestableItemMatcher;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class EndUserController extends Controller
 {
@@ -481,7 +485,74 @@ class EndUserController extends Controller
         return response()->json([
             'title' => 'My Assigned Items',
             'activityRows' => $activityRows,
+            'incidentReports' => MaintenanceRecord::query()
+                ->with('inventory:item_id,item_name,inventory_item_no')
+                ->with('evidence:id,maintenance_record_id,original_filename')
+                ->with('events.actor:id,first_name,last_name,username')
+                ->where('reported_by', $user->id)
+                ->whereIn('diagnosis', MaintenanceRecord::INCIDENT_TYPES)
+                ->latest('created_at')
+                ->get()
+                ->map(fn (MaintenanceRecord $report): array => [
+                    'id' => $report->id,
+                    'item_name' => $report->inventory?->item_name ?? 'Unknown item',
+                    'inventory_item_no' => $report->inventory?->inventory_item_no,
+                    'type' => $report->diagnosis,
+                    'quantity' => $report->quantity,
+                    'details' => $report->issue_description,
+                    'status' => $report->incident_status ?? $report->status,
+                    'outcome' => $report->incident_outcome,
+                    'submitted_at' => $report->created_at,
+                    'timeline' => $report->events->map(fn ($event): array => [
+                        'id' => $event->id,
+                        'event_type' => $event->event_type,
+                        'from_status' => $event->from_status,
+                        'to_status' => $event->to_status,
+                        'details' => $event->details,
+                        'metadata' => $event->metadata,
+                        'actor_id' => $event->actor_id,
+                        'actor' => $event->actor
+                            ? ($event->actor->full_name ?: $event->actor->username)
+                            : null,
+                        'created_at' => $event->created_at,
+                    ])->values(),
+                    'evidence' => $report->evidence
+                        ->map(fn (MaintenanceRecordEvidence $evidence): array => [
+                            'id' => $evidence->id,
+                            'filename' => $evidence->original_filename,
+                            'download_url' => route('api.incident-evidence.download', $evidence->id),
+                        ])
+                        ->values(),
+                ])
+                ->values(),
             'endUsers' => $endUsers,
+        ]);
+    }
+
+    public function respondToIncidentInformation(
+        Request $request,
+        $id,
+        IncidentLifecycleService $incidentLifecycle,
+    ) {
+        $validated = $request->validate([
+            'details' => ['required', 'string', 'min:3', 'max:2000'],
+        ]);
+        $record = MaintenanceRecord::query()
+            ->whereKey($id)
+            ->where('reported_by', $request->user()->id)
+            ->firstOrFail();
+
+        $record = $incidentLifecycle->transition(
+            $record,
+            'reported',
+            (int) $request->user()->id,
+            $validated['details'],
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'incident_status' => $record->incident_status,
+            'message' => 'Your response was added to the report history.',
         ]);
     }
 
@@ -933,12 +1004,13 @@ class EndUserController extends Controller
      * the reporter and type (`diagnosis`), which the custodian triages from
      * the inventory Records view.
      */
-    public function reportIssue(Request $request, $itemId)
+    public function reportIssue(Request $request, $itemId, IncidentLifecycleService $incidentLifecycle)
     {
         $validated = $request->validate([
-            'type' => ['required', 'string', 'in:damaged,lost'],
-            'quantity' => ['nullable', 'integer', 'min:1'],
-            'notes' => ['nullable', 'string', 'max:1000'],
+            'type' => ['required', 'string', 'in:damaged,needs_repair,lost,stolen'],
+            'quantity' => ['required', 'integer', 'min:1'],
+            'notes' => ['required', 'string', 'min:5', 'max:2000'],
+            'evidence' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
         ]);
 
         $inventory = Inventory::findOrFail($itemId);
@@ -972,9 +1044,13 @@ class EndUserController extends Controller
                 ->latest('transaction_date')
                 ->first();
 
-        $outstandingQuantity = $approvedAssignment?->quantity ?? $assignmentTransaction?->quantity ?? $inventory->quantity;
-        $reportQuantity = $validated['quantity'] ?? $outstandingQuantity;
-        if ($reportQuantity < 1 || $reportQuantity > $outstandingQuantity) {
+        $assignedQuantity = $incidentLifecycle->currentAssignedQuantity(
+            (int) $inventory->item_id,
+            (int) $user->id,
+            $assignmentTransaction?->id,
+        );
+        $reportQuantity = $validated['quantity'] ?? $assignedQuantity;
+        if ($reportQuantity < 1 || $reportQuantity > $assignedQuantity) {
             return redirect()->back()->with('error', 'Report quantity must be between 1 and the assigned quantity.');
         }
 
@@ -987,17 +1063,67 @@ class EndUserController extends Controller
             return redirect()->back()->with('error', 'You already have an open report for this item.');
         }
 
-        MaintenanceRecord::create([
-            'inventory_id' => $inventory->item_id,
-            'quantity' => $reportQuantity,
-            'reported_by' => $user->id,
-            'status' => 'reported',
-            'issue_description' => $validated['notes'] ?? null,
-            'diagnosis' => $validated['type'],
-            'started_at' => now(),
-        ]);
+        $evidence = $request->file('evidence');
+        $storedEvidencePath = null;
+
+        try {
+            DB::transaction(function () use ($inventory, $reportQuantity, $user, $validated, $assignmentTransaction, $incidentLifecycle, $evidence, &$storedEvidencePath): void {
+                $record = MaintenanceRecord::create([
+                    'inventory_id' => $inventory->item_id,
+                    'quantity' => $reportQuantity,
+                    'reported_by' => $user->id,
+                    'status' => 'reported',
+                    'issue_description' => $validated['notes'],
+                    'diagnosis' => $validated['type'],
+                    'started_at' => now(),
+                ]);
+
+                $incidentLifecycle->recordSubmission($record, (int) $user->id, $assignmentTransaction?->id);
+
+                if ($evidence) {
+                    $storedEvidencePath = $evidence->store("incident-evidence/{$record->id}", 'local');
+                    if (! is_string($storedEvidencePath) || $storedEvidencePath === '') {
+                        throw new \RuntimeException('Incident evidence could not be stored.');
+                    }
+
+                    $record->evidence()->create([
+                        'uploaded_by' => $user->id,
+                        'disk' => 'local',
+                        'path' => $storedEvidencePath,
+                        'original_filename' => mb_substr(basename($evidence->getClientOriginalName()), 0, 255),
+                        'mime_type' => $evidence->getMimeType() ?? 'application/octet-stream',
+                        'size' => $evidence->getSize(),
+                    ]);
+                }
+            });
+        } catch (Throwable $exception) {
+            if (is_string($storedEvidencePath) && $storedEvidencePath !== '') {
+                Storage::disk('local')->delete($storedEvidencePath);
+            }
+
+            throw $exception;
+        }
 
         return redirect()->route('endUser.my-assigned-items')->with('success', 'Issue reported for custodian triage.');
+    }
+
+    public function downloadIncidentEvidence(Request $request, MaintenanceRecordEvidence $evidence)
+    {
+        $record = $evidence->maintenanceRecord()->with('reportedBy.role')->firstOrFail();
+        $user = $request->user();
+        $isReporter = (int) $record->reported_by === (int) $user->id;
+        $isCustodian = $user->role?->role_name === 'Property Custodian';
+
+        abort_unless($record->isIncidentReport() && ($isReporter || $isCustodian), 403);
+
+        $disk = Storage::disk($evidence->disk);
+        abort_unless($disk->exists($evidence->path), 404);
+
+        return $disk->download(
+            $evidence->path,
+            basename($evidence->original_filename),
+            ['Content-Type' => $evidence->mime_type],
+        );
     }
 
     public function cancelRequest(Request $request, $id)

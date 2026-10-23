@@ -60,19 +60,19 @@ services:
       - key: GEMINI_MODEL
         value: gemini-3.1-flash-lite
       - key: MAIL_MAILER
-        sync: false # e.g. smtp (set in dashboard; local stays log)
+        sync: false # set to smtp in the Render dashboard; local stays log
       - key: MAIL_HOST
-        sync: false # e.g. smtp.gmail.com (production SMTP host)
+        sync: false # Brevo SMTP host: smtp-relay.brevo.com
       - key: MAIL_PORT
-        sync: false # e.g. 587
+        sync: false # Brevo SMTP TLS port: 587
       - key: MAIL_USERNAME
-        sync: false # production SMTP username
+        sync: false # Brevo SMTP login from SMTP & API settings (not your account email)
       - key: MAIL_PASSWORD
-        sync: false # production SMTP password (never commit)
+        sync: false # Brevo SMTP key (not the API key); never commit
       - key: MAIL_ENCRYPTION
-        sync: false # e.g. tls
+        sync: false # tls
       - key: MAIL_FROM_ADDRESS
-        sync: false # e.g. noreply@example.com
+        sync: false # sender address verified in Brevo
       - key: MAIL_FROM_NAME
         sync: false # e.g. DNHS Inventory
       - key: FORECAST_API_URL

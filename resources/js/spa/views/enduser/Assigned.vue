@@ -18,7 +18,84 @@
       </button>
     </div>
 
-    <div v-else class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <section class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">My Incident Reports</h2>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Track reports you submitted and their current status.</p>
+        </div>
+        <span class="text-xs text-gray-500 dark:text-gray-400">{{ incidentReports.length }} report{{ incidentReports.length === 1 ? '' : 's' }}</span>
+      </div>
+      <div v-if="loading" class="compact-skeleton h-10" />
+      <p v-else-if="incidentReports.length === 0" class="rounded-md bg-gray-50 px-3 py-4 text-xs text-gray-500 dark:bg-white/5 dark:text-gray-400">
+        You have not submitted any incident reports.
+      </p>
+      <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+        <li v-for="report in incidentReports" :key="report.id" class="flex flex-wrap items-start justify-between gap-3 py-3 first:pt-1">
+          <div class="min-w-0 space-y-1">
+            <p class="text-xs font-semibold text-gray-900 dark:text-white">
+              {{ report.item_name }} <span class="font-normal capitalize text-gray-500">· {{ report.type.replaceAll('_', ' ') }}</span>
+            </p>
+            <p class="text-xs text-gray-600 dark:text-gray-300">{{ report.quantity }} affected · {{ report.details }}</p>
+            <p class="text-[11px] text-gray-500 dark:text-gray-400">Submitted {{ formatDate(report.submitted_at) }}</p>
+            <a
+              v-for="file in report.evidence ?? []"
+              :key="file.id"
+              :href="file.download_url"
+              class="inline-flex text-[11px] font-semibold text-brand-700 underline dark:text-brand-300"
+            >
+              Download {{ file.filename }}
+            </a>
+            <div v-if="report.status === 'awaiting_reporter'" class="mt-2 flex w-full flex-wrap gap-2">
+              <textarea
+                v-model="incidentResponseDrafts[report.id]"
+                rows="2"
+                maxlength="2000"
+                aria-label="Response to custodian information request"
+                placeholder="Provide the requested information…"
+                class="min-w-64 flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              />
+              <button
+                type="button"
+                class="self-end rounded-md bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                :disabled="incidentResponseId === report.id || String(incidentResponseDrafts[report.id] ?? '').trim().length < 3"
+                @click="respondToIncidentInformation(report)"
+              >
+                Send Response
+              </button>
+            </div>
+            <ol v-if="report.timeline?.length" class="mt-2 max-h-40 w-full space-y-2 overflow-y-auto border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              <li v-for="event in report.timeline" :key="event.id ?? `${event.created_at}-${event.event_type}`">
+                <p>
+                  {{ formatIncidentDate(event.created_at) }} · {{ event.actor || 'System' }} ·
+                  {{ incidentEventLabel(event) }}
+                </p>
+                <p v-if="event.details" class="whitespace-pre-wrap">{{ event.details }}</p>
+                <p v-if="incidentRelatedRecords(event).length" class="text-[10px] text-gray-400 dark:text-gray-500">
+                  Related:
+                  <span v-for="(reference, index) in incidentRelatedRecords(event)" :key="`${reference.label}-${reference.id}`">
+                    <span v-if="index"> · </span>{{ reference.label }} #{{ reference.id }}
+                  </span>
+                </p>
+                <a
+                  v-for="file in incidentEvidenceForEvent(report, event)"
+                  :key="`${event.created_at}-${file.id}`"
+                  :href="file.download_url"
+                  class="mr-2 font-semibold text-brand-700 underline dark:text-brand-300"
+                >
+                  {{ file.filename }}
+                </a>
+              </li>
+            </ol>
+          </div>
+          <span class="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold capitalize text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+            {{ report.status.replaceAll('_', ' ') }}
+          </span>
+        </li>
+      </ul>
+    </section>
+
+    <div v-if="!error" class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="relative w-full sm:max-w-xs">
           <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -391,14 +468,13 @@
         </div>
       </template>
     </Modal>
-    <!-- Report issue: damage/loss on an assigned item. Report-only — the item
-         stays assigned and no stock moves. -->
+    <!-- Reporting records the issue only; inventory and assignment are unchanged. -->
     <Modal :open="reportTarget !== null" title="Report Issue" max-width="max-w-md" @close="reportTarget = null">
       <div v-if="reportTarget" class="space-y-4">
         <p class="rounded-md bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:bg-white/5 dark:text-gray-300">
           Report an issue with <span class="font-semibold text-gray-900 dark:text-white">{{ reportTarget.item_name }}</span>
           ({{ reportTarget.quantity }} {{ Number(reportTarget.quantity) === 1 ? 'unit' : 'units' }} assigned)?
-          The item stays assigned; the custodian triages the report.
+          The item and assignment stay unchanged; the custodian reviews your report.
         </p>
         <div class="space-y-1.5">
           <label for="report-type" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
@@ -410,7 +486,9 @@
             class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="damaged">Damaged</option>
+            <option value="needs_repair">Needs Repair</option>
             <option value="lost">Lost</option>
+            <option value="stolen">Stolen</option>
           </select>
         </div>
         <div class="space-y-1.5">
@@ -428,16 +506,30 @@
         </div>
         <div class="space-y-1.5">
           <label for="report-notes" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-            Notes <span class="font-normal text-gray-500">(optional)</span>
+            Incident details
           </label>
           <textarea
             id="report-notes"
             v-model="reportNotes"
-            rows="2"
-            maxlength="1000"
-            placeholder="What happened, visible damage, last known location…"
+            rows="3"
+            maxlength="2000"
+            placeholder="Describe what happened, when, and where…"
             class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
+          <p v-if="reportNotes.trim().length < 5" class="text-[11px] text-gray-500">Enter at least 5 characters.</p>
+        </div>
+        <div class="space-y-1.5">
+          <label for="report-evidence" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+            Supporting evidence <span class="font-normal text-gray-500">(optional, JPG/PNG/PDF, up to 5 MB; visible only to you and custodians)</span>
+          </label>
+          <input
+            id="report-evidence"
+            type="file"
+            accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+            class="block w-full text-xs text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold dark:text-gray-300 dark:file:bg-gray-800"
+            @change="reportEvidence = $event.target.files?.[0] ?? null"
+          />
+          <p v-if="reportEvidence" class="truncate text-[11px] text-gray-500">{{ reportEvidence.name }}</p>
         </div>
       </div>
       <template #footer>
@@ -452,7 +544,7 @@
           <button
             type="button"
             class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
-            :disabled="reportTarget && workingId === rowKey(reportTarget)"
+            :disabled="!reportTarget || workingId === rowKey(reportTarget) || reportNotes.trim().length < 5"
             @click="confirmReportIssue"
           >
             Submit Report
@@ -484,6 +576,9 @@ const expanded = ref(new Set());
 
 const rows = ref([]);
 const endUsers = ref([]);
+const incidentReports = ref([]);
+const incidentResponseDrafts = ref({});
+const incidentResponseId = ref(null);
 const filterSearch = ref('');
 const filterStatus = ref('');
 
@@ -520,6 +615,7 @@ const reportTarget = ref(null);
 const reportType = ref('damaged');
 const reportQuantity = ref(1);
 const reportNotes = ref('');
+const reportEvidence = ref(null);
 
 const TRANSFERABLE = ['approved', 'accepted'];
 
@@ -558,6 +654,7 @@ function openReportIssue(row) {
   reportType.value = 'damaged';
   reportQuantity.value = Math.max(1, Number(row?.quantity) || 1);
   reportNotes.value = '';
+  reportEvidence.value = null;
 }
 
 function reportQuantityCap() {
@@ -572,24 +669,49 @@ async function confirmReportIssue() {
   }
   workingId.value = rowKey(row);
 
-  const cap = Math.max(1, Number(row.quantity) || 1);
-  const quantity = Math.min(cap, Math.max(1, Number(reportQuantity.value) || 1));
-
   try {
-    await api.post(`/end-user/inventory/${itemId}/report`, {
-      type: reportType.value,
-      quantity,
-      notes: reportNotes.value.trim() || null,
-    });
+    const formData = new FormData();
+    formData.append('type', reportType.value);
+    formData.append('quantity', String(reportQuantity.value));
+    formData.append('notes', reportNotes.value.trim());
+    if (reportEvidence.value) {
+      formData.append('evidence', reportEvidence.value);
+    }
+    await api.post(`/end-user/inventory/${itemId}/report`, formData);
     reportTarget.value = null;
     forgetPageCache();
     await load();
   } catch (requestError) {
     if (requestError?.response?.status === 422) {
       toast.error('Error', requestError?.response?.data?.message ?? 'Could not report the issue.');
+    } else {
+      toast.error('Could not submit report', requestError?.response?.data?.message ?? 'Check your connection and try again.');
     }
   } finally {
     workingId.value = null;
+  }
+}
+
+async function respondToIncidentInformation(report) {
+  const details = String(incidentResponseDrafts.value[report.id] ?? '').trim();
+  if (details.length < 3 || incidentResponseId.value !== null) {
+    return;
+  }
+  incidentResponseId.value = report.id;
+
+  try {
+    await api.post(`/end-user/incident-reports/${report.id}/information-response`, { details });
+    incidentResponseDrafts.value[report.id] = '';
+    toast.success('Response sent', 'Your response was added to the incident timeline.');
+    forgetPageCache();
+    await load();
+  } catch (requestError) {
+    toast.error(
+      'Could not send response',
+      requestError?.response?.data?.message ?? 'Refresh the report and try again.',
+    );
+  } finally {
+    incidentResponseId.value = null;
   }
 }
 
@@ -599,6 +721,66 @@ function formatDate(value) {
   }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+function formatIncidentDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function incidentEventLabel(event) {
+  if (event.event_type === 'report_submitted') return 'Report submitted';
+  if (event.event_type === 'reporter_response_received') return 'Information response received';
+  if (event.event_type === 'status_changed' && event.to_status === 'awaiting_reporter') return 'Information requested';
+  if (event.event_type === 'physical_inspection_recorded') return 'Physical inspection recorded';
+  if (event.event_type === 'incident_handover_confirmed') return 'Handover confirmed';
+  if (event.event_type === 'incident_repair_started') return 'Repair started';
+  if (event.event_type === 'incident_repairability_reassessed') return 'Repair reassessed as not viable';
+  if (event.event_type === 'investigation_action_recorded') return 'Investigation update';
+  if (event.event_type === 'incident_processing_blocked') {
+    return `Pending ${String(event.metadata?.stage ?? 'processing').replaceAll('_', ' ')}`;
+  }
+  if (event.event_type === 'status_changed' && event.to_status) {
+    if (event.to_status === 'under_investigation') return 'Investigation started';
+    if (event.to_status === 'resolved') {
+      return `Report resolved: ${String(event.metadata?.outcome ?? 'complete').replaceAll('_', ' ')}`;
+    }
+    return `Status changed to ${event.to_status.replaceAll('_', ' ')}`;
+  }
+  return String(event.event_type ?? 'Incident activity').replaceAll('_', ' ');
+}
+
+function incidentRelatedRecords(event) {
+  const metadata = event.metadata ?? {};
+  const references = [
+    ['inventory_id', 'Inventory'],
+    ['source_inventory_id', 'Inventory'],
+    ['processing_inventory_id', 'Processing inventory'],
+    ['assignment_transaction_id', 'Assignment transaction'],
+    ['assignment_request_id', 'Assignment request'],
+    ['assignment_return_id', 'Assignment return'],
+    ['maintenance_record_id', 'Repair record'],
+    ['disposal_movement_id', 'Disposal movement'],
+    ['stock_movement_id', 'Stock movement'],
+  ];
+  const seen = new Set();
+
+  return references.flatMap(([key, label]) => {
+    const id = Number(metadata[key]);
+    if (!Number.isInteger(id) || id < 1 || seen.has(`${label}-${id}`)) {
+      return [];
+    }
+    seen.add(`${label}-${id}`);
+    return [{ label, id }];
+  });
+}
+
+function incidentEvidenceForEvent(report, event) {
+  const evidenceIds = new Set((event.metadata?.evidence_ids ?? []).map(Number));
+  return (report.evidence ?? []).filter((file) => evidenceIds.has(Number(file.id)));
 }
 
 function toggleExpand(key) {
@@ -713,6 +895,7 @@ async function load(options = {}) {
     },
     applyData: (data) => {
       rows.value = data.activityRows ?? [];
+      incidentReports.value = data.incidentReports ?? [];
       endUsers.value = (data.endUsers ?? []).filter((person) => person.status !== 'inactive');
     },
     onStart: () => {

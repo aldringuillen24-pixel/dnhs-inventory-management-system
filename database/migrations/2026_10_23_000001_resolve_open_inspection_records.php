@@ -20,11 +20,15 @@ return new class extends Migration
             DB::table('inspection_records')
                 ->whereIn('status', ['flagged', 'repair_recommended'])
                 ->orderBy('id')
+                ->lockForUpdate()
                 ->get()
                 ->each(function (object $record) use ($now): void {
-                    $statusBefore = in_array($record->status_before, self::RESTORABLE_STATUSES, true)
-                        ? $record->status_before
-                        : 'available';
+                    if (! in_array($record->status_before, self::RESTORABLE_STATUSES, true)) {
+                        throw new RuntimeException(
+                            "Cannot safely restore inspection record {$record->id}: invalid prior inventory status."
+                        );
+                    }
+                    $statusBefore = $record->status_before;
 
                     DB::table('inventory')
                         ->where('item_id', $record->inventory_id)

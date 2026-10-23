@@ -80,7 +80,7 @@ test('end user workspace reads return JSON shapes', function () {
 
     $this->actingAs($this->endUser)->getJson(route('api.end-user.assigned-items'))
         ->assertOk()
-        ->assertJsonStructure(['activityRows', 'endUsers']);
+        ->assertJsonStructure(['activityRows', 'incidentReports', 'endUsers']);
 });
 
 test('accepting an assignment through the api assigns stock', function () {

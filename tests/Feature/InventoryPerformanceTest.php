@@ -128,9 +128,8 @@ beforeEach(function () {
 test('inventory aggregates match independent recomputation at volume', function () {
     $response = $this->actingAs($this->custodian)->getJson(route('api.custodian.inventory'))->assertOk();
 
-    // Independent recomputation of the intended semantics: custody-based statuses
-    // (assigned, and items flagged for inspection while still with a user) read the
-    // active assignment transaction, everything else reads the stored column.
+    // Legacy inspection-flagged records continue to read active assignment
+    // transactions until the cleanup migration restores their prior statuses.
     $activeAssignments = Transaction::query()
         ->where('status', 'assigned')
         ->groupBy('item_id')
@@ -159,12 +158,23 @@ test('inventory aggregates match independent recomputation at volume', function 
         (int) $liveItems->groupBy('status')->sum(fn ($items) => (int) $items->sum($effective))
     );
 
-    foreach (['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose'] as $status) {
-        $response->assertJsonPath(
-            "inventoryStatusCounts.{$status}",
-            (int) $liveItems->where('status', $status)->sum($effective)
+    $expectedAssignedWorkspaceQuantity = (int) $liveItems->where('status', 'assigned')->sum($effective)
+    + (int) $liveItems->where('status', 'under_inspection')->filter(fn (Inventory $item) => $activeAssignments->has($item->item_id))->sum($effective)
+    + (int) $liveItems->where('status', 'available')->sum(fn (Inventory $item) => (int) ($activeAssignments[$item->item_id] ?? 0));
+
+    $response->assertJsonPath('inventoryStatusCounts.assigned', $expectedAssignedWorkspaceQuantity);
+
+    foreach (['available', 'assigned', 'under_repair', 'ready_to_dispose'] as $status) {
+    if ($status === 'assigned') {
+        continue;
+    }
+
+    $response->assertJsonPath(
+        "inventoryStatusCounts.{$status}",
+        (int) $liveItems->where('status', $status)->sum($effective)
         );
     }
+    $response->assertJsonMissingPath('inventoryPages.under_inspection');
     $response->assertJsonPath(
         'inventoryStatusCounts.disposed',
         (int) Inventory::where('status', 'disposed')->sum('quantity')

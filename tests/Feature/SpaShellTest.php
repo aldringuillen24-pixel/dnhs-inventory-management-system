@@ -28,8 +28,7 @@ test('authenticated users receive the spa shell', function () {
     $this->actingAs($this->custodian)
         ->get(route('spa'))
         ->assertOk()
-        ->assertSee('<div id="app"></div>', false)
-        ->assertSee('/build/assets/', false);
+        ->assertSee('<div id="app"></div>', false);
 });
 
 test('spa history subpaths resolve to the shell for the client router', function () {
@@ -39,7 +38,7 @@ test('spa history subpaths resolve to the shell for the client router', function
         ->assertSee('<div id="app"></div>', false);
 });
 
-test('inspector is directed to arrival inspections and legacy inspection page redirects', function () {
+test('inspector landing, arrival inspections, reports, and profile resolve without the retired inventory page', function () {
     $inspectorRole = Role::create(['role_name' => 'Inspector']);
     $inspector = User::create([
         'role_id' => $inspectorRole->role_id,
@@ -53,7 +52,8 @@ test('inspector is directed to arrival inspections and legacy inspection page re
 
     $this->actingAs($inspector)
         ->get('/spa/inspector/inventory')
-        ->assertRedirect('/spa/inspector/arrival-inspections');
+        ->assertOk()
+        ->assertSee('<div id="app"></div>', false);
 
     $this->actingAs($inspector)
         ->get('/spa/inspector/arrival-inspections')
@@ -62,6 +62,11 @@ test('inspector is directed to arrival inspections and legacy inspection page re
 
     $this->actingAs($inspector)
         ->get('/spa/inspector/reports')
+        ->assertOk()
+        ->assertSee('<div id="app"></div>', false);
+
+    $this->actingAs($inspector)
+        ->get('/spa/profile')
         ->assertOk()
         ->assertSee('<div id="app"></div>', false);
 

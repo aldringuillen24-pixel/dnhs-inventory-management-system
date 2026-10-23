@@ -76,7 +76,7 @@
 
     <!-- Error State -->
     <div
-      v-if="error"
+      v-if="error && !isIncidentWorkspace"
       class="flex items-center justify-between rounded-md border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-rose-400"
     >
       <div class="flex items-center gap-3">
@@ -216,7 +216,7 @@
         </div>
 
         <!-- Toolbar: Search + Category + Stats + Bulk Actions -->
-        <div class="flex shrink-0 flex-col gap-2.5 border-b border-gray-100 p-2.5 dark:border-white/5 min-[480px]:gap-3 min-[480px]:p-4 sm:flex-row sm:items-center">
+        <div v-if="!isIncidentWorkspace" class="flex shrink-0 flex-col gap-2.5 border-b border-gray-100 p-2.5 dark:border-white/5 min-[480px]:gap-3 min-[480px]:p-4 sm:flex-row sm:items-center">
           <!-- Search Input -->
           <div class="relative w-full min-w-0 sm:max-w-[17rem] sm:flex-shrink-0">
             <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -306,7 +306,7 @@
           </div>
         </div>
 
-        <Transition name="workspace" mode="out-in">
+        <Transition v-if="!isIncidentWorkspace" name="workspace" mode="out-in">
           <div :key="workspace" class="flex min-h-0 min-w-0 flex-1 flex-col">
         <div v-if="loading" class="min-h-0 min-w-0 flex-1 shrink space-y-2.5 overflow-y-auto p-3 xl:hidden" aria-hidden="true">
           <div v-for="row in 4" :key="row" class="space-y-2.5 rounded-md border border-gray-200 p-3 dark:border-gray-800">
@@ -352,7 +352,6 @@
                 {{ disposalReason(row) || 'No reason recorded.' }}
               </p>
               <StatusBadge v-else :status="row.status" compact />
-              <span v-if="hasRepairRecommendation(row)" class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Repair recommended</span>
               <span v-if="hasIssuedOut(row) && workspace !== 'available' && workspace !== 'all'" class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">Assigned issuing</span>
               <button
                 type="button"
@@ -561,7 +560,6 @@
                     </div>
                     <div v-else class="flex flex-wrap items-center gap-1.5">
                       <StatusBadge :status="displayStatus(row)" />
-                      <span v-if="hasRepairRecommendation(row)" class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">Repair recommended</span>
                     </div>
                   </td>
 
@@ -695,7 +693,369 @@
         </div>
           </div>
         </Transition>
+        <section v-else class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 p-3 dark:border-gray-800">
+            <div>
+              <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
+                {{ workspace === 'investigations' ? 'Lost / Stolen Investigations' : 'Incident Reports' }}
+              </h2>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ displayedIncidentQueue.length }} {{ workspace === 'investigations' ? 'active investigation' : 'open report' }}{{ displayedIncidentQueue.length === 1 ? '' : 's' }}
+              </p>
+            </div>
+            <button
+              type="button"
+              class="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
+              :disabled="incidentQueueLoading"
+              @click="loadIncidentQueue"
+            >
+              {{ incidentQueueLoading ? 'Refreshing…' : 'Refresh' }}
+            </button>
+          </div>
+          <p v-if="incidentQueueError" role="alert" class="m-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200">
+            {{ incidentQueueError }}
+          </p>
+          <div v-if="incidentQueueLoading && incidentQueue.length === 0" class="m-3 h-20 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
+          <div v-else-if="displayedIncidentQueue.length === 0 && !incidentQueueError" class="m-3 flex flex-col items-center justify-center rounded-md border-2 border-gray-500 px-4 py-10 text-center dark:border-gray-400">
+            <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-md text-gray-400 dark:text-gray-500">
+              <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7m16 0v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-5m16 0h-2.586a1 1 0 0 0-.707.293l-2.414 2.414a1 1 0 0 1-.707.293h-3.172a1 1 0 0 1-.707-.293l-2.414-2.414A1 1 0 0 0 6.586 13H4" />
+              </svg>
+            </div>
+            <p class="text-sm font-semibold text-gray-800 dark:text-white">
+              {{ workspace === 'investigations' ? 'No active investigations' : 'No incident reports found' }}
+            </p>
+            <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              {{ workspace === 'investigations' ? 'Active Lost or Stolen investigations will appear here.' : 'Submitted incident reports will appear here.' }}
+            </p>
+          </div>
+          <div v-else-if="displayedIncidentQueue.length > 0" class="grid min-h-0 flex-1 grid-cols-1 content-start gap-3 overflow-y-auto p-3 md:grid-cols-2 xl:grid-cols-4">
+            <article
+              v-for="report in displayedIncidentQueue"
+              :key="report.id"
+              class="w-full space-y-2 rounded-md border border-gray-200 p-3 dark:border-gray-700"
+            >
+              <div class="flex min-w-0 items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ report.item.name }}</h3>
+                  <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                    {{ report.item.inventory_item_no || `Item #${report.item.id}` }}
+                    · {{ report.quantity }} {{ report.item.unit || 'unit(s)' }} affected
+                    · {{ report.reporter.name }}
+                  </p>
+                </div>
+                <span class="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-semibold capitalize text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                  {{ report.status.replaceAll('_', ' ') }}
+                </span>
+              </div>
+              <div class="flex min-w-0 items-start gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                <span class="shrink-0 font-semibold capitalize">{{ report.type.replaceAll('_', ' ') }}</span>
+                <span aria-hidden="true">·</span>
+                <p class="line-clamp-2 min-w-0">{{ report.details }}</p>
+              </div>
+              <div class="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                <p class="text-[10px] text-gray-500 dark:text-gray-400">
+                  {{ formatIncidentDate(report.submitted_at) }}
+                  <span v-if="report.timeline.length"> · {{ report.timeline.length }} updates</span>
+                </p>
+                <button
+                  type="button"
+                  class="rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500"
+                  :class="incidentDetailsReport?.id === report.id
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm hover:from-emerald-500 hover:to-teal-500'
+                    : 'border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5'"
+                  :aria-expanded="incidentDetailsReport?.id === report.id"
+                  :aria-controls="incidentDetailsReport?.id === report.id ? 'incident-report-details-popover' : undefined"
+                  @click="toggleIncidentDetails(report, $event)"
+                >
+                  Details
+                </button>
+              </div>
+              <div v-if="report.status === 'reported' || (report.status === 'under_review' && !report.handover)" class="flex flex-wrap gap-1.5">
+                <button
+                  v-if="report.status === 'reported' || report.status === 'under_review'"
+                  type="button"
+                  class="rounded-md border border-gray-200 px-2 py-1 text-[10px] font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
+                  :disabled="incidentActionId !== null"
+                  @click="requestIncidentInformation(report)"
+                >
+                  Request Details
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md border border-rose-200 px-2 py-1 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                  :disabled="incidentActionId !== null"
+                  @click="declineIncident(report)"
+                >
+                  Decline
+                </button>
+                <button
+                  v-if="report.status === 'reported'"
+                  type="button"
+                  class="rounded-md bg-brand-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                  :disabled="incidentActionId !== null"
+                  @click="acceptIncident(report)"
+                >
+                  Accept for Review
+                </button>
+                <template v-if="report.status === 'under_review'">
+                  <button
+                    v-if="['damaged', 'needs_repair'].includes(report.type)"
+                    type="button"
+                    class="rounded-md border border-blue-200 px-2 py-1 text-[10px] font-semibold text-blue-800 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-500/10"
+                    :disabled="incidentActionId !== null || Boolean(report.handover)"
+                    @click="recordIncidentInspection(report)"
+                  >
+                    Record Inspection
+                  </button>
+                  <button
+                    v-if="['damaged', 'needs_repair'].includes(report.type) && report.inspection && ['repairable', 'not_repairable'].includes(report.inspection.repairability) && !report.handover"
+                    type="button"
+                    class="rounded-md border border-emerald-200 px-2 py-1 text-[10px] font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                    :disabled="incidentActionId !== null"
+                    @click="confirmIncidentHandover(report)"
+                  >
+                    {{ report.inspection.repairability === 'not_repairable' ? 'Confirm Handover & Ready for Disposal' : 'Confirm Handover' }}
+                  </button>
+                  <button
+                    v-if="['damaged', 'needs_repair'].includes(report.type) && report.inspection?.repairability === 'repairable' && report.handover"
+                    type="button"
+                    class="rounded-md bg-brand-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                    :disabled="incidentActionId !== null"
+                    @click="startIncidentRepair(report)"
+                  >
+                    Start Repair
+                  </button>
+                  <button
+                    v-if="['lost', 'stolen'].includes(report.type)"
+                    type="button"
+                    class="rounded-md bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                    :disabled="incidentActionId !== null"
+                    @click="startIncidentInvestigation(report)"
+                  >
+                    Start Investigation
+                  </button>
+                </template>
+              </div>
+              <div v-else-if="report.status === 'processing_repair'" class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  class="rounded-md bg-brand-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                  :disabled="incidentActionId !== null"
+                  @click="completeIncidentRepair(report)"
+                >
+                  Mark Repair Complete
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md border border-orange-200 px-2 py-1 text-[10px] font-semibold text-orange-800 hover:bg-orange-50 disabled:opacity-50 dark:border-orange-800 dark:text-orange-300 dark:hover:bg-orange-500/10"
+                  :disabled="incidentActionId !== null"
+                  @click="confirmIncidentRepairNotViable(report)"
+                >
+                  Repair Not Viable
+                </button>
+              </div>
+              <div v-else-if="report.status === 'under_investigation'" class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  class="rounded-md border border-indigo-200 px-2 py-1 text-[10px] font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+                  :disabled="incidentActionId !== null"
+                  @click="openInvestigationActionModal(report)"
+                >
+                  Add Investigation Update
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  :disabled="incidentActionId !== null"
+                  @click="openInvestigationResolutionModal(report)"
+                >
+                  Close Investigation
+                </button>
+              </div>
+              <p v-else-if="report.status === 'processing_disposal'" class="text-[10px] text-orange-700 dark:text-orange-300">
+                Complete disposal through Inventory.
+              </p>
+              <p v-else-if="report.status === 'under_review'" class="text-[10px] text-gray-500 dark:text-gray-400">
+                {{ report.inspection?.repairability === 'pending' ? 'Inspection is pending.' : 'Inspection and handover are next.' }}
+              </p>
+              <p v-else-if="report.status === 'awaiting_reporter'" class="text-[10px] text-amber-700 dark:text-amber-300">
+                Waiting for reporter information.
+              </p>
+            </article>
+          </div>
+          <Teleport to="body">
+            <section
+              v-if="incidentDetailsReport"
+              id="incident-report-details-popover"
+              ref="incidentDetailsPopover"
+              role="dialog"
+              :aria-labelledby="`incident-details-title-${incidentDetailsReport.id}`"
+              class="fixed z-[100000] flex w-[min(48rem,calc(100vw-1.5rem))] max-h-[min(78vh,42rem)] flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl ring-1 ring-black/5 dark:border-gray-700 dark:bg-gray-900"
+              :style="incidentDetailsStyle"
+              @pointerdown.stop
+              @click.stop
+            >
+              <header class="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+                <div class="min-w-0">
+                  <h3 :id="`incident-details-title-${incidentDetailsReport.id}`" class="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                    {{ incidentDetailsReport.item.name }}
+                  </h3>
+                  <div class="mt-1 flex flex-nowrap items-center gap-x-3 overflow-hidden text-[11px] text-gray-500 dark:text-gray-400">
+                    <p class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+                      <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 9h8M8 13h5" />
+                      </svg>
+                      {{ incidentDetailsReport.item.inventory_item_no || `Item #${incidentDetailsReport.item.id}` }}
+                    </p>
+                    <p class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+                      <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m3 7 9-4 9 4v10l-9 4-9-4z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m3 7 9 4 9-4m-9 4v10" />
+                      </svg>
+                      {{ incidentDetailsReport.quantity }} {{ incidentDetailsReport.item.unit || 'unit(s)' }}
+                    </p>
+                    <p class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+                      <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <circle cx="12" cy="8" r="3.5" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 20a7 7 0 0 1 14 0" />
+                      </svg>
+                      {{ incidentDetailsReport.reporter.name }}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  ref="incidentDetailsCloseButton"
+                  type="button"
+                  class="shrink-0 rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-brand-500 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-white"
+                  aria-label="Close incident report details"
+                  @click="closeIncidentDetails(true)"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </header>
+              <div class="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden p-4 text-xs text-gray-700 dark:text-gray-300 md:grid-cols-2">
+                <div class="min-h-0 space-y-4 overflow-y-auto md:border-r md:border-gray-100 md:pr-4 dark:md:border-gray-800">
+                  <section class="space-y-2">
+                    <div class="space-y-1">
+                      <p><span class="font-semibold">Status:</span> <span class="capitalize">{{ incidentDetailsReport.status.replaceAll('_', ' ') }}</span></p>
+                      <p><span class="font-semibold">Type:</span> <span class="capitalize">{{ incidentDetailsReport.type.replaceAll('_', ' ') }}</span></p>
+                      <p><span class="font-semibold">Reported:</span> {{ formatIncidentDate(incidentDetailsReport.submitted_at) }}</p>
+                    </div>
+                    <div>
+                      <p class="font-semibold">Incident details</p>
+                      <p class="mt-1 whitespace-pre-wrap">{{ incidentDetailsReport.details }}</p>
+                    </div>
+                  </section>
+                  <section v-if="incidentDetailsReport.evidence.length" class="space-y-1 border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <h4 class="font-semibold">Evidence</h4>
+                    <a
+                      v-for="file in incidentDetailsReport.evidence"
+                      :key="file.id"
+                      :href="file.download_url"
+                      class="block font-semibold text-brand-700 underline dark:text-brand-300"
+                    >
+                      Download {{ file.filename }}
+                    </a>
+                  </section>
+                  <section v-if="incidentDetailsReport.inspection" class="space-y-1 border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <h4 class="font-semibold capitalize">
+                      Inspection · {{ incidentDetailsReport.inspection.repairability.replaceAll('_', ' ') }}
+                    </h4>
+                    <p v-if="incidentDetailsReport.inspection.inspector" class="inline-flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <circle cx="12" cy="8" r="3.5" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 20a7 7 0 0 1 14 0" />
+                      </svg>
+                      {{ incidentDetailsReport.inspection.inspector }}
+                    </p>
+                    <p class="whitespace-pre-wrap">{{ incidentDetailsReport.inspection.findings }}</p>
+                  </section>
+                  <section v-if="incidentDetailsReport.handover" class="space-y-1 border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <h4 class="font-semibold">Handover received · {{ incidentDetailsReport.quantity }} affected unit(s)</h4>
+                    <p>{{ incidentDetailsReport.handover.details }}</p>
+                    <p v-if="incidentDetailsReport.handover.processing_inventory_id" class="text-[11px] text-gray-500">
+                      Separate inventory record used to track the affected units during repair or disposal.
+                    </p>
+                  </section>
+                </div>
+                <section class="min-h-0 md:pl-1">
+                  <h4 class="mb-2 font-semibold">Timeline · {{ incidentDetailsReport.timeline.length }} updates</h4>
+                  <ol
+                    v-if="incidentDetailsReport.timeline.length"
+                    class="space-y-3"
+                    :class="incidentDetailsReport.timeline.length >= 3 ? 'max-h-48 overflow-y-auto pr-2' : ''"
+                  >
+                    <li
+                      v-for="(event, index) in incidentDetailsReport.timeline"
+                      :key="event.id ?? `${incidentDetailsReport.id}-${index}`"
+                      class="relative pl-6"
+                    >
+                      <span
+                        v-if="index < incidentDetailsReport.timeline.length - 1"
+                        aria-hidden="true"
+                        class="absolute bottom-[-0.75rem] left-[5px] top-2 w-0.5 bg-emerald-500"
+                      />
+                      <span
+                        aria-hidden="true"
+                        class="absolute left-0 top-1 h-3 w-3 rounded-full border-2 ring-2 ring-white dark:ring-gray-900"
+                        :class="index === incidentDetailsReport.timeline.length - 1
+                          ? 'border-emerald-600 bg-white dark:border-emerald-400 dark:bg-gray-900'
+                          : 'border-emerald-600 bg-emerald-600 dark:border-emerald-400 dark:bg-emerald-400'"
+                      />
+                      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        <p class="inline-flex items-center gap-1">
+                          <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 7v5l3 2" />
+                          </svg>
+                          {{ formatIncidentDate(event.created_at) }}
+                        </p>
+                        <p class="inline-flex items-center gap-1">
+                          <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <circle cx="12" cy="8" r="3.5" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 20a7 7 0 0 1 14 0" />
+                          </svg>
+                          {{ event.actor || 'System' }}
+                        </p>
+                      </div>
+                      <p class="mt-0.5 font-semibold">{{ incidentEventLabel(event) }}</p>
+                      <p v-if="event.details" class="mt-0.5 whitespace-pre-wrap">{{ event.details }}</p>
+                      <div v-if="incidentRelatedRecords(event).length" class="mt-2 space-y-1.5">
+                        <p class="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Related records
+                        </p>
+                        <div class="flex flex-wrap gap-1.5">
+                          <span
+                            v-for="reference in incidentRelatedRecords(event)"
+                            :key="`${reference.label}-${reference.id}`"
+                            class="inline-flex max-w-full flex-col rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] text-gray-700 dark:border-gray-700 dark:bg-white/5 dark:text-gray-300"
+                          >
+                            <span>{{ reference.description }}</span>
+                          </span>
+                        </div>
+                      </div>
+                      <a
+                        v-for="file in investigationEvidenceForEvent(incidentDetailsReport, event)"
+                        :key="`${event.id}-${file.id}`"
+                        :href="file.download_url"
+                        class="mt-1 block font-semibold text-brand-700 underline dark:text-brand-300"
+                      >
+                        {{ file.filename }}
+                      </a>
+                    </li>
+                  </ol>
+                  <p v-else class="text-gray-500 dark:text-gray-400">No timeline entries yet.</p>
+                </section>
+              </div>
+            </section>
+          </Teleport>
+        </section>
         <InventoryItemLogDrawer
+          v-if="!isIncidentWorkspace"
           :open="logsOpen"
           :workspace="workspace"
           :search="search"
@@ -706,7 +1066,7 @@
         />
 
         <!-- Pagination & Footer -->
-        <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-gray-200/80 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-900/50">
+        <div v-if="!isIncidentWorkspace" class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-gray-200/80 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-900/50">
           <Pagination
             class="ml-auto"
             :current-page="paginator.current_page ?? 1"
@@ -719,6 +1079,497 @@
         </div>
       </div>
     </template>
+
+    <Modal
+      :open="incidentQueueOpen"
+      title="Incident Report Review"
+      subtitle="Review reports from end users. Reporting itself does not change inventory or assignment status."
+      max-width="max-w-5xl"
+      fixed-body
+      @close="incidentQueueOpen = false"
+    >
+      <div class="flex min-h-0 flex-1 flex-col gap-3">
+        <div class="flex shrink-0 items-center justify-between gap-3">
+          <p class="text-xs text-gray-500 dark:text-gray-400">
+            {{ incidentQueue.length }} open report{{ incidentQueue.length === 1 ? '' : 's' }}
+          </p>
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
+            :disabled="incidentQueueLoading"
+            @click="loadIncidentQueue"
+          >
+            Refresh
+          </button>
+        </div>
+        <p v-if="incidentQueueError" role="alert" class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200">
+          {{ incidentQueueError }}
+        </p>
+        <div v-if="incidentQueueLoading" class="compact-skeleton h-20" />
+        <p v-else-if="!incidentQueueError && incidentQueue.length === 0" class="rounded-md bg-gray-50 px-3 py-8 text-center text-sm text-gray-500 dark:bg-white/5 dark:text-gray-400">
+          There are no open incident reports to review.
+        </p>
+        <div v-else class="min-h-0 space-y-3 overflow-y-auto pr-1">
+          <article
+            v-for="report in incidentQueue"
+            :key="report.id"
+            class="space-y-3 rounded-md border border-gray-200 p-3 dark:border-gray-700"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ report.item.name }}</h3>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ report.item.inventory_item_no || `Item #${report.item.id}` }}
+                  · {{ report.quantity }} {{ report.item.unit || 'unit(s)' }} affected
+                  · {{ report.reporter.name }}
+                </p>
+              </div>
+              <span class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold capitalize text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                {{ report.status.replaceAll('_', ' ') }}
+              </span>
+            </div>
+            <div class="grid gap-3 text-xs text-gray-700 dark:text-gray-300 sm:grid-cols-2">
+              <p><span class="font-semibold">Type:</span> {{ report.type.replaceAll('_', ' ') }}</p>
+              <p><span class="font-semibold">Reported:</span> {{ formatIncidentDate(report.submitted_at) }}</p>
+              <p class="sm:col-span-2 whitespace-pre-wrap">{{ report.details }}</p>
+            </div>
+            <div v-if="report.evidence.length" class="flex flex-wrap gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+              <a
+                v-for="file in report.evidence"
+                :key="file.id"
+                :href="file.download_url"
+                class="text-xs font-semibold text-brand-700 underline dark:text-brand-300"
+              >
+                Download {{ file.filename }}
+              </a>
+            </div>
+            <ol v-if="report.timeline.length" class="max-h-32 space-y-0 overflow-y-auto border-t border-gray-100 pt-2 pr-1 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              <li
+                v-for="(event, index) in report.timeline"
+                :key="event.id ?? `${report.id}-${index}`"
+                class="relative flex gap-2.5 pb-3 last:pb-0"
+              >
+                <span class="relative flex w-3 shrink-0 justify-center">
+                  <span
+                    v-if="index < report.timeline.length - 1"
+                    class="absolute -bottom-5 top-2 w-0.5 bg-emerald-600/70 dark:bg-emerald-400/70"
+                  />
+                  <span class="relative z-10 mt-1 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-white dark:ring-gray-900" />
+                </span>
+                <p class="min-w-0 flex-1">
+                  {{ formatIncidentDate(event.created_at) }} · {{ event.actor || 'System' }} ·
+                  {{ incidentEventLabel(event) }}
+                  <span v-if="event.details"> — {{ event.details }}</span>
+                  <span v-if="incidentRelatedRecords(event).length" class="block text-[10px] text-gray-400 dark:text-gray-500">
+                    Related:
+                    <span v-for="(reference, referenceIndex) in incidentRelatedRecords(event)" :key="`${reference.label}-${reference.id}`">
+                      <span v-if="referenceIndex"> · </span>
+                      <span>{{ reference.description }}</span>
+                    </span>
+                  </span>
+                </p>
+              </li>
+            </ol>
+            <div v-if="report.inspection" class="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+              <p class="font-semibold">
+                Inspection: {{ report.inspection.repairability.replaceAll('_', ' ') }}
+                <span v-if="report.inspection.inspector">· {{ report.inspection.inspector }}</span>
+              </p>
+              <p class="mt-1 whitespace-pre-wrap">{{ report.inspection.findings }}</p>
+            </div>
+            <div v-if="report.handover" class="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
+              <p class="font-semibold">Handover received · {{ report.quantity }} affected unit(s)</p>
+              <p class="mt-1">{{ report.handover.details }}</p>
+              <p class="mt-1">
+                Separate inventory record used to track the affected units during repair or disposal.
+              </p>
+            </div>
+            <div v-if="['reported', 'under_review'].includes(report.status)" class="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+              <button
+                type="button"
+                class="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
+                :disabled="incidentActionId !== null"
+                @click="requestIncidentInformation(report)"
+              >
+                Request Details
+              </button>
+              <button
+                v-if="report.status === 'reported' || (report.status === 'under_review' && !report.handover)"
+                type="button"
+                class="rounded-md border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                :disabled="incidentActionId !== null"
+                @click="declineIncident(report)"
+              >
+                Decline
+              </button>
+              <button
+                v-if="report.status === 'reported'"
+                type="button"
+                class="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                :disabled="incidentActionId !== null"
+                @click="acceptIncident(report)"
+              >
+                {{ incidentActionId === report.id ? 'Accepting…' : 'Accept for Review' }}
+              </button>
+              <template v-if="report.status === 'under_review'">
+                <button
+                  type="button"
+                  class="rounded-md border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-500/10"
+                  :disabled="incidentActionId !== null || Boolean(report.handover)"
+                  @click="recordIncidentInspection(report)"
+                >
+                  Record Inspection
+                </button>
+                <button
+                  v-if="report.inspection && ['repairable', 'not_repairable'].includes(report.inspection.repairability) && !report.handover"
+                  type="button"
+                  class="rounded-md border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                  :disabled="incidentActionId !== null"
+                  @click="confirmIncidentHandover(report)"
+                >
+                  {{ report.inspection.repairability === 'not_repairable' ? 'Confirm Handover & Ready for Disposal' : 'Confirm Handover' }}
+                </button>
+                <button
+                  v-if="report.inspection?.repairability === 'repairable' && report.handover"
+                  type="button"
+                  class="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                  :disabled="incidentActionId !== null"
+                  @click="startIncidentRepair(report)"
+                >
+                  Start Repair
+                </button>
+              </template>
+            </div>
+            <p
+              v-if="report.status === 'under_review' && report.inspection?.repairability === 'pending'"
+              class="text-xs text-amber-700 dark:text-amber-300"
+            >
+              Inspection is inconclusive. Add another inspection before handover or repair processing.
+            </p>
+            <div v-else-if="report.status === 'awaiting_reporter'" class="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2">
+              <p class="text-xs text-amber-700 dark:text-amber-300">
+                Waiting for the reporter to provide the requested information.
+              </p>
+              <button
+                v-if="report.status === 'reported' || (report.status === 'under_review' && !report.handover)"
+                type="button"
+                class="rounded-md border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                :disabled="incidentActionId !== null"
+                @click="declineIncident(report)"
+              >
+                Decline
+              </button>
+            </div>
+            <div v-else-if="report.status === 'processing_repair'" class="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2">
+              <p class="text-xs text-gray-600 dark:text-gray-300">
+                Repair is in progress for the isolated affected units.
+              </p>
+              <button
+                type="button"
+                class="rounded-md border border-orange-200 px-3 py-1.5 text-xs font-semibold text-orange-800 hover:bg-orange-50 disabled:opacity-50 dark:border-orange-800 dark:text-orange-300 dark:hover:bg-orange-500/10"
+                :disabled="incidentActionId !== null"
+                @click="confirmIncidentRepairNotViable(report)"
+              >
+                Repair Not Viable
+              </button>
+              <button
+                type="button"
+                class="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                :disabled="incidentActionId !== null"
+                @click="completeIncidentRepair(report)"
+              >
+                Mark Repair Complete
+              </button>
+            </div>
+            <p v-else-if="report.status === 'processing_disposal'" class="border-t border-gray-100 pt-2 text-xs text-orange-800 dark:border-gray-800 dark:text-orange-300">
+              The affected units are in Ready to Dispose. Complete disposal through the existing inventory disposal workflow.
+            </p>
+            <p v-else class="border-t border-gray-100 pt-2 text-xs text-gray-500 dark:border-gray-800 dark:text-gray-400">
+              Accepted for review. The case stays open while inspection, handover, or other next steps are pending.
+            </p>
+          </article>
+        </div>
+      </div>
+    </Modal>
+
+    <Modal
+      :open="incidentInspectionReport !== null"
+      :title="incidentInspectionReport ? `Record inspection · ${incidentInspectionReport.item.name}` : 'Record inspection'"
+      subtitle="Document what you found and whether the affected units can be repaired."
+      max-width="max-w-lg"
+      @close="closeIncidentInspectionModal"
+    >
+      <div v-if="incidentInspectionReport" class="space-y-4">
+        <div class="space-y-1.5">
+          <label for="incident-inspection-findings" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+            Inspection findings <span class="text-rose-500">*</span>
+          </label>
+          <textarea
+            id="incident-inspection-findings"
+            v-model="incidentInspectionFindings"
+            rows="4"
+            maxlength="2000"
+            required
+            :disabled="incidentActionId !== null"
+            placeholder="Describe the physical condition and inspection results"
+            class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </div>
+        <div class="space-y-1.5">
+          <label for="incident-inspection-repairability" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+            Repairability <span class="text-rose-500">*</span>
+          </label>
+          <select
+            id="incident-inspection-repairability"
+            v-model="incidentInspectionRepairability"
+            required
+            :disabled="incidentActionId !== null"
+            class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
+            <option value="pending">Pending / needs more inspection</option>
+            <option value="repairable">Repairable</option>
+            <option value="not_repairable">Not repairable</option>
+          </select>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            :disabled="incidentActionId !== null"
+            @click="closeIncidentInspectionModal"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="incidentActionId !== null || incidentInspectionFindings.trim().length < 3"
+            @click="saveIncidentInspection"
+          >
+            {{ incidentActionId === incidentInspectionReport?.id ? 'Saving…' : 'Save Inspection' }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+
+    <Modal
+      :open="incidentInformationReport !== null"
+      :title="incidentInformationReport ? `Request details · ${incidentInformationReport.item.name}` : 'Request details'"
+      subtitle="Tell the reporter what additional information is needed."
+      max-width="max-w-lg"
+      @close="closeIncidentInformationModal"
+    >
+      <div v-if="incidentInformationReport" class="space-y-1.5">
+        <label for="incident-information-reason" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+          Information requested <span class="text-rose-500">*</span>
+        </label>
+        <textarea
+          id="incident-information-reason"
+          v-model="incidentInformationReason"
+          rows="4"
+          maxlength="1000"
+          required
+          :disabled="incidentActionId !== null"
+          placeholder="Describe the details or evidence the reporter should provide"
+          class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        />
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            :disabled="incidentActionId !== null"
+            @click="closeIncidentInformationModal"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="incidentActionId !== null || incidentInformationReason.trim().length < 3"
+            @click="saveIncidentInformationRequest"
+          >
+            {{ incidentActionId === incidentInformationReport?.id ? 'Sending…' : 'Request Information' }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+
+    <Modal
+      :open="incidentHandoverReport !== null"
+      :title="incidentHandoverReport ? `Confirm handover · ${incidentHandoverReport.item.name}` : 'Confirm handover'"
+      :subtitle="incidentHandoverReport ? `Confirm receipt of ${incidentHandoverReport.quantity} affected unit(s) from ${incidentHandoverReport.reporter.name}. Only these units will be processed.` : ''"
+      max-width="max-w-lg"
+      @close="closeIncidentHandoverModal"
+    >
+      <div v-if="incidentHandoverReport" class="space-y-1.5">
+        <label for="incident-handover-details" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+          Handover notes <span class="text-rose-500">*</span>
+        </label>
+        <textarea
+          id="incident-handover-details"
+          v-model="incidentHandoverDetails"
+          rows="4"
+          maxlength="1000"
+          required
+          :disabled="incidentActionId !== null"
+          placeholder="Record who handed over the units, where they were received, or other handover details"
+          class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        />
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            :disabled="incidentActionId !== null"
+            @click="closeIncidentHandoverModal"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="incidentActionId !== null || incidentHandoverDetails.trim().length < 3"
+            @click="saveIncidentHandover"
+          >
+            {{ incidentActionId === incidentHandoverReport?.id ? 'Confirming…' : 'Confirm Handover' }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+
+    <Modal
+      :open="investigationActionReport !== null"
+      :title="investigationActionReport ? `Add investigation update · ${investigationActionReport.item.name}` : 'Add investigation update'"
+      subtitle="Each update and evidence file is added to the permanent incident history."
+      max-width="max-w-lg"
+      @close="closeInvestigationActionModal"
+    >
+      <div v-if="investigationActionReport" class="space-y-4">
+        <div class="space-y-1.5">
+          <label for="investigation-action-details" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+            Investigation update <span class="text-rose-500">*</span>
+          </label>
+          <textarea
+            id="investigation-action-details"
+            v-model="investigationActionDetails"
+            rows="4"
+            maxlength="2000"
+            required
+            :disabled="incidentActionId !== null"
+            placeholder="Record the action taken, who was contacted, or what was found"
+            class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </div>
+        <div class="space-y-1.5">
+          <label for="investigation-evidence" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+            Supporting evidence <span class="font-normal text-gray-500">(optional; up to 5 files, 5 MB each)</span>
+          </label>
+          <input
+            id="investigation-evidence"
+            type="file"
+            multiple
+            accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+            :disabled="incidentActionId !== null"
+            class="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-gray-700 dark:text-gray-300 dark:file:bg-gray-800 dark:file:text-gray-200"
+            @change="selectInvestigationEvidence"
+          />
+          <ul v-if="investigationEvidenceFiles.length" class="space-y-1 text-xs text-gray-500 dark:text-gray-400">
+            <li v-for="file in investigationEvidenceFiles" :key="`${file.name}-${file.size}-${file.lastModified}`">
+              {{ file.name }}
+            </li>
+          </ul>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            :disabled="incidentActionId !== null"
+            @click="closeInvestigationActionModal"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="incidentActionId !== null || investigationActionDetails.trim().length < 3"
+            @click="saveInvestigationAction"
+          >
+            {{ incidentActionId === investigationActionReport?.id ? 'Saving…' : 'Add Update' }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+
+    <Modal
+      :open="investigationResolutionReport !== null"
+      :title="investigationResolutionReport ? `Close investigation · ${investigationResolutionReport.item.name}` : 'Close investigation'"
+      :subtitle="investigationResolutionReport ? `This confirms the outcome for ${investigationResolutionReport.quantity} affected unit(s). Unaffected units will remain unchanged.` : ''"
+      max-width="max-w-lg"
+      @close="closeInvestigationResolutionModal"
+    >
+      <div v-if="investigationResolutionReport" class="space-y-4">
+        <div class="space-y-1.5">
+          <label for="investigation-outcome" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+            Confirmed outcome <span class="text-rose-500">*</span>
+          </label>
+          <select
+            id="investigation-outcome"
+            v-model="investigationResolutionOutcome"
+            required
+            :disabled="incidentActionId !== null"
+            class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          >
+            <option value="recovered">Recovered — keep affected quantity assigned to reporter</option>
+            <option value="confirmed_lost_stolen">Confirmed Lost/Stolen — remove affected quantity from inventory and assignment</option>
+            <option value="unsubstantiated">Unsubstantiated — no inventory or assignment changes</option>
+          </select>
+          <p class="text-xs text-gray-500 dark:text-gray-400">
+            Only the reported quantity is affected. This decision closes the investigation and is recorded in its timeline.
+          </p>
+        </div>
+        <div class="space-y-1.5">
+          <label for="investigation-resolution-details" class="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+            Resolution notes <span class="font-normal text-gray-500">(optional)</span>
+          </label>
+          <textarea
+            id="investigation-resolution-details"
+            v-model="investigationResolutionDetails"
+            rows="3"
+            maxlength="1000"
+            :disabled="incidentActionId !== null"
+            placeholder="Add the reason or supporting context for this outcome"
+            class="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            :disabled="incidentActionId !== null"
+            @click="closeInvestigationResolutionModal"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="incidentActionId !== null || !investigationResolutionOutcome"
+            @click="saveInvestigationResolution"
+          >
+            {{ incidentActionId === investigationResolutionReport?.id ? 'Closing…' : 'Confirm Outcome & Close' }}
+          </button>
+        </div>
+      </template>
+    </Modal>
 
     <Modal
       :open="recordGroup !== null"
@@ -960,6 +1811,14 @@
                   <span class="text-[11px] text-rose-700 dark:text-rose-300">
                     by {{ openIssueReport(source).reporter }}<span v-if="openIssueReport(source).notes"> · {{ openIssueReport(source).notes }}</span>
                   </span>
+                  <a
+                    v-for="file in openIssueReport(source).evidence"
+                    :key="file.id"
+                    :href="`/api/incident-evidence/${file.id}`"
+                    class="text-[11px] font-semibold text-brand-700 underline dark:text-brand-300"
+                  >
+                    Download {{ file.original_filename }}
+                  </a>
                   <span class="ml-auto inline-flex items-center gap-1.5">
                     <button
                       type="button"
@@ -968,33 +1827,6 @@
                       @click="declineIssueReport(source)"
                     >
                       {{ reportDecisionId === openIssueReport(source).id ? 'Declining…' : 'Decline' }}
-                    </button>
-                  </span>
-                </div>
-                <div
-                  v-if="source.repairRecommendation"
-                  class="flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-200 bg-amber-50/70 px-2 py-1.5 dark:border-amber-500/30 dark:bg-amber-500/5"
-                >
-                  <span class="text-[11px] font-bold text-amber-800 dark:text-amber-200">Repair recommended</span>
-                  <span class="text-[11px] text-amber-700 dark:text-amber-300">
-                    by {{ source.repairRecommendation.inspected_by }}<span v-if="source.repairRecommendation.reason"> · {{ source.repairRecommendation.reason }}</span>
-                  </span>
-                  <span class="ml-auto inline-flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      class="rounded-md bg-amber-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      :disabled="repairDecisionId !== null"
-                      @click="decideRepairRecommendation(source, 'approve')"
-                    >
-                      {{ repairDecisionId === source.repairRecommendation.inspection_id ? 'Approving…' : 'Approve' }}
-                    </button>
-                    <button
-                      type="button"
-                      class="rounded-md border border-gray-200 px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-white/5"
-                      :disabled="repairDecisionId !== null"
-                      @click="decideRepairRecommendation(source, 'decline')"
-                    >
-                      Decline
                     </button>
                   </span>
                 </div>
@@ -1968,6 +2800,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import QRCode from 'qrcode';
+import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom';
 import { Armchair, BookOpen, Camera, Dumbbell, FileStack, FlaskConical, HardDrive, Monitor, Package, Printer, Projector, Wrench } from 'lucide';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
@@ -1985,7 +2818,7 @@ import EditInventoryModal from './EditInventoryModal.vue';
 import IirupPrintModal from './components/IirupPrintModal.vue';
 import RfqPrintModal from './components/RfqPrintModal.vue';
 
-const STATUSES = ['available', 'assigned', 'under_repair', 'under_inspection', 'ready_to_dispose', 'disposed'];
+const STATUSES = ['available', 'assigned', 'under_repair', 'ready_to_dispose', 'disposed'];
 const EXPORT_PDF_SIGNATURE_FIELDS = [
   'received_from_name',
   'received_from_position',
@@ -2019,7 +2852,6 @@ const STATUS_LABELS = {
   available: 'Available',
   assigned: 'Assigned',
   under_repair: 'Under Repair',
-  under_inspection: 'Under Inspection',
   ready_to_dispose: 'Ready to Dispose',
   disposed: 'Disposed',
 };
@@ -2082,8 +2914,30 @@ const qrPrintSelected = ref([]);
 const qrPrintSearch = ref('');
 const qrPrintLoading = ref(false);
 const qrPrintError = ref('');
-const repairDecisionId = ref(null);
 const reportDecisionId = ref(null);
+const incidentQueueOpen = ref(false);
+const incidentQueue = ref([]);
+const incidentQueueLoading = ref(false);
+const incidentQueueError = ref('');
+const incidentDetailsReport = ref(null);
+const incidentDetailsTrigger = ref(null);
+const incidentDetailsPopover = ref(null);
+const incidentDetailsCloseButton = ref(null);
+const incidentDetailsStyle = ref({ left: '0px', top: '0px', visibility: 'hidden' });
+const incidentActionId = ref(null);
+const incidentInspectionReport = ref(null);
+const incidentInspectionFindings = ref('');
+const incidentInspectionRepairability = ref('pending');
+const incidentInformationReport = ref(null);
+const incidentInformationReason = ref('');
+const incidentHandoverReport = ref(null);
+const incidentHandoverDetails = ref('');
+const investigationActionReport = ref(null);
+const investigationActionDetails = ref('');
+const investigationEvidenceFiles = ref([]);
+const investigationResolutionReport = ref(null);
+const investigationResolutionOutcome = ref('recovered');
+const investigationResolutionDetails = ref('');
 const maintenanceGroup = ref(null);
 const maintenanceItemIds = ref([]);
 const maintenanceIssue = ref('');
@@ -2119,18 +2973,32 @@ const categories = ref([]);
 const allPage = ref({ data: [] });
 const statusPages = ref({});
 
+const isIncidentWorkspace = computed(() => ['incident_reports', 'investigations'].includes(workspace.value));
+const investigationQueue = computed(() => incidentQueue.value.filter((report) => report.status === 'under_investigation'));
+const reviewIncidentQueue = computed(() => incidentQueue.value.filter((report) => report.status !== 'under_investigation'));
+const displayedIncidentQueue = computed(() => (
+  workspace.value === 'investigations' ? investigationQueue.value : reviewIncidentQueue.value
+));
+
 const tabs = computed(() => [
   {
     key: 'all',
     label: STATUS_LABELS.all,
-    // Assigned and Under Inspection intentionally overlap (a unit flagged while
-    // still issued to a user is both), so summing the per-status badges would
-    // double count. The server total is the de-duplicated figure.
+    // The server total is de-duplicated because partially issued inventory can
+    // appear in both the Available and Assigned workspaces.
     count: Number(metrics.value?.total ?? 0),
   },
-  ...STATUSES
-    .filter((status) => status !== 'under_inspection')
-    .map((status) => ({ key: status, label: STATUS_LABELS[status], count: Number(counts.value?.[status] ?? 0) })),
+  ...STATUSES.map((status) => ({ key: status, label: STATUS_LABELS[status], count: Number(counts.value?.[status] ?? 0) })),
+  {
+    key: 'incident_reports',
+    label: 'Incident Reports',
+    count: reviewIncidentQueue.value.length,
+  },
+  {
+    key: 'investigations',
+    label: 'Investigations',
+    count: investigationQueue.value.length,
+  },
 ]);
 
 const activeWorkspaceTab = computed(() => tabs.value.find((tab) => tab.key === workspace.value) ?? tabs.value[0]);
@@ -2235,7 +3103,6 @@ function tabBadgeClass(key, isActive) {
     case 'assigned':
       return 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300';
     case 'under_repair':
-    case 'under_inspection':
       return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300';
     case 'ready_to_dispose':
       return 'bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300';
@@ -2669,9 +3536,8 @@ function format(value) {
 }
 
 // A fully issued record keeps 0 in inventory.quantity because the units live on the
-// assignment transaction instead. Read that so the unit row agrees with the group total.
-// This covers both `assigned` and `under_inspection` flagged while assigned: flagging
-// only rewrites `status`, the transaction stays active, and the stored quantity stays 0.
+// assignment transaction instead. Keep reading legacy inspection-flagged assignments
+// this way until the cleanup migration restores their prior status.
 function sourceQuantity(source) {
   const assigned = Number(source?.assigned_quantity ?? 0);
   if (assigned > 0 && ['assigned', 'under_inspection'].includes(source?.status)) {
@@ -2929,10 +3795,6 @@ function scanAnotherQrCode() {
   qrError.value = '';
 }
 
-function hasRepairRecommendation(row) {
-  return (row?.sourceItems ?? []).some((source) => Boolean(source?.repairRecommendation));
-}
-
 // Disposal audit attached per source row. The serializer keys relations by
 // their camelCase method names; the snake_case fallbacks stay for any path
 // that already provides them.
@@ -2949,36 +3811,6 @@ function disposalReason(row) {
     .map((source) => disposalMovementOf(source)?.notes)
     .filter((note) => typeof note === 'string' && note.trim() !== '');
   return [...new Set(reasons.map((note) => note.trim()))].join(' · ');
-}
-
-async function decideRepairRecommendation(source, decision) {
-  const inspectionId = source?.repairRecommendation?.inspection_id;
-  if (!inspectionId || repairDecisionId.value !== null) return;
-
-  repairDecisionId.value = inspectionId;
-  try {
-    const { data } = await api.post(
-      `/custodian/inspection/${inspectionId}/${decision === 'approve' ? 'approve-repair' : 'decline-repair'}`,
-      {},
-      { skipToast: true },
-    );
-    useToastStore().success(
-      decision === 'approve' ? 'Repair approved' : 'Recommendation declined',
-      data?.message ?? (decision === 'approve'
-        ? 'The item is now under repair.'
-        : 'The item was returned to its previous status.'),
-    );
-    recordGroup.value = null;
-    forgetPageCache();
-    await load();
-  } catch (requestError) {
-    useToastStore().error(
-      'Could not decide',
-      requestError?.response?.data?.message ?? 'Could not record this decision. Refresh the inventory and try again.',
-    );
-  } finally {
-    repairDecisionId.value = null;
-  }
 }
 
 function openRecordModal(row) {
@@ -3003,6 +3835,7 @@ function openIssueReport(source) {
     diagnosis: record.diagnosis,
     reporter: name,
     notes: record.issue_description ?? '',
+    evidence: record.evidence ?? [],
   };
 }
 
@@ -3010,11 +3843,18 @@ async function declineIssueReport(source) {
   const report = openIssueReport(source);
   if (!report?.id || reportDecisionId.value !== null) return;
 
+  const reason = window.prompt('Enter the reason for declining this report.');
+  if (reason === null) return;
+  if (!reason.trim()) {
+    useToastStore().error('Reason required', 'Enter a reason before declining this report.');
+    return;
+  }
+
   reportDecisionId.value = report.id;
   try {
     const { data } = await api.post(
       `/custodian/maintenance/${report.id}/decline`,
-      {},
+      { reason: reason.trim() },
       { skipToast: true },
     );
     useToastStore().success(
@@ -3032,6 +3872,458 @@ async function declineIssueReport(source) {
   } finally {
     reportDecisionId.value = null;
   }
+}
+
+function formatIncidentDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+let incidentDetailsAutoUpdateCleanup = null;
+
+async function positionIncidentDetails() {
+  const trigger = incidentDetailsTrigger.value;
+  const popover = incidentDetailsPopover.value;
+  if (!trigger || !popover) return;
+
+  const { x, y } = await computePosition(trigger, popover, {
+    strategy: 'fixed',
+    placement: 'right',
+    middleware: [
+      offset({ mainAxis: 8, crossAxis: 48 }),
+      flip({ fallbackPlacements: ['left', 'bottom', 'top'], padding: 12 }),
+      shift({ padding: 12 }),
+    ],
+  });
+
+  if (incidentDetailsTrigger.value === trigger && incidentDetailsPopover.value === popover) {
+    incidentDetailsStyle.value = { left: `${x}px`, top: `${y}px`, visibility: 'visible' };
+  }
+}
+
+function onIncidentDetailsPointerDown(event) {
+  const target = event.target;
+  if (!(target instanceof Node)) return;
+  if (incidentDetailsTrigger.value?.contains(target) || incidentDetailsPopover.value?.contains(target)) return;
+  closeIncidentDetails();
+}
+
+function onIncidentDetailsKeydown(event) {
+  if (event.key !== 'Escape' || !incidentDetailsReport.value) return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeIncidentDetails(true);
+}
+
+function closeIncidentDetails(restoreFocus = false) {
+  const trigger = incidentDetailsTrigger.value;
+  incidentDetailsAutoUpdateCleanup?.();
+  incidentDetailsAutoUpdateCleanup = null;
+  document.removeEventListener('pointerdown', onIncidentDetailsPointerDown);
+  document.removeEventListener('keydown', onIncidentDetailsKeydown);
+  incidentDetailsReport.value = null;
+  incidentDetailsTrigger.value = null;
+  incidentDetailsPopover.value = null;
+  incidentDetailsCloseButton.value = null;
+  incidentDetailsStyle.value = { left: '0px', top: '0px', visibility: 'hidden' };
+  if (restoreFocus) trigger?.focus();
+}
+
+async function toggleIncidentDetails(report, event) {
+  const trigger = event.currentTarget;
+  if (!(trigger instanceof HTMLElement)) return;
+  const alreadyOpen = incidentDetailsReport.value?.id === report.id;
+  closeIncidentDetails();
+  if (alreadyOpen) return;
+
+  incidentDetailsReport.value = report;
+  incidentDetailsTrigger.value = trigger;
+  await nextTick();
+  if (!incidentDetailsReport.value || incidentDetailsReport.value.id !== report.id) return;
+  const popover = incidentDetailsPopover.value;
+  if (!popover) return;
+  document.addEventListener('pointerdown', onIncidentDetailsPointerDown);
+  document.addEventListener('keydown', onIncidentDetailsKeydown);
+  incidentDetailsAutoUpdateCleanup = autoUpdate(trigger, popover, positionIncidentDetails);
+  incidentDetailsCloseButton.value?.focus();
+}
+
+function incidentEventLabel(event) {
+  if (event.event_type === 'report_submitted') return 'Report submitted';
+  if (event.event_type === 'reporter_response_received') return 'Information response received';
+  if (event.event_type === 'status_changed' && event.to_status === 'awaiting_reporter') return 'Information requested';
+  if (event.event_type === 'physical_inspection_recorded') return 'Physical inspection recorded';
+  if (event.event_type === 'incident_handover_confirmed') return 'Handover confirmed';
+  if (event.event_type === 'incident_repair_started') return 'Repair started';
+  if (event.event_type === 'incident_repairability_reassessed') return 'Repair reassessed as not viable';
+  if (event.event_type === 'investigation_action_recorded') return 'Investigation update';
+  if (event.event_type === 'incident_processing_blocked') {
+    return `Pending ${String(event.metadata?.stage ?? 'processing').replaceAll('_', ' ')}`;
+  }
+  if (event.event_type === 'status_changed' && event.to_status) {
+    if (event.to_status === 'under_investigation') return 'Investigation started';
+    if (event.to_status === 'resolved') {
+      return `Report resolved: ${String(event.metadata?.outcome ?? 'complete').replaceAll('_', ' ')}`;
+    }
+    return `Status changed to ${event.to_status.replaceAll('_', ' ')}`;
+  }
+  return String(event.event_type ?? 'Incident activity').replaceAll('_', ' ');
+}
+
+function incidentRelatedRecords(event) {
+  const metadata = event.metadata ?? {};
+  const references = [
+    ['inventory_id', 'Inventory record', 'Inventory item linked to this report.'],
+    ['source_inventory_id', 'Original inventory record', 'Original inventory item reported by the user.'],
+    ['processing_inventory_id', 'Affected inventory record', 'Separate inventory record used to track the affected units during repair or disposal.'],
+    ['assignment_transaction_id', 'Assignment transaction', 'Record of the equipment assignment related to this report.'],
+    ['assignment_request_id', 'Assignment request', 'Request associated with the equipment assignment.'],
+    ['assignment_return_id', 'Assignment return record', 'Record confirming the assigned equipment was returned to the custodian.'],
+    ['maintenance_record_id', 'Repair record', 'Record of repair work related to this report.'],
+    ['disposal_movement_id', 'Disposal record', 'Record of the affected equipment being disposed.'],
+    ['stock_movement_id', 'Stock movement record', 'Record of the inventory quantity change related to this report.'],
+  ];
+  const seen = new Set();
+
+  return references.flatMap(([key, label, description]) => {
+    const id = Number(metadata[key]);
+    if (!Number.isInteger(id) || id < 1 || seen.has(`${label}-${id}`)) {
+      return [];
+    }
+    seen.add(`${label}-${id}`);
+    return [{ label, id, description }];
+  });
+}
+
+function investigationEvidenceForEvent(report, event) {
+  const evidenceIds = new Set((event.metadata?.evidence_ids ?? []).map(Number));
+  return report.evidence.filter((file) => evidenceIds.has(Number(file.id)));
+}
+
+async function loadIncidentQueue() {
+  if (incidentQueueLoading.value) return;
+  incidentQueueLoading.value = true;
+  incidentQueueError.value = '';
+  try {
+    const { data } = await api.get('/custodian/incident-reports', { skipToast: true });
+    if (!Array.isArray(data?.reports)) {
+      throw new Error('The incident queue response was invalid.');
+    }
+    incidentQueue.value = data.reports;
+  } catch (requestError) {
+    incidentQueueError.value = requestError?.response?.data?.message
+      ?? requestError?.message
+      ?? 'Could not load incident reports. Refresh and try again.';
+  } finally {
+    incidentQueueLoading.value = false;
+  }
+}
+
+async function submitIncidentAction(report, endpoint, payload, successTitle, fallbackMessage) {
+  if (!report?.id || incidentActionId.value !== null) return;
+  incidentActionId.value = report.id;
+  try {
+    const { data } = await api.post(endpoint, payload, { skipToast: true });
+    useToastStore().success(successTitle, data?.message ?? fallbackMessage);
+    const refreshes = [loadIncidentQueue()];
+    if (!isIncidentWorkspace.value) {
+      refreshes.push(load());
+    }
+    await Promise.all(refreshes);
+    return true;
+  } catch (requestError) {
+    useToastStore().error(
+      'Incident action failed',
+      requestError?.response?.data?.message ?? 'Could not update this incident report. Refresh and try again.',
+    );
+    return false;
+  } finally {
+    incidentActionId.value = null;
+  }
+}
+
+async function acceptIncident(report) {
+  await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/review`,
+    {},
+    'Report accepted',
+    'The incident is now under custodian review.',
+  );
+}
+
+async function startIncidentInvestigation(report) {
+  await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/start-investigation`,
+    {},
+    'Investigation started',
+    'The Lost or Stolen report is now under investigation.',
+  );
+}
+
+function openInvestigationActionModal(report) {
+  investigationActionReport.value = report;
+  investigationActionDetails.value = '';
+  investigationEvidenceFiles.value = [];
+}
+
+function selectInvestigationEvidence(event) {
+  const files = Array.from(event.target.files ?? []);
+  event.target.value = '';
+  if (files.length > 5) {
+    investigationEvidenceFiles.value = [];
+    useToastStore().error('Too many files', 'You can attach up to 5 evidence files per investigation update.');
+    return;
+  }
+  investigationEvidenceFiles.value = files;
+}
+
+function closeInvestigationActionModal() {
+  if (incidentActionId.value !== null) return;
+  investigationActionReport.value = null;
+  investigationActionDetails.value = '';
+  investigationEvidenceFiles.value = [];
+}
+
+async function saveInvestigationAction() {
+  const report = investigationActionReport.value;
+  const details = investigationActionDetails.value.trim();
+  if (!report?.id) return;
+  if (details.length < 3) {
+    useToastStore().error('Update required', 'Enter at least 3 characters describing the investigation action.');
+    return;
+  }
+
+  const payload = new FormData();
+  payload.append('details', details);
+  investigationEvidenceFiles.value.forEach((file) => payload.append('evidence[]', file));
+  const saved = await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/investigation-actions`,
+    payload,
+    'Investigation updated',
+    'The investigation update was added to the history.',
+  );
+  if (saved) {
+    closeInvestigationActionModal();
+  }
+}
+
+function openInvestigationResolutionModal(report) {
+  investigationResolutionReport.value = report;
+  investigationResolutionOutcome.value = 'recovered';
+  investigationResolutionDetails.value = '';
+}
+
+function closeInvestigationResolutionModal() {
+  if (incidentActionId.value !== null) return;
+  investigationResolutionReport.value = null;
+  investigationResolutionOutcome.value = 'recovered';
+  investigationResolutionDetails.value = '';
+}
+
+async function saveInvestigationResolution() {
+  const report = investigationResolutionReport.value;
+  if (!report?.id) return;
+  const outcome = investigationResolutionOutcome.value;
+  if (!['recovered', 'confirmed_lost_stolen', 'unsubstantiated'].includes(outcome)) {
+    useToastStore().error('Outcome required', 'Choose a valid confirmed outcome before closing the investigation.');
+    return;
+  }
+
+  const saved = await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/resolve-investigation`,
+    { outcome, details: investigationResolutionDetails.value.trim() },
+    'Investigation closed',
+    'The investigation was closed with the selected outcome.',
+  );
+  if (saved) {
+    closeInvestigationResolutionModal();
+  }
+}
+
+function requestIncidentInformation(report) {
+  incidentInformationReport.value = report;
+  incidentInformationReason.value = '';
+}
+
+function closeIncidentInformationModal() {
+  if (incidentActionId.value !== null) return;
+  incidentInformationReport.value = null;
+  incidentInformationReason.value = '';
+}
+
+async function saveIncidentInformationRequest() {
+  const report = incidentInformationReport.value;
+  const reason = incidentInformationReason.value.trim();
+  if (!report?.id) return;
+  if (reason.length < 3) {
+    useToastStore().error('Reason required', 'Enter at least 3 characters describing the information needed.');
+    return;
+  }
+  const saved = await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/request-information`,
+    { reason },
+    'Information requested',
+    'The reporter has been asked for more information.',
+  );
+  if (saved) {
+    closeIncidentInformationModal();
+  }
+}
+
+async function declineIncident(report) {
+  const reason = window.prompt('Enter the reason for declining this report.');
+  if (reason === null) return;
+  if (reason.trim().length < 3) {
+    useToastStore().error('Reason required', 'Enter at least 3 characters describing why this report is declined.');
+    return;
+  }
+  await submitIncidentAction(
+    report,
+    `/custodian/maintenance/${report.id}/decline`,
+    { reason: reason.trim() },
+    'Report declined',
+    'The incident report was declined.',
+  );
+}
+
+function recordIncidentInspection(report) {
+  incidentInspectionReport.value = report;
+  incidentInspectionFindings.value = '';
+  incidentInspectionRepairability.value = report.inspection?.repairability ?? 'pending';
+}
+
+function closeIncidentInspectionModal() {
+  if (incidentActionId.value !== null) return;
+  incidentInspectionReport.value = null;
+  incidentInspectionFindings.value = '';
+  incidentInspectionRepairability.value = 'pending';
+}
+
+async function saveIncidentInspection() {
+  const report = incidentInspectionReport.value;
+  const findings = incidentInspectionFindings.value.trim();
+  if (!report?.id) return;
+  if (findings.length < 3) {
+    useToastStore().error('Inspection findings required', 'Enter at least 3 characters describing what was found.');
+    return;
+  }
+  const repairability = incidentInspectionRepairability.value;
+  if (!['repairable', 'not_repairable', 'pending'].includes(repairability)) {
+    useToastStore().error('Invalid repairability', 'Choose repairable, not_repairable, or pending.');
+    return;
+  }
+  const saved = await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/inspection`,
+    { findings, repairability },
+    'Inspection recorded',
+    'Inspection results were added to the report.',
+  );
+  if (saved) {
+    closeIncidentInspectionModal();
+  }
+}
+
+function confirmIncidentHandover(report) {
+  incidentHandoverReport.value = report;
+  incidentHandoverDetails.value = '';
+}
+
+function closeIncidentHandoverModal() {
+  if (incidentActionId.value !== null) return;
+  incidentHandoverReport.value = null;
+  incidentHandoverDetails.value = '';
+}
+
+async function saveIncidentHandover() {
+  const report = incidentHandoverReport.value;
+  const details = incidentHandoverDetails.value.trim();
+  if (!report?.id) return;
+  if (details.length < 3) {
+    useToastStore().error('Handover details required', 'Record who handed over the item or where it was received.');
+    return;
+  }
+  const saved = await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/handover`,
+    { details },
+    'Handover recorded',
+    'Affected units were received and isolated.',
+  );
+  if (saved) {
+    closeIncidentHandoverModal();
+  }
+}
+
+async function startIncidentRepair(report) {
+  const notes = window.prompt(
+    'Optional note for the repair technician.',
+    report.inspection?.findings ?? '',
+  );
+  if (notes === null) return;
+  await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/start-repair`,
+    { notes: notes.trim() },
+    'Repair started',
+    'Repair started for only the affected units.',
+  );
+}
+
+async function completeIncidentRepair(report) {
+  const processingInventoryId = Number(report.handover?.processing_inventory_id);
+  if (!Number.isInteger(processingInventoryId) || processingInventoryId < 1) {
+    useToastStore().error('Repair record unavailable', 'This report has no linked inventory record for repair completion.');
+    return;
+  }
+  const repairNotes = window.prompt('Describe the completed repair and its result.');
+  if (repairNotes === null) return;
+  if (repairNotes.trim().length < 3) {
+    useToastStore().error('Repair resolution required', 'Enter at least 3 characters describing the repair result.');
+    return;
+  }
+  const costText = window.prompt('Optional repair cost. Leave blank if unknown.', '');
+  if (costText === null) return;
+  const payload = { repair_notes: repairNotes.trim() };
+  if (costText.trim() !== '') {
+    const cost = Number(costText);
+    if (!Number.isFinite(cost) || cost < 0) {
+      useToastStore().error('Invalid repair cost', 'Enter a non-negative number or leave the cost blank.');
+      return;
+    }
+    payload.maintenance_cost = cost;
+  }
+  await submitIncidentAction(
+    report,
+    `/custodian/inventory/${processingInventoryId}/mark-repaired`,
+    payload,
+    'Repair completed',
+    'The affected units were repaired and the incident resolved.',
+  );
+}
+
+async function confirmIncidentRepairNotViable(report) {
+  const findings = window.prompt('Why can the affected units not be repaired? Record the reassessment findings.');
+  if (findings === null) return;
+  if (findings.trim().length < 3) {
+    useToastStore().error('Findings required', 'Enter at least 3 characters explaining why repair is not viable.');
+    return;
+  }
+  await submitIncidentAction(
+    report,
+    `/custodian/incident-reports/${report.id}/repair-not-viable`,
+    { findings: findings.trim() },
+    'Ready for disposal',
+    'The affected units were moved to the existing disposal process.',
+  );
 }
 
 function isMaintenanceEligible(source, row = maintenanceGroup.value) {
@@ -3358,6 +4650,9 @@ function switchWorkspace(next) {
   workspace.value = next;
   page.value = 1;
   selection.value = [];
+  if (['incident_reports', 'investigations'].includes(next)) {
+    loadIncidentQueue();
+  }
 }
 
 // Sliding active-tab pill: measured from the rendered button so it tracks
@@ -3397,11 +4692,15 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  closeIncidentDetails();
   pillObserver?.disconnect();
   window.removeEventListener('resize', updatePill);
 });
 
-watch(workspace, () => nextTick(updatePill));
+watch(workspace, () => {
+  closeIncidentDetails();
+  nextTick(updatePill);
+});
 
 function selectWorkspace(next) {
   switchWorkspace(next);
@@ -3480,8 +4779,15 @@ function onEditSaved() {
   load();
 }
 
-watch([workspace, page], () => load());
-onMounted(() => load());
+watch([workspace, page], () => {
+  if (!isIncidentWorkspace.value) {
+    load();
+  }
+});
+onMounted(() => {
+  load();
+  loadIncidentQueue();
+});
 </script>
 
 <style scoped>

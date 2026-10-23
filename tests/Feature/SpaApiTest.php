@@ -218,6 +218,8 @@ test('inspector reports remain available while inspection api is removed', funct
     $this->actingAs($this->inspector)->getJson('/api/inspector/inspection/qr-lookup?token=unused')->assertNotFound();
     $this->actingAs($this->inspector)->postJson('/api/inspector/inspection/1/mark-inspected')->assertNotFound();
     $this->actingAs($this->inspector)->getJson('/api/inspector/inventory/overview')->assertNotFound();
+    $this->actingAs($this->custodian)->postJson('/api/custodian/inspection/1/approve-repair')->assertNotFound();
+    $this->actingAs($this->custodian)->postJson('/api/custodian/inspection/1/decline-repair')->assertNotFound();
 
     $this->actingAs($this->inspector)->getJson(route('api.school-head.inventory.overview'))
         ->assertForbidden();
