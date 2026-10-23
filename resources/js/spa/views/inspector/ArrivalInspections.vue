@@ -48,8 +48,8 @@
             <div class="min-w-0">
               <h3 class="truncate text-sm font-semibold text-gray-900 dark:text-white">{{ record.supplier_name || 'Untitled inspection' }}</h3>
               <p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{{ record.iar_number || 'IAR number pending' }} · {{ formatDate(record.iar_date) || 'No date' }}</p>
-              <span class="mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-medium" :class="record.status === 'inspected' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'">
-                {{ record.status === 'inspected' ? 'Inspected' : 'Draft' }}
+              <span class="mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-medium" :class="recordStatusClass(record.status)">
+                {{ recordStatusLabel(record.status) }}
               </span>
             </div>
             <div class="flex shrink-0 items-center gap-1">
@@ -66,20 +66,20 @@
               <button
                 type="button"
                 class="rounded-md p-2 text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-brand-300 dark:hover:bg-brand-500/10"
-                :aria-label="record.status === 'draft' ? 'Continue draft' : 'Review inspection'"
-                :title="record.status === 'draft' ? 'Continue' : 'Review'"
+                :aria-label="['draft', 'returned'].includes(record.status) ? 'Continue draft' : 'Review inspection'"
+                :title="['draft', 'returned'].includes(record.status) ? 'Continue' : 'Review'"
                 :disabled="openingRecordId === record.id"
                 :class="{ 'cursor-wait opacity-70': openingRecordId === record.id }"
                 @click="openRecord(record.id)"
               >
                 <LucideIcon
-                  :icon="openingRecordId === record.id ? LoaderCircle : (record.status === 'draft' ? Pencil : Eye)"
+                  :icon="openingRecordId === record.id ? LoaderCircle : (['draft', 'returned'].includes(record.status) ? Pencil : Eye)"
                   class="h-4 w-4"
                   :class="{ 'animate-spin': openingRecordId === record.id }"
                 />
               </button>
               <a
-                v-if="record.status === 'inspected' && record.acceptance_status !== 'rejected' && record.iar_number"
+                v-if="['inspected', 'approved', 'posted'].includes(record.status) && record.acceptance_status !== 'rejected' && record.iar_number"
                 :href="`/api/inspector/arrival-inspections/${record.id}/pdf`"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -104,8 +104,11 @@
       @close="cancelEdit"
     >
     <div class="flex min-h-0 flex-1 flex-col gap-3">
+      <p v-if="form.status === 'returned' && form.custodian_return_reason" role="status" class="shrink-0 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+        <strong>Returned by the Custodian:</strong> {{ form.custodian_return_reason }}
+      </p>
       <div class="flex min-h-0 flex-1 flex-col overflow-auto rounded-md bg-gray-100 p-3 dark:bg-gray-800 sm:p-5">
-        <fieldset class="mx-auto min-w-0 flex-1 border-0 p-0" :disabled="['finalized', 'posted'].includes(form.status)">
+        <fieldset class="mx-auto min-w-0 flex-1 border-0 p-0" :disabled="!['draft', 'returned'].includes(form.status)">
         <article class="mx-auto flex min-h-[11in] w-full max-w-[8.5in] flex-col bg-white px-8 py-10 text-[10pt] leading-tight text-black shadow-sm sm:px-12">
           <header class="mb-3 border-b border-gray-300 pb-3">
             <img
@@ -261,7 +264,7 @@
         >
           Cancel
         </button>
-        <template v-if="!['finalized', 'posted'].includes(form.status)">
+        <template v-if="['draft', 'returned'].includes(form.status)">
           <button
             type="button"
             class="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5"
@@ -279,6 +282,8 @@
             {{ savingAction === 'inspected' ? 'Recording…' : 'Record inspection results' }}
           </button>
         </template>
+        <span v-else-if="form.status === 'inspected'" class="self-center text-xs text-gray-500 dark:text-gray-400">Submitted to the Custodian for approval.</span>
+        <span v-else-if="form.status === 'approved'" class="self-center text-xs text-emerald-700 dark:text-emerald-300">Approved by the Custodian.</span>
       </div>
     </template>
     </Modal>
@@ -368,6 +373,10 @@ function removeItem(index) {
 
 function setForm(data) {
   Object.assign(form, emptyForm(), data, {
+    iar_date: normalizeDateInput(data.iar_date),
+    invoice_date: normalizeDateInput(data.invoice_date),
+    inspection_date: normalizeDateInput(data.inspection_date),
+    receipt_date: normalizeDateInput(data.receipt_date),
     items: (data.items ?? [emptyItem()]).map((item) => ({
       ...emptyItem(),
       ...item,
@@ -378,6 +387,10 @@ function setForm(data) {
       key: `${item.id ?? Date.now()}-${Math.random()}`,
     })),
   });
+}
+
+function normalizeDateInput(value) {
+  return value ? String(value).slice(0, 10) : '';
 }
 
 async function load() {
@@ -441,6 +454,7 @@ async function save(status) {
     return;
   }
 
+  const pdfWindow = status === 'inspected' ? window.open('about:blank', '_blank') : null;
   saving.value = true;
   savingAction.value = status;
   const payload = {
@@ -459,9 +473,19 @@ async function save(status) {
       ? await api.patch(`/inspector/arrival-inspections/${form.id}`, payload, { skipToast: true })
       : await api.post('/inspector/arrival-inspections', payload, { skipToast: true });
     inspections.value = [response.data.inspection, ...inspections.value.filter((record) => record.id !== response.data.inspection.id)];
-    toast.success('Inspection saved', response.data.message ?? 'The inspection was saved.');
+    if (status === 'inspected') {
+      if (pdfWindow && !pdfWindow.closed) {
+        pdfWindow.location.href = `/api/inspector/arrival-inspections/${response.data.inspection.id}/pdf`;
+        toast.success('Inspection submitted', 'The IAR PDF was opened in a new tab.');
+      } else {
+        toast.success('Inspection submitted', 'Allow pop-ups to open the IAR PDF, or use the PDF icon on its card.');
+      }
+    } else {
+      toast.success('Inspection saved', response.data.message ?? 'The inspection was saved.');
+    }
     editing.value = false;
   } catch (requestError) {
+    pdfWindow?.close();
     const errors = requestError?.response?.data?.errors;
     const hasItemErrors = Object.keys(errors ?? {}).some((key) => key.startsWith('items.'));
     const message = hasItemErrors
@@ -478,6 +502,28 @@ function formatDate(value) {
   if (!value) return '';
   const date = new Date(`${value}`.slice(0, 10));
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString();
+}
+
+function recordStatusLabel(status) {
+  return ({
+    draft: 'Draft',
+    returned: 'Returned',
+    inspected: 'Awaiting custodian',
+    approved: 'Approved',
+    finalized: 'Finalized',
+    posted: 'Posted',
+  })[status] ?? 'Draft';
+}
+
+function recordStatusClass(status) {
+  if (status === 'approved' || status === 'inspected' || status === 'finalized' || status === 'posted') {
+    return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300';
+  }
+  if (status === 'returned') {
+    return 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300';
+  }
+
+  return 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300';
 }
 
 onMounted(load);

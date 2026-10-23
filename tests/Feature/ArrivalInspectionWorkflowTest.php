@@ -1,7 +1,10 @@
 <?php
 
 use App\Models\ArrivalInspection;
+use App\Models\Category;
+use App\Models\Inventory;
 use App\Models\Role;
+use App\Models\StockMovement;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -10,6 +13,13 @@ uses(RefreshDatabase::class);
 function inspectorUser(): User
 {
     $role = Role::query()->firstOrCreate(['role_name' => 'Inspector']);
+
+    return User::factory()->create(['role_id' => $role->role_id]);
+}
+
+function custodianUser(): User
+{
+    $role = Role::query()->firstOrCreate(['role_name' => 'Property Custodian']);
 
     return User::factory()->create(['role_id' => $role->role_id]);
 }
@@ -177,8 +187,7 @@ it('rejects an IAR number on a fully rejected delivery', function () {
 it('limits arrival inspection endpoints to inspectors and records to their creator', function () {
     $inspector = inspectorUser();
     $otherInspector = inspectorUser();
-    $custodianRole = Role::query()->firstOrCreate(['role_name' => 'Property Custodian']);
-    $custodian = User::factory()->create(['role_id' => $custodianRole->role_id]);
+    $custodian = custodianUser();
     $inspection = ArrivalInspection::query()->create([
         'status' => 'draft',
         'supplier_name' => 'Private Supplier',
@@ -232,7 +241,7 @@ it('prevents deleting an inspected arrival inspection', function () {
         ->assertStatus(409);
 });
 
-it('allows correcting inspected IAR details before finalization', function () {
+it('prevents editing an IAR while it is awaiting custodian approval', function () {
     $inspector = inspectorUser();
     $inspection = ArrivalInspection::query()->create([
         'status' => 'inspected',
@@ -244,8 +253,336 @@ it('allows correcting inspected IAR details before finalization', function () {
 
     $this->actingAs($inspector)
         ->patchJson("/api/inspector/arrival-inspections/{$inspection->id}", $payload)
+        ->assertStatus(409);
+});
+
+it('allows correcting and resubmitting an IAR returned by the custodian', function () {
+    $inspector = inspectorUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'returned',
+        'iar_number' => 'IAR-2026-0001',
+        'supplier_name' => 'Recorded Supplier',
+        'custodian_return_reason' => 'Correct the invoice number.',
+        'custodian_returned_at' => now(),
+        'created_by' => $inspector->id,
+    ]);
+    $payload = arrivalInspectionPayload(['iar_number' => 'IAR-2026-0002']);
+
+    $this->actingAs($inspector)
+        ->patchJson("/api/inspector/arrival-inspections/{$inspection->id}", $payload)
         ->assertOk()
-        ->assertJsonPath('inspection.iar_number', 'IAR-2026-0002');
+        ->assertJsonPath('inspection.status', 'inspected')
+        ->assertJsonPath('inspection.iar_number', 'IAR-2026-0002')
+        ->assertJsonPath('inspection.custodian_return_reason', null);
+});
+
+it('shows submitted non-rejected IARs in the custodian approval queue', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $submitted = ArrivalInspection::query()->create([
+        'status' => 'inspected',
+        'supplier_name' => 'Submitted Supplier',
+        'created_by' => $inspector->id,
+        'inspected_by' => $inspector->id,
+    ]);
+    $submitted->items()->create([
+        'description' => 'Desk',
+        'unit' => 'UNIT',
+        'quantity' => 2,
+    ]);
+    ArrivalInspection::query()->create([
+        'status' => 'draft',
+        'supplier_name' => 'Private Draft',
+        'created_by' => $inspector->id,
+    ]);
+    ArrivalInspection::query()->create([
+        'status' => 'inspected',
+        'acceptance_status' => 'rejected',
+        'created_by' => $inspector->id,
+    ]);
+
+    $this->actingAs($custodian)
+        ->getJson('/api/custodian/arrival-inspections/pending-approval')
+        ->assertOk()
+        ->assertJsonCount(1, 'inspections')
+        ->assertJsonPath('inspections.0.id', $submitted->id)
+        ->assertJsonPath('inspections.0.items.0.quantity', 2)
+        ->assertJsonPath('inspections.0.creator.id', $inspector->id);
+
+    $this->actingAs($inspector)
+        ->getJson('/api/custodian/arrival-inspections/pending-approval')
+        ->assertForbidden();
+});
+
+it('offers approved unposted IARs as Stock In sources', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $approved = ArrivalInspection::query()->create([
+        'status' => 'approved',
+        'acceptance_status' => 'complete',
+        'iar_number' => 'IAR-READY',
+        'supplier_name' => 'Approved Supplier',
+        'created_by' => $inspector->id,
+    ]);
+    $approved->items()->create(['description' => 'Desk', 'unit' => 'UNIT', 'quantity' => 2]);
+    ArrivalInspection::query()->create([
+        'status' => 'inspected',
+        'iar_number' => 'IAR-PENDING',
+        'created_by' => $inspector->id,
+    ]);
+    ArrivalInspection::query()->create([
+        'status' => 'posted',
+        'iar_number' => 'IAR-POSTED',
+        'posted_at' => now(),
+        'created_by' => $inspector->id,
+    ]);
+
+    $this->actingAs($custodian)
+        ->getJson('/api/custodian/inventory/stock-in/approved-iars')
+        ->assertOk()
+        ->assertJsonCount(1, 'inspections')
+        ->assertJsonPath('inspections.0.id', $approved->id)
+        ->assertJsonPath('inspections.0.items.0.quantity', 2);
+
+    $this->actingAs($inspector)
+        ->getJson('/api/custodian/inventory/stock-in/approved-iars')
+        ->assertForbidden();
+});
+
+it('stocks every accepted item from an approved IAR once and links inventory back to the IAR', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'approved',
+        'acceptance_status' => 'partial',
+        'iar_number' => 'IAR-STOCK-IN',
+        'receipt_date' => '2026-10-20',
+        'inspection_date' => '2026-10-19',
+        'created_by' => $inspector->id,
+        'completed_by' => $custodian->id,
+        'completed_at' => now(),
+    ]);
+    $inspectionItem = $inspection->items()->create([
+        'stock_property_number' => 'PROPERTY-001',
+        'description' => 'Approved desk',
+        'unit' => 'UNIT',
+        'quantity' => 3,
+    ]);
+    $category = Category::query()->create([
+        'category_name' => 'Learning Resources',
+        'requires_serial_number' => false,
+        'requires_qr_code' => false,
+        'default_lifespan_years' => 5,
+    ]);
+    $payload = [
+        'arrival_inspection_id' => $inspection->id,
+        'ics_no' => 'ICS-2026-001',
+        'rows' => [[
+            'arrival_inspection_item_id' => $inspectionItem->id,
+            'category_id' => $category->category_id,
+            'unit_cost' => 1500,
+            'lifespan_years' => null,
+            'serial_numbers' => [],
+        ]],
+    ];
+
+    $this->actingAs($custodian)
+        ->postJson('/api/custodian/inventory/stock-in/approved-iar', $payload)
+        ->assertCreated()
+        ->assertJsonPath('created_records', 1)
+        ->assertJsonPath('message', 'Stock In completed from IAR IAR-STOCK-IN.');
+
+    $inventory = Inventory::query()->where('arrival_inspection_id', $inspection->id)->firstOrFail();
+    expect($inventory->item_name)->toBe('Approved desk')
+        ->and($inventory->unit)->toBe('UNIT')
+        ->and($inventory->quantity)->toBe(3)
+        ->and((float) $inventory->unit_cost)->toBe(1500.0)
+        ->and($inventory->ics_no)->toBe('ICS-2026-001')
+        ->and($inventory->date_acquired->format('Y-m-d'))->toBe('2026-10-20')
+        ->and($inventory->arrival_inspection_item_id)->toBe($inspectionItem->id)
+        ->and($inspection->fresh()->status)->toBe('posted')
+        ->and($inspection->fresh()->posted_at)->not->toBeNull();
+
+    expect(StockMovement::query()
+        ->where('inventory_id', $inventory->item_id)
+        ->where('movement_type', 'stock_in')
+        ->exists())->toBeTrue();
+
+    $this->actingAs($custodian)
+        ->postJson('/api/custodian/inventory/stock-in/approved-iar', $payload)
+        ->assertStatus(409);
+
+    expect(Inventory::query()->where('arrival_inspection_id', $inspection->id)->count())->toBe(1);
+});
+
+it('creates separately tracked stock records for serial-numbered IAR quantities', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'approved',
+        'acceptance_status' => 'complete',
+        'iar_number' => 'IAR-SERIAL-STOCK-IN',
+        'receipt_date' => '2026-10-20',
+        'created_by' => $inspector->id,
+        'completed_by' => $custodian->id,
+        'completed_at' => now(),
+    ]);
+    $inspectionItem = $inspection->items()->create([
+        'description' => 'Laptop',
+        'unit' => 'UNIT',
+        'quantity' => 2,
+    ]);
+    $category = Category::query()->create([
+        'category_name' => 'ICT Equipment',
+        'requires_serial_number' => true,
+        'requires_qr_code' => true,
+    ]);
+
+    $this->actingAs($custodian)
+        ->postJson('/api/custodian/inventory/stock-in/approved-iar', [
+            'arrival_inspection_id' => $inspection->id,
+            'rows' => [[
+                'arrival_inspection_item_id' => $inspectionItem->id,
+                'category_id' => $category->category_id,
+                'unit_cost' => 25000,
+                'serial_numbers' => ['LAPTOP-001', 'LAPTOP-002'],
+            ]],
+        ])
+        ->assertCreated()
+        ->assertJsonPath('created_records', 2);
+
+    $items = Inventory::query()->where('arrival_inspection_id', $inspection->id)->orderBy('item_id')->get();
+    expect($items)->toHaveCount(2)
+        ->and($items->pluck('serial_number')->all())->toBe(['LAPTOP-001', 'LAPTOP-002'])
+        ->and($items->pluck('quantity')->all())->toBe([1, 1])
+        ->and($items->every(fn (Inventory $item) => $item->arrival_inspection_item_id === $inspectionItem->id
+            && $item->qr_code !== null))->toBeTrue();
+});
+
+it('requires every approved IAR item to be mapped before Stock In', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'approved',
+        'acceptance_status' => 'complete',
+        'iar_number' => 'IAR-INCOMPLETE-MAPPING',
+        'created_by' => $inspector->id,
+    ]);
+    $inspection->items()->create(['description' => 'Desk', 'unit' => 'UNIT', 'quantity' => 1]);
+    $inspection->items()->create(['description' => 'Chair', 'unit' => 'UNIT', 'quantity' => 2]);
+    $category = Category::query()->create([
+        'category_name' => 'IAR Mapping Furniture',
+        'requires_serial_number' => false,
+        'requires_qr_code' => false,
+    ]);
+
+    $this->actingAs($custodian)
+        ->postJson('/api/custodian/inventory/stock-in/approved-iar', [
+            'arrival_inspection_id' => $inspection->id,
+            'rows' => [[
+                'arrival_inspection_item_id' => $inspection->items()->first()->id,
+                'category_id' => $category->category_id,
+                'unit_cost' => 100,
+            ]],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('rows');
+
+    expect(Inventory::query()->where('arrival_inspection_id', $inspection->id)->exists())->toBeFalse()
+        ->and($inspection->fresh()->status)->toBe('approved');
+});
+
+it('allows a custodian to sign and approve an IAR awaiting approval', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'inspected',
+        'created_by' => $inspector->id,
+        'inspected_by' => $inspector->id,
+    ]);
+    $signatureName = trim($custodian->first_name.' '.$custodian->last_name);
+
+    $this->actingAs($custodian)
+        ->postJson("/api/custodian/arrival-inspections/{$inspection->id}/approve", [
+            'signature_name' => $signatureName,
+            'confirmation' => true,
+        ])
+        ->assertOk()
+        ->assertJsonPath('message', 'IAR approved and signed.');
+
+    $this->assertDatabaseHas('arrival_inspections', [
+        'id' => $inspection->id,
+        'status' => 'approved',
+        'completed_by' => $custodian->id,
+        'custodian_signature_name' => $signatureName,
+    ]);
+    expect($inspection->fresh()->completed_at)->not->toBeNull();
+});
+
+it('requires the authenticated custodian name to sign an IAR approval', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'inspected',
+        'created_by' => $inspector->id,
+    ]);
+
+    $this->actingAs($custodian)
+        ->postJson("/api/custodian/arrival-inspections/{$inspection->id}/approve", [
+            'signature_name' => 'Someone Else',
+            'confirmation' => true,
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('signature_name');
+
+    $this->assertDatabaseHas('arrival_inspections', ['id' => $inspection->id, 'status' => 'inspected']);
+});
+
+it('prevents a custodian from approving a fully rejected delivery', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'inspected',
+        'acceptance_status' => 'rejected',
+        'created_by' => $inspector->id,
+    ]);
+
+    $this->actingAs($custodian)
+        ->postJson("/api/custodian/arrival-inspections/{$inspection->id}/approve", [
+            'signature_name' => trim($custodian->first_name.' '.$custodian->last_name),
+            'confirmation' => true,
+        ])
+        ->assertStatus(409);
+
+    $this->assertDatabaseHas('arrival_inspections', ['id' => $inspection->id, 'status' => 'inspected']);
+});
+
+it('returns an IAR to the inspector with a required correction reason', function () {
+    $inspector = inspectorUser();
+    $custodian = custodianUser();
+    $inspection = ArrivalInspection::query()->create([
+        'status' => 'inspected',
+        'created_by' => $inspector->id,
+    ]);
+
+    $this->actingAs($custodian)
+        ->postJson("/api/custodian/arrival-inspections/{$inspection->id}/return", ['reason' => ''])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('reason');
+
+    $this->actingAs($custodian)
+        ->postJson("/api/custodian/arrival-inspections/{$inspection->id}/return", [
+            'reason' => 'Please correct the invoice details.',
+        ])
+        ->assertOk()
+        ->assertJsonPath('message', 'IAR returned to the Inspector for correction.');
+
+    $this->assertDatabaseHas('arrival_inspections', [
+        'id' => $inspection->id,
+        'status' => 'returned',
+        'custodian_return_reason' => 'Please correct the invoice details.',
+        'completed_by' => null,
+    ]);
 });
 
 it('locks an inspection after IAR finalization', function () {

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\SampleForecastData;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Inventory extends Model
 {
@@ -71,6 +72,8 @@ class Inventory extends Model
         'date_acquired',
         'lifespan_years',
         'expected_end_date',
+        'arrival_inspection_id',
+        'arrival_inspection_item_id',
     ];
 
     /**
@@ -237,6 +240,16 @@ class Inventory extends Model
     public function stockMovements()
     {
         return $this->hasMany(StockMovement::class, 'inventory_id', 'item_id');
+    }
+
+    public function arrivalInspection(): BelongsTo
+    {
+        return $this->belongsTo(ArrivalInspection::class);
+    }
+
+    public function arrivalInspectionItem(): BelongsTo
+    {
+        return $this->belongsTo(ArrivalInspectionItem::class);
     }
 
     public function assignmentReturns()

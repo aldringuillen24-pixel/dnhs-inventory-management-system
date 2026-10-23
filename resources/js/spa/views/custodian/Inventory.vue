@@ -2128,7 +2128,9 @@ const tabs = computed(() => [
     // double count. The server total is the de-duplicated figure.
     count: Number(metrics.value?.total ?? 0),
   },
-  ...STATUSES.map((status) => ({ key: status, label: STATUS_LABELS[status], count: Number(counts.value?.[status] ?? 0) })),
+  ...STATUSES
+    .filter((status) => status !== 'under_inspection')
+    .map((status) => ({ key: status, label: STATUS_LABELS[status], count: Number(counts.value?.[status] ?? 0) })),
 ]);
 
 const activeWorkspaceTab = computed(() => tabs.value.find((tab) => tab.key === workspace.value) ?? tabs.value[0]);

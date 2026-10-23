@@ -8,7 +8,7 @@
     @close="$emit('close')"
   >
     <div class="space-y-3">
-      <div class="grid w-full max-w-xs grid-cols-2 gap-0.5 rounded-md bg-gray-100 p-0.5 dark:bg-white/5" role="tablist" aria-label="Stock-in method">
+      <div class="grid w-full max-w-lg grid-cols-3 gap-0.5 rounded-md bg-gray-100 p-0.5 dark:bg-white/5" role="tablist" aria-label="Stock-in method">
         <button
           v-for="tab in stockInTabs"
           :key="tab.key"
@@ -19,10 +19,34 @@
             ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
             : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
           :aria-selected="activeTab === tab.key"
-          @click="activeTab = tab.key"
+          @click="selectTab(tab.key)"
         >
           {{ tab.label }}
         </button>
+      </div>
+
+      <div v-if="activeTab === 'iar'" class="grid gap-2 rounded-md border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/20 sm:grid-cols-[minmax(16rem,24rem)_1fr] sm:items-end">
+        <div>
+          <label for="stock-in-approved-iar" class="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300">Approved IAR</label>
+          <select
+            id="stock-in-approved-iar"
+            v-model="selectedIarId"
+            class="block w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+            :disabled="approvedIarsLoading || !approvedIars.length"
+            @change="selectApprovedIar"
+          >
+            <option value="">{{ approvedIarsLoading ? 'Loading approved IARs…' : 'Select an approved IAR' }}</option>
+            <option v-for="inspection in approvedIars" :key="inspection.id" :value="String(inspection.id)">
+              {{ inspection.iar_number }} · {{ inspection.supplier_name }}
+            </option>
+          </select>
+          <p v-if="approvedIarsError" role="alert" class="mt-1 text-xs text-rose-700 dark:text-rose-300">
+            {{ approvedIarsError }}
+            <button type="button" class="ml-1 font-semibold underline" @click="loadApprovedIars">Retry</button>
+          </p>
+          <p v-else-if="!approvedIarsLoading && !approvedIars.length" class="mt-1 text-xs text-gray-500 dark:text-gray-400">No approved IARs are waiting for Stock In.</p>
+          <p v-else class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Only approved IARs not yet posted to inventory are listed.</p>
+        </div>
       </div>
 
       <div class="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
@@ -55,7 +79,7 @@
             </label>
           </template>
           <button
-            v-else
+            v-else-if="activeTab === 'manual'"
             type="button"
             class="inline-flex items-center gap-1.5 rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="lineItems.length >= 100"
@@ -94,12 +118,14 @@
             <tbody class="divide-y divide-gray-100 bg-white dark:divide-white/5 dark:bg-gray-900">
               <tr v-if="!lineItems.length">
                 <td colspan="9" class="px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
-                  {{ activeTab === 'manual' ? 'Select Add item to create an editable row.' : 'Choose a CSV file to load editable item rows.' }}
+                  {{ activeTab === 'manual' ? 'Select Add item to create an editable row.' : (activeTab === 'csv' ? 'Choose a CSV file to load editable item rows.' : 'Select an approved IAR to load accepted item lines.') }}
                 </td>
               </tr>
               <template v-for="(row, index) in lineItems" :key="row.id">
                 <tr :class="row.errors.length || row.serverErrors.length ? 'bg-rose-50/50 dark:bg-rose-950/20' : ''">
                   <td class="px-3 py-2 align-top text-right">
+                    <span v-if="activeTab === 'iar'" class="inline-block min-w-20 py-1.5 text-right font-semibold text-gray-800 dark:text-gray-200">{{ row.quantity }}</span>
+                    <template v-else>
                     <input
                       v-model.number="row.quantity"
                       type="number"
@@ -109,8 +135,11 @@
                       @input="refreshLine(row)"
                     />
                     <p v-if="row.fieldErrors.quantity" class="mt-1 max-w-20 break-words text-[10px] text-rose-700 dark:text-rose-300">{{ row.fieldErrors.quantity }}</p>
+                    </template>
                   </td>
                   <td class="px-3 py-2 align-top">
+                    <span v-if="activeTab === 'iar'" class="inline-block min-w-24 py-1.5 text-gray-700 dark:text-gray-300">{{ row.unit }}</span>
+                    <template v-else>
                     <input
                       v-model.trim="row.unit"
                       type="text"
@@ -120,6 +149,7 @@
                       @input="refreshLine(row)"
                     />
                     <p v-if="row.fieldErrors.unit" class="mt-1 max-w-24 break-words text-[10px] text-rose-700 dark:text-rose-300">{{ row.fieldErrors.unit }}</p>
+                    </template>
                   </td>
                   <td class="px-3 py-2 align-top text-right">
                     <input
@@ -137,6 +167,8 @@
                     {{ formatCurrency(rowTotal(row)) }}
                   </td>
                   <td class="min-w-52 px-3 py-2 align-top">
+                    <p v-if="activeTab === 'iar'" class="w-52 whitespace-pre-wrap break-words py-1.5 text-gray-700 dark:text-gray-300">{{ row.description }}</p>
+                    <template v-else>
                     <textarea
                       v-model.trim="row.description"
                       rows="2"
@@ -146,6 +178,7 @@
                       @input="refreshLine(row)"
                     />
                     <p v-if="row.fieldErrors.description" class="mt-1 text-[10px] text-rose-700 dark:text-rose-300">{{ row.fieldErrors.description }}</p>
+                    </template>
                   </td>
                   <td class="min-w-40 px-3 py-2 align-top">
                     <CategoryCombobox
@@ -198,6 +231,7 @@
                   </td>
                   <td class="px-3 py-2 align-top">
                     <button
+                      v-if="activeTab !== 'iar'"
                       type="button"
                       class="rounded px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
                       :aria-label="`Remove line ${index + 1}`"
@@ -274,6 +308,7 @@ const emit = defineEmits(['close', 'saved', 'categories-updated']);
 const stockInTabs = [
   { key: 'manual', label: 'Manual' },
   { key: 'csv', label: 'Through CSV' },
+  { key: 'iar', label: 'From approved IAR' },
 ];
 const activeTab = ref('manual');
 const saving = ref(false);
@@ -282,6 +317,11 @@ const batchMessage = ref('');
 const csvError = ref('');
 const csvFileName = ref('');
 const csvFileInput = ref(null);
+const approvedIars = ref([]);
+const approvedIarsLoading = ref(false);
+const approvedIarsError = ref('');
+const selectedIarId = ref('');
+const selectedIar = ref(null);
 const today = new Date().toISOString().slice(0, 10);
 let nextLineId = 1;
 const lineItems = ref([]);
@@ -298,6 +338,45 @@ watch(() => props.open, (isOpen) => {
     }
   }
 });
+
+function selectTab(tab) {
+  if (tab === activeTab.value) return;
+  if (activeTab.value === 'iar' || tab === 'iar') {
+    selectedIarId.value = '';
+    selectedIar.value = null;
+    lineItems.value = [];
+  }
+  activeTab.value = tab;
+  batchMessage.value = '';
+  csvError.value = '';
+  if (tab === 'manual' && lineItems.value.length === 0) lineItems.value.push(createLine());
+  if (tab === 'iar') loadApprovedIars();
+}
+
+async function loadApprovedIars() {
+  approvedIarsLoading.value = true;
+  approvedIarsError.value = '';
+  try {
+    const { data } = await api.get('/custodian/inventory/stock-in/approved-iars');
+    approvedIars.value = data.inspections ?? [];
+  } catch (error) {
+    approvedIarsError.value = error?.response?.data?.message ?? 'Could not load approved IARs.';
+  } finally {
+    approvedIarsLoading.value = false;
+  }
+}
+
+function selectApprovedIar() {
+  selectedIar.value = approvedIars.value.find((inspection) => String(inspection.id) === String(selectedIarId.value)) ?? null;
+  lineItems.value = (selectedIar.value?.items ?? []).map((item) => createLine({
+    arrival_inspection_item_id: item.id,
+    description: item.description,
+    unit: item.unit,
+    quantity: item.quantity,
+    date_acquired: selectedIar.value.receipt_date ?? selectedIar.value.inspection_date ?? today,
+  }));
+  batchMessage.value = '';
+}
 
 function categoryRequiresSerial(category) {
   return category?.requires_serial_number === true || category?.requires_serial_number === 1;
@@ -327,6 +406,7 @@ function createLine(values = {}) {
     lifespan_years: values.lifespan_years === '' || values.lifespan_years == null ? '' : Number(values.lifespan_years),
     serial_numbers: Array.isArray(values.serial_numbers) ? values.serial_numbers : [],
     serial_numbers_text: Array.isArray(values.serial_numbers) ? values.serial_numbers.join('\n') : '',
+    arrival_inspection_item_id: values.arrival_inspection_item_id ?? null,
     inventory_item_no: '',
     errors: [],
     fieldErrors: {},
@@ -352,6 +432,7 @@ function validateLine(row) {
   if (!String(row.unit ?? '').trim()) fail('unit', 'Required.');
   if (!Number.isSafeInteger(quantity) || quantity < 1) fail('quantity', 'Enter a whole number above 0.');
   if (row.unit_cost === '' || row.unit_cost == null || !Number.isFinite(cost) || cost < 0) fail('unit_cost', 'Enter a cost of 0 or more.');
+  else if (cost > 9999999999.99) fail('unit_cost', 'Cost exceeds the inventory limit.');
   if (!row.date_acquired || Number.isNaN(Date.parse(row.date_acquired))) fail('date_acquired', 'Enter a valid date.');
   else if (row.date_acquired > today) fail('date_acquired', 'Date must not be in the future.');
   if (row.lifespan_years !== '' && row.lifespan_years != null) {
@@ -577,6 +658,10 @@ function flattenMessages(messages) {
 
 async function submitBatch() {
   if (saving.value || !validRows.value.length) return;
+  if (activeTab.value === 'iar' && (!selectedIar.value || validRows.value.length !== lineItems.value.length)) {
+    batchMessage.value = 'Complete all category, unit-cost, and required serial-number details before posting this IAR.';
+    return;
+  }
   if (String(icsNo.value).length > 255) {
     batchMessage.value = 'ICS number must not exceed 255 characters.';
     return;
@@ -586,6 +671,28 @@ async function submitBatch() {
   batchMessage.value = '';
   const sentRows = [...validRows.value];
   try {
+    if (activeTab.value === 'iar') {
+      const { data } = await api.post('/custodian/inventory/stock-in/approved-iar', {
+        arrival_inspection_id: selectedIar.value.id,
+        ics_no: icsNo.value.trim() || null,
+        rows: sentRows.map((row) => ({
+          arrival_inspection_item_id: row.arrival_inspection_item_id,
+          category_id: Number(row.category_id),
+          unit_cost: Number(row.unit_cost),
+          lifespan_years: row.lifespan_years === '' ? null : Number(row.lifespan_years),
+          serial_numbers: row.serial_numbers,
+        })),
+      });
+      batchMessage.value = data.message ?? 'The approved IAR was stocked in successfully.';
+      lineItems.value = [];
+      selectedIarId.value = '';
+      selectedIar.value = null;
+      icsNo.value = '';
+      await loadApprovedIars();
+      emit('saved');
+      return;
+    }
+
     const { data } = await api.post('/custodian/inventory/stock-in/import', {
       rows: sentRows.map((row) => ({
         item_name: row.description,
@@ -624,8 +731,10 @@ async function submitBatch() {
     }
     batchMessage.value = data?.message ?? 'Some lines could not be saved. Review the rows marked with errors and try again.';
   } catch (error) {
-    batchMessage.value = error?.response?.data?.message
-      ?? 'Stock-in could not be completed. Your item lines are still here; check your connection and try again.';
+    const validationMessages = Object.values(error?.response?.data?.errors ?? {}).flat().filter((message) => typeof message === 'string');
+    batchMessage.value = validationMessages.join(' ')
+      || (error?.response?.data?.message
+        ?? 'Stock-in could not be completed. Your item lines are still here; check your connection and try again.');
   } finally {
     saving.value = false;
   }

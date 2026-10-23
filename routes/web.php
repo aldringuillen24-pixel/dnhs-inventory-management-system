@@ -274,6 +274,8 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
     Route::post('/inventory/iirup-pdf', [PropertyCustodianController::class, 'generateIirupPdf'])->name('inventory.iirup-pdf');
         Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
         Route::post('/inventory/stock-in/import', [PropertyCustodianController::class, 'stockInImport'])->name('inventory.stock-in.import');
+        Route::get('/inventory/stock-in/approved-iars', [PropertyCustodianController::class, 'approvedIarsForStockIn'])->name('inventory.stock-in.approved-iars');
+        Route::post('/inventory/stock-in/approved-iar', [PropertyCustodianController::class, 'stockInApprovedIar'])->name('inventory.stock-in.approved-iar');
         Route::get('/categories', [PropertyCustodianController::class, 'categories'])->name('categories.index');
         Route::post('/categories', [PropertyCustodianController::class, 'storeCategory'])->name('categories.store');
         Route::patch('/categories/{category}', [PropertyCustodianController::class, 'updateCategory'])->name('categories.update');
@@ -283,6 +285,9 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::get('/inventory-logs', [PropertyCustodianController::class, 'inventoryLogs'])->name('inventory.logs');
         Route::get('/inventory/{inventory}', [PropertyCustodianController::class, 'editInventory'])->name('inventory.edit');
         Route::patch('/inventory/{inventory}', [PropertyCustodianController::class, 'updateInventory'])->name('inventory.update');
+        Route::get('/arrival-inspections/pending-approval', [ArrivalInspectionController::class, 'pendingApproval'])->name('arrival-inspections.pending-approval');
+        Route::post('/arrival-inspections/{arrivalInspection}/approve', [ArrivalInspectionController::class, 'approve'])->name('arrival-inspections.approve');
+        Route::post('/arrival-inspections/{arrivalInspection}/return', [ArrivalInspectionController::class, 'returnForCorrection'])->name('arrival-inspections.return');
         Route::delete('/inventory/{inventory}', [PropertyCustodianController::class, 'destroyInventory'])->name('inventory.destroy');
         Route::post('/inventory/{itemId}/send-to-maintenance', [PropertyCustodianController::class, 'sendToMaintenance'])->name('inventory.send-to-maintenance');
         Route::post('/inventory/{itemId}/mark-repaired', [PropertyCustodianController::class, 'markRepaired'])->name('inventory.mark-repaired');

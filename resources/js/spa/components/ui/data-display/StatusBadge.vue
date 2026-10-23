@@ -33,6 +33,7 @@ const classes = computed(() => {
         case 'accepted':
         case 'completed':
         case 'active':
+        case 'inspected':
             return 'bg-emerald-50 text-emerald-700 border border-emerald-200/60 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20';
         case 'assigned':
             return 'bg-indigo-50 text-indigo-700 border border-indigo-200/60 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/20';
@@ -72,6 +73,7 @@ const dotClass = computed(() => {
         case 'accepted':
         case 'completed':
         case 'active':
+        case 'inspected':
             return 'bg-emerald-500';
         case 'assigned':
             return 'bg-indigo-500';

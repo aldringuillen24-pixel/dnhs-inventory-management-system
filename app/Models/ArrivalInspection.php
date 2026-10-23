@@ -41,6 +41,9 @@ class ArrivalInspection extends Model
         'inspected_at',
         'completed_by',
         'completed_at',
+        'custodian_signature_name',
+        'custodian_return_reason',
+        'custodian_returned_at',
         'posted_at',
     ];
 
@@ -54,6 +57,7 @@ class ArrivalInspection extends Model
             'receipt_date' => 'date',
             'inspected_at' => 'datetime',
             'completed_at' => 'datetime',
+            'custodian_returned_at' => 'datetime',
             'posted_at' => 'datetime',
         ];
     }

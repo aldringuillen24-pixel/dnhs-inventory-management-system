@@ -23,9 +23,6 @@
         .rule { border-top: 1px solid #000; margin: 3mm 0 0; }
         .appendix { font-size: 10pt; font-style: italic; font-weight: bold; text-align: right; margin-top: 1mm; }
         h1 { font-size: 10pt; margin: 2mm 0 3mm; text-align: center; }
-        table.rfq-footer,
-        table.rfq-footer td { font-size: 10pt !important; }
-
         table { border-collapse: collapse; width: 100%; table-layout: fixed; }
         .entity-row { margin-bottom: 3mm; }
         .entity-row td { border: 0; padding: 0 1mm; }
@@ -38,8 +35,11 @@
         .details .label { font-weight: bold; white-space: nowrap; }
         .details .left-label { width: 23%; }
         .details .left-value { width: 51%; }
-        .details .right-label { width: 13%; }
-        .details .right-value { width: 13%; }
+        .details .right-details { width: 26%; padding: 0.5mm 1.5mm !important; }
+        .details .right-details-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+        .details .right-details-table td { border: 0; height: 5mm; padding: 0.25mm 0; }
+        .details .right-details-label { width: 42%; font-weight: bold; white-space: nowrap; }
+        .details .right-details-value { width: 58%; border-bottom: 1px solid #000 !important; padding-left: 1mm !important; }
         .items { margin-top: 0; }
         .items th, .items td { border: 1px solid #000; padding: 1.2mm; }
         .items thead th { border-top: 0; }
@@ -108,26 +108,40 @@
             <tr>
                 <td class="label left-label">Supplier:</td>
                 <td class="left-value">{{ $inspection->supplier_name }}</td>
-                <td class="label right-label">IAR No.:</td>
-                <td class="right-value">{{ $inspection->iar_number }}</td>
+                <td class="right-details" rowspan="4">
+                    <table class="right-details-table">
+                        <tbody>
+                            <tr>
+                                <td class="right-details-label">IAR No.:</td>
+                                <td class="right-details-value">{{ $inspection->iar_number }}</td>
+                            </tr>
+                            <tr>
+                                <td class="right-details-label">Date:</td>
+                                <td class="right-details-value">{{ $formatDate($inspection->iar_date) }}</td>
+                            </tr>
+                            <tr>
+                                <td class="right-details-label">Invoice No.:</td>
+                                <td class="right-details-value">{{ $inspection->invoice_number }}</td>
+                            </tr>
+                            <tr>
+                                <td class="right-details-label">Date:</td>
+                                <td class="right-details-value">{{ $formatDate($inspection->invoice_date) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </td>
             </tr>
             <tr>
                 <td class="label">Contract Title:</td>
                 <td>{{ $inspection->contract_title }}</td>
-                <td class="label">Date:</td>
-                <td>{{ $formatDate($inspection->iar_date) }}</td>
             </tr>
             <tr>
                 <td class="label">Requisitioning Office/Dept.:</td>
                 <td>{{ $inspection->requesting_office }}</td>
-                <td class="label invoice-label">Invoice No.:</td>
-                <td class="invoice-value">{{ $inspection->invoice_number }}</td>
             </tr>
             <tr>
                 <td class="label">Responsibility Center Code:</td>
                 <td>{{ $inspection->responsibility_center_code }}</td>
-                <td class="label invoice-label">Date:</td>
-                <td class="invoice-value">{{ $formatDate($inspection->invoice_date) }}</td>
             </tr>
         </tbody>
     </table>
@@ -193,15 +207,16 @@
                     @endif
                     <div class="custodian">
                         <div class="signature-line"></div>
-                        <div class="signatory-name">{{ $inspection->custodian_name }}</div>
+                        <div class="signatory-name">{{ $inspection->custodian_signature_name ?: ($inspection->status === 'approved' || $inspection->status === 'posted' ? $inspection->custodian_name : '') }}</div>
                         <div class="signatory-designation">{{ $inspection->custodian_designation ?: 'School Property Custodian' }}</div>
+                        @if ($inspection->custodian_signature_name && $inspection->completed_at)
+                            <div class="signatory-designation">Electronically signed {{ $inspection->completed_at->format('F d, Y g:i A') }}</div>
+                        @endif
                     </div>
                 </td>
             </tr>
         </tbody>
     </table>
-
-    @include('pdfs.components.rfq-footer')
 </div>
 </body>
 </html>

@@ -1,4 +1,4 @@
-<table class="rfq-footer" style="width: 100%; border-collapse: collapse; margin: 12px 0 0; font-family: 'Times New Roman', serif; font-size: 8.5pt; line-height: 1.25; color: #000;">
+<table class="rfq-footer" style="width: 100%; table-layout: auto; border-collapse: collapse; margin: 12px 0 0; font-family: 'Times New Roman', serif; font-size: 8.5pt; line-height: 1.25; color: #000;">
     <tbody>
         <tr>
             <td style="width: 46px; padding: 0 10px 0 0; vertical-align: middle;">

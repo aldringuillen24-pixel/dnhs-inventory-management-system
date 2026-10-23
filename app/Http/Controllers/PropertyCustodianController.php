@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AssignmentRequest;
+use App\Models\ArrivalInspection;
 use App\Models\Category;
 use App\Models\InventoryItemLog;
 use App\Models\User;
@@ -3251,6 +3252,165 @@ class PropertyCustodianController extends Controller
         });
 
         return redirect()->route('propertyCustodian.inventory')->with('success', 'Item stocked in successfully.');
+    }
+
+    public function approvedIarsForStockIn()
+    {
+        $inspections = ArrivalInspection::query()
+            ->where('status', 'approved')
+            ->whereNull('posted_at')
+            ->where('acceptance_status', '!=', 'rejected')
+            ->whereNotNull('iar_number')
+            ->with('items:id,arrival_inspection_id,stock_property_number,description,unit,quantity')
+            ->orderBy('completed_at')
+            ->get();
+
+        return response()->json(['inspections' => $inspections]);
+    }
+
+    public function stockInApprovedIar(Request $request)
+    {
+        $validated = $request->validate([
+            'arrival_inspection_id' => ['required', 'integer', 'exists:arrival_inspections,id'],
+            'ics_no' => ['nullable', 'string', 'max:255'],
+            'rows' => ['required', 'array', 'min:1', 'max:100'],
+            'rows.*.arrival_inspection_item_id' => ['required', 'integer', 'distinct', 'exists:arrival_inspection_items,id'],
+            'rows.*.category_id' => ['required', 'integer', 'exists:categories,category_id'],
+            'rows.*.unit_cost' => ['required', 'numeric', 'min:0', 'max:9999999999.99'],
+            'rows.*.lifespan_years' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'rows.*.serial_numbers' => ['nullable', 'array'],
+            'rows.*.serial_numbers.*' => ['required', 'string', 'max:255', 'distinct', 'unique:inventory,serial_number'],
+        ]);
+
+        $userId = $request->user()->getAuthIdentifier();
+        $stockInResult = DB::transaction(function () use ($validated, $userId): array {
+            $inspection = ArrivalInspection::query()
+                ->whereKey($validated['arrival_inspection_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            abort_unless(
+                $inspection->status === 'approved' && $inspection->posted_at === null,
+                409,
+                'This IAR is not available for Stock In. It may already be posted.',
+            );
+            abort_unless($inspection->iar_number, 409, 'An IAR number is required before Stock In.');
+            abort_if($inspection->acceptance_status === 'rejected', 409, 'A fully rejected delivery cannot be stocked in.');
+
+            $inspectionItems = $inspection->items()->orderBy('id')->get();
+            $submittedRows = collect($validated['rows'])->keyBy('arrival_inspection_item_id');
+            $expectedIds = $inspectionItems->pluck('id')->map(fn ($id) => (int) $id)->sort()->values();
+            $submittedIds = $submittedRows->keys()->map(fn ($id) => (int) $id)->sort()->values();
+
+            if ($expectedIds->all() !== $submittedIds->all()) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'rows' => ['Stock In must include each accepted IAR item exactly once.'],
+                ]);
+            }
+
+            $dateAcquired = $inspection->receipt_date?->toDateString()
+                ?? $inspection->inspection_date?->toDateString()
+                ?? now()->toDateString();
+            if ($dateAcquired > now()->toDateString()) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'arrival_inspection_id' => ['The IAR receipt date cannot be in the future for Stock In.'],
+                ]);
+            }
+            $created = 0;
+
+            foreach ($inspectionItems as $inspectionItem) {
+                if (mb_strlen($inspectionItem->description) > 255) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'rows' => ["IAR item {$inspectionItem->id} exceeds the 255-character inventory item name limit."],
+                    ]);
+                }
+
+                $row = $submittedRows->get($inspectionItem->id);
+                $category = Category::query()->findOrFail($row['category_id']);
+                $serialNumbers = array_values(array_map('trim', $row['serial_numbers'] ?? []));
+
+                if ($category->requires_serial_number) {
+                    if (count($serialNumbers) !== (int) $inspectionItem->quantity || in_array('', $serialNumbers, true)) {
+                        throw \Illuminate\Validation\ValidationException::withMessages([
+                            "rows.{$inspectionItem->id}.serial_numbers" => [
+                                "Enter one unique serial number for each of the {$inspectionItem->quantity} accepted units.",
+                            ],
+                        ]);
+                    }
+                } elseif ($serialNumbers !== []) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        "rows.{$inspectionItem->id}.serial_numbers" => ['This category does not use serial numbers.'],
+                    ]);
+                }
+
+                $lifespanYears = $row['lifespan_years'] ?? $category->default_lifespan_years;
+                $lifespanYears = $lifespanYears === null ? null : (int) $lifespanYears;
+                $itemAttributes = [
+                    'category_id' => $category->category_id,
+                    'unit' => $inspectionItem->unit,
+                    'user_id' => $userId,
+                    'item_name' => $inspectionItem->description,
+                    'description' => "Received from approved IAR {$inspection->iar_number}",
+                    'ics_no' => $validated['ics_no'] ?? null,
+                    'unit_cost' => $row['unit_cost'],
+                    'date_acquired' => $dateAcquired,
+                    'lifespan_years' => $lifespanYears,
+                    'expected_end_date' => $lifespanYears === null
+                        ? null
+                        : Carbon::parse($dateAcquired)->addYears($lifespanYears)->toDateString(),
+                    'arrival_inspection_id' => $inspection->id,
+                    'arrival_inspection_item_id' => $inspectionItem->id,
+                ];
+
+                if ($category->requires_serial_number) {
+                    foreach ($serialNumbers as $serialNumber) {
+                        $this->inventoryOperations->stockIn([
+                            ...$itemAttributes,
+                            'quantity' => 1,
+                            'serial_number' => $serialNumber,
+                        ]);
+                        $created++;
+                    }
+
+                    continue;
+                }
+
+                if ($category->requires_qr_code) {
+                    for ($index = 0; $index < (int) $inspectionItem->quantity; $index++) {
+                        $this->inventoryOperations->stockIn([
+                            ...$itemAttributes,
+                            'quantity' => 1,
+                            'serial_number' => null,
+                        ]);
+                        $created++;
+                    }
+
+                    continue;
+                }
+
+                $this->inventoryOperations->stockIn([
+                    ...$itemAttributes,
+                    'quantity' => $inspectionItem->quantity,
+                    'serial_number' => null,
+                ]);
+                $created++;
+            }
+
+            $inspection->update([
+                'status' => 'posted',
+                'posted_at' => now(),
+            ]);
+
+            return [
+                'created_records' => $created,
+                'iar_number' => $inspection->iar_number,
+            ];
+        });
+
+        return response()->json([
+            'message' => "Stock In completed from IAR {$stockInResult['iar_number']}.",
+            'created_records' => $stockInResult['created_records'],
+        ], 201);
     }
 
     public function stockInImport(Request $request)
