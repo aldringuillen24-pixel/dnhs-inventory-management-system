@@ -5,7 +5,10 @@ use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\Transaction;
+use App\Models\StockMovement;
+use App\Models\TransferReleaseSlip;
 use App\Models\User;
+use App\Services\InventoryOperationService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -63,6 +66,7 @@ test('transactions api returns every workspace list as JSON', function () {
             'incomingRequests',
             'assignmentRequests',
             'pendingTransfers',
+            'transferDrafts',
             'pendingReturns',
             'transactions',
             'auditLedger',
@@ -99,6 +103,251 @@ test('approve specific item request through the api assigns stock', function () 
         'quantity' => 2,
         'status' => 'assigned',
     ]);
+});
+
+test('custodian drafts the transfer release slip before confirming allocation', function () {
+    $recipient = User::create([
+        'role_id' => Role::where('role_name', 'End User')->value('role_id'),
+        'first_name' => 'Transfer',
+        'last_name' => 'Recipient',
+        'username' => 'transfer-recipient',
+        'email' => 'transfer-recipient@example.com',
+        'password' => 'password',
+        'status' => 'active',
+        'building' => 'Science Building',
+        'room' => '203',
+    ]);
+    $item = Inventory::create([
+        'category_id' => $this->category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->custodian->id,
+        'assigned_to_user_id' => $this->endUser->id,
+        'building' => 'Main Building',
+        'room' => '101',
+        'item_name' => 'Transfer Laptop',
+        'inventory_item_no' => 'INV-TRANSFER-001',
+        'quantity' => 0,
+        'status' => 'assigned',
+        'date_acquired' => '2026-01-10',
+    ]);
+    $original = AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.transfer'), [
+            'request_id' => $original->id,
+            'transfer_user_id' => $recipient->id,
+            'item_id' => $item->item_id,
+            'quantity' => 1,
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $transfer = AssignmentRequest::query()
+        ->where('user_id', $this->endUser->id)
+        ->where('target_user_id', $recipient->id)
+        ->firstOrFail();
+    expect($transfer->status)->toBe('waiting for custodian approval')
+        ->and($transfer->source_assignment_id)->toBe($original->id);
+    $this->actingAs($recipient)
+        ->getJson(route('api.end-user.requests'))
+        ->assertOk()
+        ->assertJsonCount(0, 'incomingRequests');
+    $this->assertDatabaseHas('inventory', [
+        'item_id' => $item->item_id,
+        'assigned_to_user_id' => $this->endUser->id,
+        'building' => 'Main Building',
+    ]);
+    $this->assertDatabaseCount('transactions', 0);
+
+    $pdf = \Mockery::mock(\Barryvdh\DomPDF\PDF::class);
+    $pdf->shouldReceive('stream')
+        ->twice()
+        ->withArgs(fn (string $filename): bool => str_starts_with($filename, 'PRS-'))
+        ->andReturn(response('%PDF-preview', 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="PRS-preview.pdf"',
+        ]));
+    $pdf->shouldReceive('download')
+        ->once()
+        ->withArgs(fn (string $filename): bool => str_starts_with($filename, 'PRS-'))
+        ->andReturn(response('%PDF-download', 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="PRS-download.pdf"',
+        ]));
+    Pdf::shouldReceive('loadView')
+        ->times(3)
+        ->with('pdfs.property-release-slip', \Mockery::on(
+            fn (array $data): bool => $data['transferFromName'] === 'End User'
+                && $data['recipientName'] === 'Transfer Recipient'
+                && $data['lines'][0]['item_no'] === 'INV-TRANSFER-001'
+                && $data['lines'][0]['qty'] === 1
+                && $data['lines'][0]['condition'] === 'Good'
+                && $data['slipFields']['department_unit'] === 'Science'
+        ))
+        ->andReturn($pdf);
+
+    $slipFields = [
+        'recipient_name' => 'Transfer Recipient',
+        'department_unit' => 'Science',
+        'designation' => 'Teacher',
+        'purpose' => 'Transfer / Relocation',
+        'condition_upon_release' => 'Good',
+        'released_by_name' => 'Property Custodian',
+        'released_by_date' => '2026-10-24',
+        'received_by_name' => 'Transfer Recipient',
+    ];
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.transfers.release-slip-preview', $transfer->id), ['slip_fields' => $slipFields])
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.transfers.draft', $transfer->id), ['slip_fields' => $slipFields])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($transfer->fresh()->status)->toBe('transfer draft');
+    $this->assertDatabaseHas('transfer_release_slips', [
+        'request_id' => $transfer->id,
+        'recipient_name' => 'Transfer Recipient',
+        'purpose' => 'Transfer / Relocation',
+        'status' => 'draft',
+    ]);
+    $this->actingAs($this->custodian)
+        ->getJson(route('api.custodian.transactions'))
+        ->assertOk()
+        ->assertJsonCount(1, 'transferDrafts');
+    $this->assertDatabaseHas('inventory', [
+        'item_id' => $item->item_id,
+        'assigned_to_user_id' => $this->endUser->id,
+        'building' => 'Main Building',
+    ]);
+    $this->assertDatabaseCount('transactions', 0);
+
+    $this->actingAs($this->custodian)
+        ->get(route('api.custodian.transfers.release-slip', $transfer->id).'?preview=1')
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf')
+        ->assertHeader('Content-Disposition', 'inline; filename="PRS-preview.pdf"');
+
+    $this->actingAs($this->custodian)
+        ->get(route('api.custodian.transfers.release-slip', $transfer->id))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf')
+        ->assertHeader('Content-Disposition', 'attachment; filename="PRS-download.pdf"');
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.transfers.allocate', $transfer->id))
+        ->assertUnprocessable();
+    expect($transfer->fresh()->status)->toBe('transfer draft');
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.transfers.allocate', $transfer->id), ['confirmed' => true])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($transfer->fresh()->status)->toBe('approved')
+        ->and(TransferReleaseSlip::where('request_id', $transfer->id)->value('status'))->toBe('completed');
+    $this->assertDatabaseHas('inventory', [
+        'item_id' => $item->item_id,
+        'assigned_to_user_id' => $recipient->id,
+        'building' => 'Science Building',
+        'room' => '203',
+    ]);
+    $this->assertDatabaseHas('transactions', [
+        'item_id' => $item->item_id,
+        'from_user_id' => $this->endUser->id,
+        'user_id' => $recipient->id,
+        'quantity' => 1,
+        'status' => 'assigned',
+    ]);
+    expect(StockMovement::where('inventory_id', $item->item_id)->where('movement_type', 'transfer')->count())->toBe(1);
+});
+
+test('partial transfers stay linked to the correct original assignment until each is allocated', function () {
+    $recipientOne = User::create([
+        'role_id' => Role::where('role_name', 'End User')->value('role_id'),
+        'first_name' => 'Transfer',
+        'last_name' => 'One',
+        'username' => 'transfer-one',
+        'email' => 'transfer-one@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+    $recipientTwo = User::create([
+        'role_id' => Role::where('role_name', 'End User')->value('role_id'),
+        'first_name' => 'Transfer',
+        'last_name' => 'Two',
+        'username' => 'transfer-two',
+        'email' => 'transfer-two@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+    $item = Inventory::create([
+        'category_id' => $this->category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->custodian->id,
+        'assigned_to_user_id' => $this->endUser->id,
+        'item_name' => 'Shared Device',
+        'quantity' => 0,
+        'status' => 'assigned',
+        'date_acquired' => '2026-01-10',
+    ]);
+    $originTransaction = Transaction::create([
+        'item_id' => $item->item_id,
+        'from_user_id' => $this->custodian->id,
+        'user_id' => $this->endUser->id,
+        'quantity' => 5,
+        'transaction_date' => now(),
+        'status' => 'assigned',
+    ]);
+    $original = AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'transaction_id' => $originTransaction->id,
+        'quantity' => 5,
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+    $operations = app(InventoryOperationService::class);
+
+    expect($operations->requestTransfer($original->id, $item->item_id, $this->endUser->id, $recipientOne->id, 2, null))->toBe('created')
+        ->and($operations->requestTransfer($original->id, $item->item_id, $this->endUser->id, $recipientTwo->id, 3, null))->toBe('created');
+
+    $transfers = AssignmentRequest::query()
+        ->where('source_assignment_id', $original->id)
+        ->orderBy('id')
+        ->get();
+    expect($transfers)->toHaveCount(2)
+        ->and($original->fresh()->quantity)->toBe(0)
+        ->and($original->fresh()->status)->toBe('approved');
+
+    foreach ($transfers as $transfer) {
+        TransferReleaseSlip::create([
+            'request_id' => $transfer->id,
+            'custodian_id' => $this->custodian->id,
+            'recipient_name' => 'Transfer Recipient',
+            'purpose' => 'Transfer / Relocation',
+            'status' => 'draft',
+        ]);
+        $transfer->update(['status' => 'transfer draft']);
+    }
+
+    expect($operations->approveTransfer($transfers[0]->id, $this->custodian->id))->toBeTrue()
+        ->and($original->fresh()->status)->toBe('approved')
+        ->and($originTransaction->fresh()->quantity)->toBe(3);
+    expect($operations->approveTransfer($transfers[1]->id, $this->custodian->id))->toBeTrue()
+        ->and($original->fresh()->status)->toBe('transferred')
+        ->and($originTransaction->fresh()->quantity)->toBe(0)
+        ->and(Transaction::where('status', 'assigned')->sum('quantity'))->toBe(5);
 });
 
 test('custodian can download a release slip for an approved request', function () {
@@ -770,7 +1019,7 @@ test('custodian can dispose selected ready-to-dispose records together', functio
         ->and($available->fresh()->status)->toBe('available');
 });
 
-test('transfer approval rows do not inflate custodian action counts', function () {
+test('legacy transfer requests move into the custodian workflow instead of recipient acceptance', function () {
     $item = makeAvailableItem($this, 'Shared Laptop', 1);
     $recipient = User::create([
         'role_id' => Role::where('role_name', 'End User')->firstOrFail()->role_id,
@@ -790,23 +1039,24 @@ test('transfer approval rows do not inflate custodian action counts', function (
         'requested_at' => now(),
     ]);
 
-    // Custodian cannot act: every awaiting-action total stays 0.
+    // Legacy requests still awaiting recipient acceptance are routed to the
+    // custodian queue so the new slip workflow can take over.
     $this->actingAs($this->custodian)->getJson(route('api.custodian.dashboard'))
         ->assertOk()
         ->assertJsonPath('metrics.pendingRequests', 0)
-        ->assertJsonPath('metrics.pendingTransfers', 0)
+        ->assertJsonPath('metrics.pendingTransfers', 1)
         ->assertJsonPath('metrics.pendingReturns', 0);
 
     $this->actingAs($this->custodian)->getJson(route('api.custodian.transactions'))
         ->assertOk()
         ->assertJsonPath('pendingRequestsCount', 0)
-        ->assertJsonPath('pendingTransfersCount', 0)
+        ->assertJsonPath('pendingTransfersCount', 1)
         ->assertJsonPath('pendingReturnsCount', 0);
 
-    // The recipient queue still shows the one awaiting row.
+    // Recipients no longer have an in-app accept/decline step.
     $this->actingAs($recipient)->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertJsonCount(1, 'incomingRequests');
+        ->assertJsonCount(0, 'incomingRequests');
 });
 
 test('per-queue counts match the tabs that render them', function () {

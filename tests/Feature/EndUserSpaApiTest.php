@@ -155,7 +155,7 @@ test('transferring an assignment through the api creates a transfer request', fu
         'target_user_id' => $this->colleague->id,
         'item_id' => $item->item_id,
         'quantity' => 1,
-        'status' => 'waiting for transfer approval',
+        'status' => 'waiting for custodian approval',
     ]);
 });
 

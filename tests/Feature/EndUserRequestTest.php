@@ -6,6 +6,7 @@ use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\StockMovement;
 use App\Models\Transaction;
+use App\Models\TransferReleaseSlip;
 use App\Models\User;
 use App\Services\InventoryOperationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -1844,7 +1845,7 @@ test('end user sees both assigned and requested items in their activity table', 
     $response->assertSee('Monitor');
 });
 
-test('requests page labels approved transfers as transfers for sender and recipient', function () {
+test('request APIs include approved transfers for sender and recipient', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -1879,14 +1880,14 @@ test('requests page labels approved transfers as transfers for sender and recipi
     ]);
 
     $this->actingAs($recipient)
-        ->get(route('endUser.requests'))
+        ->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertSee('Transfer Request');
+        ->assertJsonPath('incomingRequests.0.status', 'approved');
 
     $this->actingAs($this->endUser)
-        ->get(route('endUser.requests'))
+        ->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertSee('Transfer');
+        ->assertJsonPath('myRequests.0.status', 'approved');
 });
 
 test('my requests page shows every inventory and transaction in a fulfilled requisition', function () {
@@ -2146,7 +2147,7 @@ test('end user cannot transfer to a non-end-user recipient', function () {
     ]);
     $this->assertDatabaseMissing('requests', [
         'target_user_id' => $this->propertyCustodian->id,
-        'status' => 'waiting for transfer approval',
+        'status' => 'waiting for custodian approval',
     ]);
 });
 
@@ -2193,12 +2194,12 @@ test('declining a partial transfer restores the sender assignment quantity', fun
 
     $transferRequest = AssignmentRequest::where('user_id', $this->endUser->id)
         ->where('target_user_id', $recipient->id)
-        ->where('status', 'waiting for transfer approval')
+        ->where('status', 'waiting for custodian approval')
         ->firstOrFail();
 
-    $this->actingAs($recipient)->post(route('endUser.requests.respond', $transferRequest->id), [
-        'action' => 'decline',
-    ])->assertRedirect(route('endUser.requests'));
+    $this->actingAs($this->propertyCustodian)->post(route('propertyCustodian.transfers.decline', $transferRequest->id), [
+        'notes' => 'Declined by custodian',
+    ])->assertRedirect(route('propertyCustodian.transactions'));
 
     $this->assertDatabaseHas('requests', [
         'id' => $originalAssignment->id,
@@ -2236,9 +2237,9 @@ test('a recipient does not see a declined transfer in assigned items', function 
     ]);
 
     $this->actingAs($this->endUser)
-        ->get(route('endUser.my-assigned-items'))
+        ->getJson(route('api.end-user.assigned-items'))
         ->assertOk()
-        ->assertDontSee('Declined Transfer Laptop');
+        ->assertJsonMissing(['item_name' => 'Declined Transfer Laptop']);
 });
 
 test('custodian approval transfers inventory ownership to the recipient', function () {
@@ -2288,12 +2289,19 @@ test('custodian approval transfers inventory ownership to the recipient', functi
         'building' => 'Old Request Building',
         'room' => 'Old Request Room',
         'quantity' => 1,
-        'status' => 'waiting for custodian approval',
+        'status' => 'transfer draft',
         'requested_at' => now(),
+    ]);
+    TransferReleaseSlip::create([
+        'request_id' => $transferRequest->id,
+        'custodian_id' => $this->propertyCustodian->id,
+        'recipient_name' => 'Transfer Recipient',
+        'purpose' => 'Transfer / Relocation',
+        'status' => 'draft',
     ]);
 
     $this->actingAs($this->propertyCustodian)
-        ->post(route('propertyCustodian.transfers.approve', $transferRequest->id))
+        ->post(route('propertyCustodian.transfers.approve', $transferRequest->id), ['confirmed' => true])
         ->assertRedirect(route('propertyCustodian.transactions'));
 
     $this->assertDatabaseHas('inventory', [
@@ -2329,7 +2337,7 @@ test('custodian approval transfers inventory ownership to the recipient', functi
         ->and($movement->notes)->toContain("user #{$this->endUser->id}", "user #{$recipient->id}");
 
     $this->actingAs($this->propertyCustodian)
-        ->post(route('propertyCustodian.transfers.approve', $transferRequest->id))
+        ->post(route('propertyCustodian.transfers.approve', $transferRequest->id), ['confirmed' => true])
         ->assertRedirect();
     expect(StockMovement::where('inventory_id', $inventory->item_id)->count())->toBe(1);
 });
@@ -2387,14 +2395,19 @@ test('partial transfer keeps assigned totals aligned on inventory and transactio
         ->assertRedirect(route('endUser.my-assigned-items'));
     $transferRequest = AssignmentRequest::where('user_id', $this->endUser->id)
         ->where('target_user_id', $recipient->id)
-        ->where('status', 'waiting for transfer approval')
+        ->where('status', 'waiting for custodian approval')
         ->firstOrFail();
 
-    $this->actingAs($recipient)
-        ->post(route('endUser.requests.respond', $transferRequest->id), ['action' => 'accept'])
-        ->assertRedirect(route('endUser.requests'));
+    TransferReleaseSlip::create([
+        'request_id' => $transferRequest->id,
+        'custodian_id' => $this->propertyCustodian->id,
+        'recipient_name' => 'Transfer Recipient',
+        'purpose' => 'Transfer / Relocation',
+        'status' => 'draft',
+    ]);
+    $transferRequest->update(['status' => 'transfer draft']);
     $this->actingAs($this->propertyCustodian)
-        ->post(route('propertyCustodian.transfers.approve', $transferRequest->id))
+        ->post(route('propertyCustodian.transfers.approve', $transferRequest->id), ['confirmed' => true])
         ->assertRedirect(route('propertyCustodian.transactions'));
 
     expect($originTransaction->fresh()->quantity)->toBe(2)
@@ -2402,19 +2415,19 @@ test('partial transfer keeps assigned totals aligned on inventory and transactio
         ->and($inventory->fresh()->assigned_to_user_id)->toBe($this->endUser->id);
 
     $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.inventory'))
-        ->assertViewHas('inventoryMetrics', fn ($metrics) => $metrics['total'] === 4
-            && $metrics['assigned'] === 4)
-        ->assertSee('End User (2)', false)
-        ->assertSee('Transfer Recipient (2)', false);
+        ->getJson(route('api.custodian.inventory'))
+        ->assertOk()
+        ->assertJsonPath('inventoryMetrics.total', 4)
+        ->assertJsonPath('inventoryMetrics.assigned', 4);
 
-    $this->actingAs($this->propertyCustodian)
-        ->get(route('propertyCustodian.transactions'))
-        ->assertViewHas('totalAssignedCount', 4)
-        ->assertViewHas('transactions', fn ($transactions) => $transactions->where('status', 'assigned')->sum('quantity') === 4);
+    $transactions = $this->actingAs($this->propertyCustodian)
+        ->getJson(route('api.custodian.transactions'))
+        ->assertOk()
+        ->json('transactions');
+    expect(collect($transactions)->where('status', 'assigned')->sum('quantity'))->toBe(4);
 });
 
-test('transfer acceptance is protected against race conditions with lockForUpdate', function () {
+test('recipient cannot accept a transfer instead of the signed release slip workflow', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -2453,28 +2466,23 @@ test('transfer acceptance is protected against race conditions with lockForUpdat
         'user_id' => $this->endUser->id,
         'target_user_id' => $recipient->id,
         'quantity' => 1,
-        'status' => 'waiting for transfer approval',
+        'status' => 'waiting for custodian approval',
         'requested_at' => now(),
     ]);
 
-    // Simulate concurrent acceptance: both try to accept same transfer request
-    // First acceptance should succeed as the recipient
+    // The recipient no longer accepts transfers in the app; the physical
+    // acknowledgement is recorded on the Property Release Slip.
     $response1 = $this->actingAs($recipient)->post(
         route('endUser.requests.respond', $transferRequest2->id),
         ['action' => 'accept']
     );
     $response1->assertRedirect(route('endUser.requests'));
-    $response1->assertSessionHas('success');
-
-    // Verify transfer was accepted
+    $response1->assertSessionHas('error', 'This request is no longer awaiting a response.');
     $this->assertDatabaseHas('requests', [
         'id' => $transferRequest2->id,
         'status' => 'waiting for custodian approval',
     ]);
-
-    // Second concurrent acceptance should fail gracefully (status already changed)
-    $transferRequest2->refresh();
-    expect($transferRequest2->status)->toBe('waiting for custodian approval');
+    expect($transferRequest2->fresh()->status)->toBe('waiting for custodian approval');
 });
 
 test('end user can request return when an approved assignment exists even if inventory ownership is stale', function () {

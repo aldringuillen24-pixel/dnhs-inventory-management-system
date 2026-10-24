@@ -70,6 +70,18 @@
             page-break-inside: avoid;
         }
 
+        .card--breakable {
+            page-break-inside: auto;
+        }
+
+        .card--breakable .card-title {
+            page-break-after: avoid;
+        }
+
+        .card--breakable .grid tr {
+            page-break-inside: avoid;
+        }
+
         .card-title {
             padding: 6pt 8pt;
             border-bottom: 1px solid #000;
@@ -220,7 +232,7 @@
         </tr>
     </table>
 
-    <div class="card">
+    <div class="card card--breakable">
         <div class="card-title">Stock Movement Trend <span class="sub">{{ $periodLabel }}</span></div>
         <table class="grid">
             <thead>

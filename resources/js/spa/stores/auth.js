@@ -49,7 +49,11 @@ export const useAuthStore = defineStore('auth', () => {
 
         try {
             const { data } = await api.get('/me');
-            setPayload(data);
+            if (data?.authenticated === false) {
+                clear();
+            } else {
+                setPayload(data);
+            }
         } catch (error) {
             if (error?.response?.status === 401) {
                 clear();

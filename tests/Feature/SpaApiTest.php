@@ -35,14 +35,20 @@ beforeEach(function () {
     $this->endUser = $makeUser('End User', 'spa-end-user');
 });
 
-test('guests receive a JSON 401 from the SPA api', function () {
-    $this->getJson(route('api.me'))->assertUnauthorized();
+test('api me returns a guest state without an unauthorized response', function () {
+    $this->getJson(route('api.me'))
+        ->assertOk()
+        ->assertJsonPath('authenticated', false)
+        ->assertJsonPath('user', null)
+        ->assertJsonPath('role', null)
+        ->assertJsonPath('onboarding_required', false);
 });
 
 test('api me returns the user, role, and onboarding flag without secrets', function () {
     $response = $this->actingAs($this->custodian)->getJson(route('api.me'))->assertOk();
 
-    $response->assertJsonPath('role', 'Property Custodian')
+    $response->assertJsonPath('authenticated', true)
+        ->assertJsonPath('role', 'Property Custodian')
         ->assertJsonPath('onboarding_required', false);
 
     expect($response->json('user'))->not->toHaveKey('password')

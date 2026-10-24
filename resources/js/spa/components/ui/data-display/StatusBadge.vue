@@ -41,6 +41,8 @@ const classes = computed(() => {
             return 'bg-amber-50 text-amber-700 border border-amber-200/60 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20';
         case 'under_inspection':
             return 'bg-purple-50 text-purple-700 border border-purple-200/60 dark:bg-purple-500/10 dark:text-purple-300 dark:border-purple-500/20';
+        case 'transfer draft':
+            return 'bg-violet-50 text-violet-700 border border-violet-200/60 dark:bg-violet-500/10 dark:text-violet-300 dark:border-violet-500/20';
         case 'ready_to_dispose':
             return 'bg-orange-50 text-orange-700 border border-orange-200/60 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/20';
         case 'waiting for approval':
@@ -81,6 +83,8 @@ const dotClass = computed(() => {
             return 'bg-amber-500';
         case 'under_inspection':
             return 'bg-purple-500';
+        case 'transfer draft':
+            return 'bg-violet-500';
         case 'ready_to_dispose':
             return 'bg-orange-500';
         case 'waiting for approval':

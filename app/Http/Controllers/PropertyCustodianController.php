@@ -17,6 +17,7 @@ use App\Models\MaintenanceRecord;
 use App\Models\MaintenanceRecordEvent;
 use App\Models\MaintenanceRecordEvidence;
 use App\Models\StockMovement;
+use App\Models\TransferReleaseSlip;
 use App\Services\Forecasting\ForecastAiRecommendationService;
 use App\Services\ForecastDecisionSupportService;
 use App\Services\Forecasting\ForecastExplanationService;
@@ -130,7 +131,7 @@ class PropertyCustodianController extends Controller
             ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'))
             ->count();
         $pendingTransferCount = AssignmentRequest::query()
-            ->where('status', 'waiting for custodian approval')
+            ->whereIn('status', ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'])
             ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
             ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'End User'))
             ->count();
@@ -149,9 +150,8 @@ class PropertyCustodianController extends Controller
                 'lowStock' => $lowStockCount,
                 // Custodian-actionable queues only, mirroring the Transactions
                 // tabs: incoming requests plus custodian assignments awaiting
-                // acceptance. Peer transfers still awaiting the recipient
-                // ('waiting for transfer approval') are excluded — the
-                // custodian cannot act on those.
+                // acceptance. Legacy transfers still waiting for recipient
+                // action are routed to the custodian for the release-slip flow.
                 'pendingRequests' => AssignmentRequest::query()
                     ->whereIn('status', ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT])
                     ->where(function ($query) use ($request): void {
@@ -168,7 +168,7 @@ class PropertyCustodianController extends Controller
                     })
                     ->count(),
                 'pendingTransfers' => AssignmentRequest::query()
-                    ->where('status', 'waiting for custodian approval')
+                    ->whereIn('status', ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'])
                     ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
                     ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'End User'))
                     ->count(),
@@ -1336,7 +1336,17 @@ class PropertyCustodianController extends Controller
         if ($workspace === 'under_maintenance') {
             $workspace = 'under_repair';
         }
-        $workspaces = ['all', 'available', 'assigned', 'under_repair', 'ready_to_dispose', 'disposed'];
+        $workspaces = [
+            'all',
+            'available',
+            'assigned',
+            'under_repair',
+            'under_inspection',
+            'ready_to_dispose',
+            'disposed',
+            'incident_reports',
+            'investigations',
+        ];
         if (! in_array($workspace, $workspaces, true)) {
             $workspace = 'all';
         }
@@ -1385,6 +1395,15 @@ class PropertyCustodianController extends Controller
         if ($icsNumbers !== []) {
             $query->whereIn('ics_no', $icsNumbers);
         }
+        if ($workspace === 'incident_reports' || $workspace === 'investigations') {
+            $incidentStatuses = $workspace === 'investigations'
+                ? ['under_investigation']
+                : ['reported', 'under_review', 'awaiting_reporter', 'processing_repair', 'processing_disposal'];
+            $query->whereIn('item_id', MaintenanceRecord::query()
+                ->select('inventory_id')
+                ->whereIn('diagnosis', MaintenanceRecord::INCIDENT_TYPES)
+                ->whereIn('incident_status', $incidentStatuses));
+        }
 
         $inventoryItems = $query->orderBy('item_name')->get();
         $assignmentsByItem = Transaction::query()
@@ -1404,6 +1423,9 @@ class PropertyCustodianController extends Controller
                 return $item->status === 'assigned'
                     || ($item->status === 'under_inspection' && $hasAssignments)
                     || ($item->status === 'available' && $hasAssignments);
+            }
+            if (in_array($workspace, ['incident_reports', 'investigations'], true)) {
+                return true;
             }
 
             return $item->status === $workspace;
@@ -1767,11 +1789,11 @@ class PropertyCustodianController extends Controller
             'accountable_officer_name' => ['nullable', 'string', 'max:255'],
             'accountable_officer_designation' => ['nullable', 'string', 'max:255'],
             'accountable_officer_station' => ['nullable', 'string', 'max:255'],
-            'approving_official_name' => ['required', 'string', 'max:255'],
+            'approving_official_name' => ['nullable', 'string', 'max:255'],
             'approving_official_designation' => ['nullable', 'string', 'max:255'],
-            'inspection_officer_name' => ['required', 'string', 'max:255'],
+            'inspection_officer_name' => ['nullable', 'string', 'max:255'],
             'inspection_designation' => ['nullable', 'string', 'max:255'],
-            'witness_name' => ['required', 'string', 'max:255'],
+            'witness_name' => ['nullable', 'string', 'max:255'],
             'witness_disposition_day' => ['nullable', 'string', 'max:20'],
             'witness_disposition_date' => ['nullable', 'string', 'max:100'],
             'selected_ids' => ['required', 'array', 'min:1'],
@@ -2086,7 +2108,7 @@ class PropertyCustodianController extends Controller
             ->orderBy('requested_at', 'desc')
             ->get();
 
-        // Transfer requests awaiting custodian approval (peer-to-peer, step 3 of 3)
+        // Transfers awaiting release-slip preparation; drafts move to their own queue.
         $pendingTransfers = AssignmentRequest::query()
             ->with([
                 'user:id,first_name,last_name,username',
@@ -2094,7 +2116,20 @@ class PropertyCustodianController extends Controller
                 'item:item_id,inventory_item_no,item_name,quantity,category_id,status,unit_cost',
                 'item.category:category_id,category_name',
             ])
-            ->where('status', 'waiting for custodian approval')
+            ->whereIn('status', ['waiting for transfer approval', 'waiting for custodian approval'])
+            ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
+            ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'End User'))
+            ->orderBy('requested_at', 'desc')
+            ->get();
+
+        $transferDrafts = AssignmentRequest::query()
+            ->with([
+                'user:id,first_name,last_name,username',
+                'targetUser:id,first_name,last_name,username',
+                'item:item_id,inventory_item_no,item_name,quantity,category_id,status,unit_cost',
+                'releaseSlip',
+            ])
+            ->where('status', 'transfer draft')
             ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
             ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'End User'))
             ->orderBy('requested_at', 'desc')
@@ -2116,8 +2151,7 @@ class PropertyCustodianController extends Controller
         $totalAssignedCount   = Transaction::where('status', 'assigned')->sum('quantity');
         // Per-queue counts matching the tabs that render them: Requests lists
         // incoming requests plus custodian assignments awaiting acceptance;
-        // Transfers and Returns list their own custodian-approval queues.
-        // Peer transfers still awaiting the recipient never inflate these.
+        // Transfers and Returns list their own review queues.
         $pendingRequestsCount = $incomingRequests->count() + $assignmentRequests->count();
         $totalTransactionsCount = $transactions->count();
         $today = now()->toDateString();
@@ -2158,6 +2192,7 @@ class PropertyCustodianController extends Controller
             'assignmentRequests'     => $assignmentRequests,
             'draftRequests'          => $draftRequests,
             'pendingTransfers'       => $pendingTransfers,
+            'transferDrafts'         => $transferDrafts,
             'pendingReturns'         => $pendingReturns,
             'transactions'           => $transactions,
             'auditLedger'            => $auditLedger,
@@ -2813,17 +2848,202 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Request has been declined.');
     }
 
+    public function storeTransferReleaseSlip(Request $request, int $id)
+    {
+        $validated = $request->validate($this->transferReleaseSlipRules());
+        $slipFields = $validated['slip_fields'];
+
+        $transfer = DB::transaction(function () use ($request, $id, $slipFields): AssignmentRequest {
+            $transfer = AssignmentRequest::query()
+                ->with(['user.role', 'targetUser.role', 'item'])
+                ->whereKey($id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            abort_unless(
+                in_array($transfer->status, ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'], true)
+                    && strtolower((string) $transfer->user?->role?->role_name) === 'end user'
+                    && strtolower((string) $transfer->targetUser?->role?->role_name) === 'end user'
+                    && $transfer->item,
+                409,
+                'This transfer is no longer available for drafting.',
+            );
+
+            TransferReleaseSlip::query()->updateOrCreate(
+                ['request_id' => $transfer->id],
+                [
+                    'custodian_id' => $request->user()->id,
+                    'recipient_name' => $slipFields['recipient_name'],
+                    'department_unit' => $slipFields['department_unit'] ?? null,
+                    'designation' => $slipFields['designation'] ?? null,
+                    'expected_return_date' => $slipFields['expected_return_date'] ?? null,
+                    'actual_return_date' => $slipFields['actual_return_date'] ?? null,
+                    'purpose' => $slipFields['purpose'],
+                    'condition_upon_release' => $slipFields['condition_upon_release'] ?? null,
+                    'released_by_name' => $slipFields['released_by_name'] ?? null,
+                    'released_by_date' => $slipFields['released_by_date'] ?? null,
+                    'received_by_name' => $slipFields['received_by_name'] ?? null,
+                    'received_by_date' => $slipFields['received_by_date'] ?? null,
+                    'approved_by_name' => $slipFields['approved_by_name'] ?? null,
+                    'approved_by_date' => $slipFields['approved_by_date'] ?? null,
+                    'status' => 'draft',
+                    'completed_at' => null,
+                ],
+            );
+
+            $transfer->update(['status' => 'transfer draft']);
+
+            return $transfer;
+        });
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Release slip saved to Drafts. Inventory has not been allocated.',
+                'transfer_id' => $transfer->id,
+            ]);
+        }
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Release slip saved to Drafts. Inventory has not been allocated.');
+    }
+
+    public function transferReleaseSlipPreview(Request $request, int $id)
+    {
+        $validated = $request->validate($this->transferReleaseSlipRules());
+        $transfer = $this->transferRequestForSlip($id);
+        $data = $this->transferReleaseSlipData(
+            $transfer,
+            $request->user(),
+            $validated['slip_fields'],
+        );
+
+        return Pdf::loadView('pdfs.property-release-slip', $data)->stream($data['docNo'].'.pdf');
+    }
+
+    public function transferReleaseSlipPdf(int $id, Request $request)
+    {
+        $transfer = $this->transferRequestForSlip($id);
+        $slip = $transfer->releaseSlip;
+        abort_unless($slip, 404, 'No release slip has been saved for this transfer.');
+
+        $data = $this->transferReleaseSlipData($transfer, $request->user(), $slip->toArray());
+
+        $pdf = Pdf::loadView('pdfs.property-release-slip', $data);
+
+        return $request->boolean('preview')
+            ? $pdf->stream($data['docNo'].'.pdf')
+            : $pdf->download($data['docNo'].'.pdf');
+    }
+
+    private function transferReleaseSlipRules(): array
+    {
+        return [
+            'slip_fields' => ['required', 'array'],
+            'slip_fields.recipient_name' => ['required', 'string', 'max:150'],
+            'slip_fields.department_unit' => ['nullable', 'string', 'max:150'],
+            'slip_fields.designation' => ['nullable', 'string', 'max:150'],
+            'slip_fields.expected_return_date' => ['nullable', 'date'],
+            'slip_fields.actual_return_date' => ['nullable', 'date'],
+            'slip_fields.purpose' => ['required', 'string', Rule::in([
+                'Official Use (Off-site)',
+                'Transfer / Relocation',
+                'Repair / Maintenance',
+                'Disposal',
+            ])],
+            'slip_fields.condition_upon_release' => ['nullable', 'string', 'max:1000'],
+            'slip_fields.released_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.released_by_date' => ['nullable', 'date'],
+            'slip_fields.received_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.received_by_date' => ['nullable', 'date'],
+            'slip_fields.approved_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.approved_by_date' => ['nullable', 'date'],
+        ];
+    }
+
+    private function transferRequestForSlip(int $id): AssignmentRequest
+    {
+        $transfer = $this->peerTransferRequest($id);
+
+        abort_unless(
+            in_array($transfer->status, ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft', 'approved'], true)
+                && $transfer->item,
+            409,
+            'This transfer has no printable release slip.',
+        );
+
+        return $transfer;
+    }
+
+    private function peerTransferRequest(int $id): AssignmentRequest
+    {
+        $transfer = AssignmentRequest::query()
+            ->with(['user.role', 'targetUser.role', 'item', 'releaseSlip'])
+            ->findOrFail($id);
+
+        abort_unless(
+            strtolower((string) $transfer->user?->role?->role_name) === 'end user'
+                && strtolower((string) $transfer->targetUser?->role?->role_name) === 'end user'
+                && $transfer->item,
+            404,
+            'Peer transfer request not found.',
+        );
+
+        return $transfer;
+    }
+
+    private function transferReleaseSlipData(AssignmentRequest $transfer, User $custodian, array $fields): array
+    {
+        $item = $transfer->item;
+        $senderName = trim((string) $transfer->user?->first_name.' '.(string) $transfer->user?->last_name)
+            ?: (string) ($transfer->user?->username ?? 'Unknown Sender');
+        $recipientName = $fields['recipient_name']
+            ?? trim((string) $transfer->targetUser?->first_name.' '.(string) $transfer->targetUser?->last_name)
+            ?: (string) ($transfer->targetUser?->username ?? 'Unknown Recipient');
+        $custodianName = trim($custodian->first_name.' '.$custodian->last_name) ?: $custodian->username;
+        $unitCost = (float) ($item->unit_cost ?? 0);
+
+        return [
+            'docNo' => sprintf('PRS-%s-%06d', now()->format('Y'), $transfer->id),
+            'documentDate' => $transfer->requested_at?->format('Y-m-d') ?? now()->toDateString(),
+            'recipientName' => $recipientName,
+            'transferFromName' => $senderName,
+            'custodianName' => $custodianName,
+            'lines' => [[
+                'item_id' => $item->item_id,
+                'item_no' => $item->inventory_item_no ?? (string) $item->item_id,
+                'description' => trim($item->item_name.($item->serial_number ? ' (SN: '.$item->serial_number.')' : '')),
+                'qty' => (int) $transfer->quantity,
+                'unit_cost' => $unitCost,
+                'amount' => $unitCost * (int) $transfer->quantity,
+                'condition' => $fields['condition_upon_release'] ?? null,
+            ]],
+            'total' => $unitCost * (int) $transfer->quantity,
+            'expectedReturnDate' => $fields['expected_return_date'] ?? null,
+            'actualReturnDate' => $fields['actual_return_date'] ?? null,
+            'slipFields' => $fields,
+        ];
+    }
+
     /**
-     * Step 3 of 3: Custodian approves a peer-to-peer transfer request.
-     * Executes the actual transaction manipulation and marks the original assignment as transferred.
+     * Finalizes a transfer only after a release-slip draft has been saved and
+     * the custodian confirms that the physical handoff and signatures are complete.
      */
+    public function allocateTransfer(Request $request, int $id)
+    {
+        return $this->approveTransfer($request, $id);
+    }
+
     public function approveTransfer(Request $request, $id)
     {
-        // $id = the transfer AssignmentRequest (status: 'waiting for custodian approval')
-        $transferRequest = AssignmentRequest::findOrFail($id);
+        $request->validate(['confirmed' => ['required', 'accepted']]);
+        $transferRequest = $this->peerTransferRequest((int) $id);
 
-        if ($transferRequest->status !== 'waiting for custodian approval') {
-            return redirect()->back()->with('error', 'This transfer request has already been processed.');
+        if ($transferRequest->status !== 'transfer draft') {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Save a release slip draft before allocating this transfer.'], 409);
+            }
+
+            return redirect()->back()->with('error', 'Save a release slip draft before allocating this transfer.');
         }
 
         $approved = $this->inventoryOperations->approveTransfer(
@@ -2832,10 +3052,21 @@ class PropertyCustodianController extends Controller
         );
 
         if (! $approved) {
-            return redirect()->back()->with('error', 'This transfer request has already been processed.');
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'This transfer is no longer available for allocation.'], 409);
+            }
+
+            return redirect()->back()->with('error', 'This transfer is no longer available for allocation.');
         }
 
-        return redirect()->route('propertyCustodian.transactions')->with('success', 'Transfer approved. Item has been transferred to the recipient.');
+        if ($request->expectsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Transfer allocated and release slip finalized.',
+            ]);
+        }
+
+        return redirect()->route('propertyCustodian.transactions')->with('success', 'Transfer allocated and release slip finalized.');
     }
 
     /**
@@ -2848,14 +3079,26 @@ class PropertyCustodianController extends Controller
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $transferRequest = AssignmentRequest::findOrFail($id);
+        $transferRequest = $this->peerTransferRequest((int) $id);
 
-        if ($transferRequest->status !== 'waiting for custodian approval') {
+        if (! in_array($transferRequest->status, ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'], true)) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'This transfer request has already been processed.'], 409);
+            }
+
             return redirect()->back()->with('error', 'This transfer request has already been processed.');
         }
 
         if (! $this->inventoryOperations->declineTransferRequest($transferRequest->id, $validated['notes'] ?? null)) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'This transfer request has already been processed.'], 409);
+            }
+
             return redirect()->back()->with('error', 'This transfer request has already been processed.');
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['status' => 'success', 'message' => 'Transfer declined and sender assignment restored.']);
         }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Transfer request declined. Sender\'s item restored.');
@@ -3807,30 +4050,17 @@ class PropertyCustodianController extends Controller
     public function inventoryLogs(Request $request)
     {
         $validated = $request->validate([
-            'search' => ['nullable', 'string', 'max:255'],
-            'category_id' => ['nullable', 'integer', 'exists:categories,category_id'],
-            'workspace' => ['nullable', 'string', 'max:32'],
             'page' => ['nullable', 'integer', 'min:1'],
         ]);
 
         $query = InventoryItemLog::query()->with('user:id,first_name,last_name');
-
-        if (! empty($validated['search'])) {
-            $search = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $validated['search']).'%';
-            $query->where(function ($inner) use ($search): void {
-                $inner->where('item_name', 'like', $search)
-                    ->orWhere('inventory_item_no', 'like', $search);
-            });
-        }
-
-        if (! empty($validated['category_id'])) {
-            $query->where('category_id', (int) $validated['category_id']);
-        }
-
-        $workspace = $validated['workspace'] ?? 'all';
-        if ($workspace !== 'all') {
-            $query->where('status', $workspace);
-        }
+        $query->whereIn('action', [
+            InventoryItemLog::ACTION_UPDATED,
+            InventoryItemLog::ACTION_DELETED,
+        ])->where(function ($logs): void {
+            $logs->whereNull('reason')
+                ->orWhere('reason', 'not like', 'Isolated incident #%');
+        });
 
         $perPage = 20;
         $page = max(1, (int) ($validated['page'] ?? 1));

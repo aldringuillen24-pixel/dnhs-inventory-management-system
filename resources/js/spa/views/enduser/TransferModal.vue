@@ -1,5 +1,5 @@
 <template>
-  <Modal :open="open" title="Transfer Item" subtitle="Send units to another end user." max-width="max-w-md" @close="$emit('close')">
+  <Modal :open="open" title="Transfer Item" subtitle="Send a request to the Property Custodian. The recipient acknowledges the handoff by signing the release slip." max-width="max-w-md" @close="$emit('close')">
     <form v-if="row" id="transfer-modal-form" class="flex flex-col gap-2.5" @submit.prevent="submit">
       <p class="rounded-md bg-gray-50 p-2.5 text-xs dark:bg-white/5">
         <span class="font-medium">{{ row.item_name }}</span>

@@ -133,6 +133,11 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/drafts/{id}/allocate', [PropertyCustodianController::class, 'allocateDraft'])->name('drafts.allocate');
 
+    Route::post('/transfers/{id}/draft', [PropertyCustodianController::class, 'storeTransferReleaseSlip'])->name('transfers.draft');
+    Route::post('/transfers/{id}/release-slip-preview', [PropertyCustodianController::class, 'transferReleaseSlipPreview'])->name('transfers.release-slip-preview');
+    Route::get('/transfers/{id}/release-slip', [PropertyCustodianController::class, 'transferReleaseSlipPdf'])->name('transfers.release-slip');
+    Route::post('/transfers/{id}/allocate', [PropertyCustodianController::class, 'allocateTransfer'])->name('transfers.allocate');
+
     Route::post('/transfers/{id}/approve', [PropertyCustodianController::class, 'approveTransfer'])->name('transfers.approve');
 
     Route::post('/transfers/{id}/decline', [PropertyCustodianController::class, 'declineTransfer'])->name('transfers.decline');
@@ -165,7 +170,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::get('/inventory/qr/lookup', [PropertyCustodianController::class, 'qrLookup'])->name('inventory.qr.lookup');
 
-    Route::get('/reports', fn () => redirect('/spa/reports'))->name('reports');
+    Route::get('/reports', fn () => redirect('/spa/reports/forecast'))->name('reports');
     // Paired with the API forecast routes further down. Same controller
     // actions, different name prefix (`propertyCustodian.` here, `api.custodian.`
     // there) and different prefix in the URL, so these are two registrations of
@@ -213,7 +218,7 @@ Route::middleware(['auth', 'role:School Head'])->prefix('school-head')->name('sc
     Route::get('/onboarding', fn () => redirect('/spa/onboarding'))->name('onboarding');
     Route::get('/dashboard', fn () => redirect('/spa/school-head/dashboard'))->name('dashboard');
     Route::get('/inventory/overview', fn () => redirect('/spa/school-head/inventory'))->name('inventory.overview');
-    Route::get('/reports', fn () => redirect('/spa/school-head/reports'))->name('reports');
+    Route::get('/reports', fn () => redirect('/spa/school-head/dashboard'))->name('reports');
     Route::get('/audit-logs', fn () => redirect('/spa/school-head/audit-logs'))->name('audit-logs');
     Route::get('/profile', fn () => redirect('/spa/profile'))->name('profile');
     Route::patch('/profile', [SchoolHeadController::class, 'updateProfile'])->name('profile.update');
@@ -259,19 +264,31 @@ Route::middleware(['auth', 'role:Property Custodian'])
 // server-side `auth` + `role` middleware remain the access control
 // authority; `api.redirect` converts Blade redirects into JSON so the
 // existing web controllers serve both clients without duplication.
+Route::get('/api/me', function (Request $request) {
+    $user = $request->user();
+
+    if (! $user) {
+        return response()->json([
+            'authenticated' => false,
+            'user' => null,
+            'role' => null,
+            'onboarding_required' => false,
+        ]);
+    }
+
+    $user->load('role');
+
+    return response()->json([
+        'authenticated' => true,
+        'user' => $user,
+        'role' => $user->role?->role_name,
+        'onboarding_required' => $user->temporary_password !== null,
+    ]);
+})->name('api.me');
+
 Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group(function () {
     Route::get('/incident-evidence/{evidence}', [EndUserController::class, 'downloadIncidentEvidence'])
         ->name('incident-evidence.download');
-
-    Route::get('/me', function (Request $request) {
-        $user = $request->user()->load('role');
-
-        return response()->json([
-            'user' => $user,
-            'role' => $user->role?->role_name,
-            'onboarding_required' => $user->temporary_password !== null,
-        ]);
-    })->name('me');
 
     Route::middleware('role:Property Custodian')->prefix('custodian')->name('custodian.')->group(function () {
         Route::get('/dashboard', [PropertyCustodianController::class, 'dashboard'])->name('dashboard');
@@ -325,6 +342,10 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/assignments/draft', [PropertyCustodianController::class, 'storeDraft'])->name('assignments.draft');
         Route::post('/assignments/draft/preview', [PropertyCustodianController::class, 'draftSlipPreview'])->name('assignments.draft.preview');
         Route::post('/drafts/{id}/allocate', [PropertyCustodianController::class, 'allocateDraft'])->name('drafts.allocate');
+        Route::post('/transfers/{id}/draft', [PropertyCustodianController::class, 'storeTransferReleaseSlip'])->name('transfers.draft');
+        Route::post('/transfers/{id}/release-slip-preview', [PropertyCustodianController::class, 'transferReleaseSlipPreview'])->name('transfers.release-slip-preview');
+        Route::get('/transfers/{id}/release-slip', [PropertyCustodianController::class, 'transferReleaseSlipPdf'])->name('transfers.release-slip');
+        Route::post('/transfers/{id}/allocate', [PropertyCustodianController::class, 'allocateTransfer'])->name('transfers.allocate');
         Route::post('/transfers/{id}/approve', [PropertyCustodianController::class, 'approveTransfer'])->name('transfers.approve');
         Route::post('/transfers/{id}/decline', [PropertyCustodianController::class, 'declineTransfer'])->name('transfers.decline');
         Route::post('/returns/{id}/approve', [PropertyCustodianController::class, 'approveReturn'])->name('returns.approve');
@@ -373,8 +394,12 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
     Route::middleware('role:School Head')->prefix('school-head')->name('school-head.')->group(function () {
         Route::get('/dashboard', [SchoolHeadController::class, 'index'])->name('dashboard');
         Route::get('/inventory/overview', [SchoolHeadController::class, 'inventoryOverview'])->name('inventory.overview');
-        Route::get('/reports', [SchoolHeadController::class, 'reports'])->name('reports');
+        Route::get('/inventory/ics-numbers', [PropertyCustodianController::class, 'inventoryIcsNumbers'])->name('inventory.ics-numbers');
+        Route::get('/inventory/export-pdf', [PropertyCustodianController::class, 'exportInventoryPdf'])->name('inventory.export-pdf');
+        Route::get('/reports', fn () => redirect('/spa/school-head/dashboard'))->name('reports');
         Route::get('/audit-logs', [SchoolHeadController::class, 'auditLogs'])->name('audit-logs');
+        Route::get('/audit-logs/export-preview', [SchoolHeadController::class, 'previewAuditLogsExport'])->name('audit-logs.export-preview');
+        Route::get('/audit-logs/export-pdf', [SchoolHeadController::class, 'exportAuditLogsPdf'])->name('audit-logs.export-pdf');
         Route::patch('/profile', [SchoolHeadController::class, 'updateProfile'])->name('profile.update');
     });
 

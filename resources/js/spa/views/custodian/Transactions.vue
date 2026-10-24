@@ -301,7 +301,7 @@
                 </span>
                 <h3 class="text-xs font-bold text-gray-800 dark:text-white min-[480px]:text-sm">Draft Slips Awaiting Allocation</h3>
               </div>
-              <span class="text-[11px] text-gray-400 dark:text-gray-500">Hold-only — no stock deducted until Allocate.</span>
+              <span class="text-[11px] text-gray-400 dark:text-gray-500">Drafts do not change ownership; allocation is the final transfer action.</span>
             </div>
 
             <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
@@ -316,34 +316,48 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-white/5">
-                  <tr v-for="draft in filteredDrafts" :key="draft.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                  <tr v-for="draft in filteredDrafts" :key="`${draft.draft_kind}:${draft.id}`" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                     <td class="px-4 py-3.5 font-semibold text-gray-900 dark:text-white">
-                      {{ personName(draft.target_user ?? draft.targetUser) }}
+                      <template v-if="draft.draft_kind === 'transfer'">
+                        {{ personName(draft.user) }} <span class="text-gray-400">→</span> {{ personName(draft.target_user ?? draft.targetUser) }}
+                      </template>
+                      <template v-else>{{ personName(draft.target_user ?? draft.targetUser) }}</template>
                     </td>
                     <td class="px-4 py-3.5">
-                      <div class="font-medium text-gray-800 dark:text-gray-200">{{ draft.requested_item_name ?? 'Unknown item' }}</div>
-                      <span v-if="draftHoldNos(draft)" class="text-xs text-gray-400 font-mono">{{ draftHoldNos(draft) }}</span>
+                      <div class="font-medium text-gray-800 dark:text-gray-200">{{ draft.requested_item_name ?? draft.item?.item_name ?? 'Unknown item' }}</div>
+                      <span v-if="draft.draft_kind === 'transfer' && draft.item?.inventory_item_no" class="text-xs text-gray-400 font-mono">{{ draft.item.inventory_item_no }}</span>
+                      <span v-else-if="draftHoldNos(draft)" class="text-xs text-gray-400 font-mono">{{ draftHoldNos(draft) }}</span>
                     </td>
                     <td class="px-4 py-3.5 text-center font-bold text-gray-900 dark:text-white">
                       {{ draft.quantity }}
                     </td>
                     <td class="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400">
-                      {{ formatDate(draft.requested_at) }}
+                      {{ formatDate(draft.draft_kind === 'transfer' ? draft.release_slip?.created_at : draft.requested_at) }}
                     </td>
                     <td class="px-4 py-3.5">
                       <div class="flex flex-row items-center justify-center gap-1.5 whitespace-nowrap">
                         <a
-                          :href="draftSlipHref(draft)"
+                          :href="draft.draft_kind === 'transfer' ? transferSlipHref(draft) : draftSlipHref(draft)"
                           target="_blank"
                           rel="noopener"
                           class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                         >
-                          Reprint
+                          {{ draft.draft_kind === 'transfer' ? 'Print / Download' : 'Reprint' }}
                         </a>
+                        <button
+                          v-if="draft.draft_kind === 'transfer'"
+                          type="button"
+                          class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                          @click="transferSlipTarget = draft"
+                        >
+                          Edit Slip
+                        </button>
                         <button
                           type="button"
                           class="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
-                          @click="confirmAction = { kind: 'allocate-draft', id: draft.id, label: `Allocate ${draft.quantity} to ${personName(draft.target_user ?? draft.targetUser)}? Signed slip collected.` }"
+                          @click="draft.draft_kind === 'transfer'
+                            ? confirmAction = { kind: 'allocate-transfer', id: draft.id, label: `Confirm that the signed release slip is collected and the physical handoff is complete. This will transfer ${draft.quantity} ${draft.item?.item_name ?? 'item'} from ${personName(draft.user)} to ${personName(draft.target_user ?? draft.targetUser)}.` }
+                            : confirmAction = { kind: 'allocate-draft', id: draft.id, label: `Allocate ${draft.quantity} to ${personName(draft.target_user ?? draft.targetUser)}? Signed slip collected.` }"
                         >
                           Allocate
                         </button>
@@ -351,9 +365,11 @@
                           type="button"
                           class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                           :disabled="working || confirmAction !== null || prompt !== null"
-                          @click="confirmAction = { kind: 'cancel-draft', id: draft.id, label: `Delete draft and release ${draft.quantity} held unit(s)?` }"
+                          @click="draft.draft_kind === 'transfer'
+                            ? openPrompt('decline-transfer', draft.id)
+                            : confirmAction = { kind: 'cancel-draft', id: draft.id, label: `Delete draft and release ${draft.quantity} held unit(s)?` }"
                         >
-                          Delete
+                          {{ draft.draft_kind === 'transfer' ? 'Decline' : 'Delete' }}
                         </button>
                       </div>
                     </td>
@@ -361,7 +377,7 @@
 
                   <tr v-if="!filteredDrafts.length">
                     <td colspan="5" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
-                      {{ draftsSearch.trim() ? `No results for '${draftsSearch.trim()}'.` : 'No draft slips. Print & Draft from Assign to hold stock here.' }}
+                      {{ draftsSearch.trim() ? `No results for '${draftsSearch.trim()}'.` : 'No draft slips are awaiting allocation.' }}
                     </td>
                   </tr>
                 </tbody>
@@ -455,12 +471,12 @@
                           type="button"
                           class="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
                           :disabled="working"
-                          @click="confirmAction = { kind: 'approve-transfer', id: transfer.id, label: `Approve transfer of ${transfer.item?.item_name ?? 'item'} to ${personName(transfer.target_user ?? transfer.targetUser)}?` }"
+                          @click="transferSlipTarget = transfer"
                         >
                           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
-                          Approve
+                          Draft Release Slip
                         </button>
 
                         <button
@@ -1010,6 +1026,13 @@
     <!-- Modals -->
     <AssignModal :open="assignOpen" :items="availableItems" :end-users="endUsers" @close="assignOpen = false" @saved="onAssignSaved" @drafted="onDraftSaved" />
     <ApproveRequestModal :open="reviewRequest !== null" :request="reviewRequest" @close="reviewRequest = null" @approved="onApproveSaved" />
+    <TransferReleaseSlipModal
+      :open="transferSlipTarget !== null"
+      :transfer="transferSlipTarget"
+      :custodian-name="auth.displayName"
+      @close="transferSlipTarget = null"
+      @saved="onTransferSlipSaved"
+    />
 
     <Modal
       :open="iarReview !== null"
@@ -1098,9 +1121,9 @@
 
     <ConfirmDialog
       :open="confirmAction !== null"
-      :title="confirmAction?.kind === 'cancel-draft' ? 'Delete Draft' : 'Confirm Approval'"
+      :title="confirmAction?.kind === 'cancel-draft' ? 'Delete Draft' : confirmAction?.kind === 'allocate-transfer' ? 'Confirm Transfer Allocation' : 'Confirm Approval'"
       :message="confirmAction?.label ?? ''"
-      :confirm-label="confirmAction?.kind === 'cancel-draft' ? 'Yes' : 'Confirm Approval'"
+      :confirm-label="confirmAction?.kind === 'cancel-draft' ? 'Yes' : confirmAction?.kind === 'allocate-transfer' ? 'Confirm Allocation' : 'Confirm Approval'"
       :busy="working"
       @cancel="confirmAction = null"
       @confirm="submitConfirm"
@@ -1153,6 +1176,7 @@ import ConfirmDialog from '../../components/ui/dialogs/ConfirmDialog.vue';
 import PromptModal from '../../components/ui/dialogs/PromptModal.vue';
 import AssignModal from './AssignModal.vue';
 import ApproveRequestModal from './ApproveRequestModal.vue';
+import TransferReleaseSlipModal from './TransferReleaseSlipModal.vue';
 
 const toast = useToastStore();
 const auth = useAuthStore();
@@ -1221,6 +1245,7 @@ const ledgerSearch = ref('');
 
 const assignOpen = ref(false);
 const reviewRequest = ref(null);
+const transferSlipTarget = ref(null);
 const prompt = ref(null);
 const confirmAction = ref(null);
 const pendingConfirm = ref(null);
@@ -1513,10 +1538,16 @@ function draftSlipHref(draft) {
   return `/property-custodian/requests/${draft.id}/slip-pdf?${params.toString()}`;
 }
 
+function transferSlipHref(transfer) {
+  return `/api/custodian/transfers/${transfer.id}/release-slip?preview=1`;
+}
+
 const filteredDrafts = computed(() =>
   drafts.value.filter((draft) => matchesSearch(draftsSearch.value, [
+    personName(draft.user),
     personName(draft.target_user ?? draft.targetUser),
-    draft.requested_item_name,
+    draft.requested_item_name ?? draft.item?.item_name,
+    draft.item?.inventory_item_no,
     draftHoldNos(draft),
     draft.quantity,
     draft.status,
@@ -1704,7 +1735,10 @@ function applyTransactionsPayload(data) {
   endUsers.value = data.endUsers ?? [];
   incoming.value = data.incomingRequests ?? [];
   assignments.value = data.assignmentRequests ?? [];
-  drafts.value = data.draftRequests ?? [];
+  drafts.value = [
+    ...(data.draftRequests ?? []).map((draft) => ({ ...draft, draft_kind: 'assignment' })),
+    ...(data.transferDrafts ?? []).map((draft) => ({ ...draft, draft_kind: 'transfer' })),
+  ];
   transfers.value = data.pendingTransfers ?? [];
   returns.value = data.pendingReturns ?? [];
   history.value = data.transactions ?? [];
@@ -1777,6 +1811,12 @@ function onApproveSaved() {
   reloadAfterChange();
 }
 
+function onTransferSlipSaved() {
+  transferSlipTarget.value = null;
+  activeTab.value = 'drafts';
+  reloadAfterChange();
+}
+
 async function runMutation(call) {
   working.value = true;
 
@@ -1784,9 +1824,7 @@ async function runMutation(call) {
     await call();
     await reloadAfterChange();
   } catch (requestError) {
-    if (requestError?.response?.status === 422) {
-      toast.error('Error', requestError?.response?.data?.message ?? 'The action could not be completed.');
-    }
+    toast.error('Action failed', requestError?.response?.data?.message ?? 'The action could not be completed.');
   } finally {
     working.value = false;
   }
@@ -1852,12 +1890,16 @@ async function submitConfirm() {
   }
 
   const urls = {
-    'approve-transfer': `/custodian/transfers/${action.id}/approve`,
+    'allocate-transfer': `/custodian/transfers/${action.id}/allocate`,
     'allocate-draft': `/custodian/drafts/${action.id}/allocate`,
   };
 
   confirmAction.value = null;
-  await runMutation(() => api.post(urls[action.kind]));
+  await runMutation(() =>
+    action.kind === 'allocate-transfer'
+      ? api.post(urls[action.kind], { confirmed: true })
+      : api.post(urls[action.kind]),
+  );
 }
 
 async function submitApproveReturn() {

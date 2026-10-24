@@ -9,7 +9,25 @@
     @close="handleClose"
   >
     <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-900" @keydown.esc.window="selectionDrawerOpen = false">
+      <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-gray-100 px-4 py-2 dark:border-gray-700 dark:bg-gray-900">
+        <h2 class="text-sm font-bold text-gray-900 dark:text-white">Document preview</h2>
+        <div class="flex gap-1" aria-label="Preview format">
+          <button type="button" class="rounded px-2.5 py-1 text-xs font-semibold" :class="previewMode === 'html' ? 'bg-white text-purple-700 shadow-sm dark:bg-gray-700 dark:text-purple-300' : 'text-gray-600 hover:bg-white/70 dark:text-gray-300 dark:hover:bg-gray-700'" :aria-pressed="previewMode === 'html'" @click="previewMode = 'html'">
+            HTML Preview
+          </button>
+          <button type="button" class="rounded px-2.5 py-1 text-xs font-semibold disabled:cursor-wait disabled:opacity-60" :class="previewMode === 'pdf' ? 'bg-white text-purple-700 shadow-sm dark:bg-gray-700 dark:text-purple-300' : 'text-gray-600 hover:bg-white/70 dark:text-gray-300 dark:hover:bg-gray-700'" :aria-pressed="previewMode === 'pdf'" :disabled="previewing && !previewPdfUrl" @click="selectPdfPreview">
+            PDF Preview
+          </button>
+        </div>
+      </div>
       <main class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4">
+        <div v-if="previewMode === 'pdf'" class="relative h-[65vh] min-h-[24rem] overflow-hidden rounded bg-white">
+          <iframe v-if="previewPdfUrl" :src="previewPdfUrl" class="h-full w-full border-0" title="IIRUP PDF preview" />
+          <div v-else class="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500" role="status">{{ previewing ? 'Generating PDF preview…' : pdfPreviewMessage }}</div>
+          <div v-if="previewing && previewPdfUrl" class="absolute right-8 top-16 rounded bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-900" role="status">Refreshing PDF preview…</div>
+          <div v-if="error" class="absolute bottom-2 left-2 right-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 shadow dark:border-rose-500/30 dark:bg-gray-900 dark:text-rose-300" role="alert">{{ error }}</div>
+        </div>
+        <div v-else>
         <div class="mx-auto mb-3 flex max-w-6xl items-center justify-between text-xs text-gray-600 dark:text-gray-300">
           <span>{{ selectedCount }} item(s) selected for disposal report</span>
           <span>Edit directly in the report preview</span>
@@ -145,7 +163,7 @@
                 </div>
                 <div class="iirup-signatory">
                   <span class="mb-2 block">Approved by:</span>
-                  <input v-model="form.approving_official_name" required class="iirup-preview-input w-full text-center font-bold" aria-label="Approving official name" />
+                  <input v-model="form.approving_official_name" class="iirup-preview-input w-full text-center font-bold" aria-label="Approving official name" />
                   <span>Signature over Printed Name of Authorized Official</span>
                   <input v-model="form.approving_official_designation" class="iirup-preview-input mt-2 w-full text-center" aria-label="Approving official designation" />
                   <span>(Designation of Authorized Official)</span>
@@ -155,7 +173,7 @@
             <div class="grid grid-cols-2 gap-4">
               <div class="iirup-signatory">
                 <span class="mb-3 block">I CERTIFY that I have inspected each and every article enumerated in this report, and that the disposition made thereof was, in my judgment, the best for the public interest.</span>
-                <input v-model="form.inspection_officer_name" required class="iirup-preview-input w-full text-center font-bold" aria-label="Inspection officer name" />
+                <input v-model="form.inspection_officer_name" class="iirup-preview-input w-full text-center font-bold" aria-label="Inspection officer name" />
                 <span>Signature over Printed Name of Inspection Officer</span>
                 <input v-model="form.inspection_designation" class="iirup-preview-input iirup-preview-input--plain mt-2 w-full text-center" aria-label="Inspection officer designation" />
               </div>
@@ -166,7 +184,7 @@
                   day of
                   <input v-model="form.witness_disposition_date" class="iirup-preview-input iirup-certification-date" aria-label="Witnessed disposition date" />.
                 </span>
-                <input v-model="form.witness_name" required class="iirup-preview-input w-full text-center font-bold" aria-label="Witness name" />
+                <input v-model="form.witness_name" class="iirup-preview-input w-full text-center font-bold" aria-label="Witness name" />
                 <span>Signature over Printed Name of Witness</span>
               </div>
             </div>
@@ -174,6 +192,7 @@
         </article>
 
         <p v-if="error" class="mx-auto mt-3 max-w-6xl text-xs text-rose-600 dark:text-rose-400">{{ error }}</p>
+        </div>
       </main>
     </div>
 
@@ -187,13 +206,8 @@
       >
         Cancel
       </button>
-      <button
-        type="button"
-        class="rounded-md border border-purple-200 bg-white px-3 py-2 text-xs font-semibold text-purple-700 shadow-sm hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10"
-        :disabled="generating || previewing || !canGenerate"
-        @click="previewIIRUP"
-      >
-        {{ previewing ? 'Generating…' : 'Preview IIRUP' }}
+      <button v-if="previewMode === 'pdf'" type="button" class="rounded-md border border-purple-200 bg-white px-3 py-2 text-xs font-semibold text-purple-700 shadow-sm hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10" :disabled="!previewBlob || previewing" @click="downloadFromPreview">
+        Download Preview PDF
       </button>
       <button
         type="submit"
@@ -208,8 +222,9 @@
     <template #overlay>
       <button
         type="button"
-        class="absolute left-0 top-26 z-[100001] flex items-center gap-2 rounded-r-md border border-l-0 border-purple-200 bg-white px-3 py-3 text-xs font-semibold text-purple-700 shadow-lg transition hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10"
+        class="absolute left-0 top-26 z-[100001] flex items-center rounded-r-md border border-l-0 border-purple-200 bg-white px-3 py-3 text-xs font-semibold text-purple-700 shadow-lg transition hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10"
         :aria-expanded="selectionDrawerOpen"
+        :aria-label="selectionDrawerOpen ? 'Close item selection drawer' : 'Open item selection drawer'"
         aria-controls="iirup-selection-drawer"
         @click="selectionDrawerOpen = !selectionDrawerOpen"
       >
@@ -224,7 +239,6 @@
         >
           <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
         </svg>
-        <span>{{ selectedCount }} selected</span>
       </button>
 
       <Transition name="iirup-fade">
@@ -364,19 +378,12 @@
     </template>
   </Modal>
 
-  <IirupPreviewModal
-    :open="previewOpen"
-    :pdf-url="previewPdfUrl"
-    @close="closePreview"
-    @download="downloadFromPreview"
-  />
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useAuthStore } from '../../../stores/auth';
 import Modal from '../../../components/ui/dialogs/Modal.vue';
-import IirupPreviewModal from './IirupPreviewModal.vue';
 import api from '../../../lib/axios';
 
 const props = defineProps({
@@ -393,9 +400,12 @@ const authStore = useAuthStore();
 const generating = ref(false);
 const previewing = ref(false);
 const error = ref('');
-const previewOpen = ref(false);
 const previewPdfUrl = ref('');
+const previewMode = ref('html');
+const previewCurrent = ref(false);
 let previewBlob = null;
+let previewRefreshTimer = null;
+let previewRequestId = 0;
 const loadingItems = ref(false);
 const selectionDrawerOpen = ref(false);
 const expandedCategories = ref([]);
@@ -459,11 +469,13 @@ const selectedPreviewGroups = computed(() => eligibleByCategory.value
 
 const canGenerate = computed(() =>
   !loadingItems.value &&
-  internalSelectedIds.value.length > 0 &&
-  form.value.approving_official_name.trim() !== '' &&
-  form.value.inspection_officer_name.trim() !== '' &&
-  form.value.witness_name.trim() !== '',
+  internalSelectedIds.value.length > 0,
 );
+const pdfPreviewMessage = computed(() => {
+  if (loadingItems.value) return 'Loading eligible items…';
+  if (internalSelectedIds.value.length === 0) return 'Select at least one eligible item to generate the IIRUP PDF.';
+  return 'PDF preview is not available.';
+});
 
 function formatMoney(value) {
   return Number(value ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -625,6 +637,7 @@ watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
+      closePreview();
       error.value = '';
       generating.value = false;
       form.value.report_date = new Date().toISOString().slice(0, 10);
@@ -639,6 +652,20 @@ watch(
     }
   },
   { immediate: true },
+);
+
+watch(
+  [form, editableRows, internalSelectedIds],
+  () => {
+    previewCurrent.value = false;
+    if (previewMode.value !== 'pdf') return;
+    clearTimeout(previewRefreshTimer);
+    previewRefreshTimer = setTimeout(() => {
+      previewRefreshTimer = null;
+      previewIIRUP();
+    }, 500);
+  },
+  { deep: true },
 );
 
 function handleClose() {
@@ -678,27 +705,40 @@ async function generatePdfBlob() {
 }
 
 async function previewIIRUP() {
-  if (!canGenerate.value || previewing.value || generating.value) return;
+  if (!canGenerate.value || generating.value) return;
+  const requestId = ++previewRequestId;
   previewing.value = true;
   error.value = '';
 
   try {
     const blob = await generatePdfBlob();
-    if (previewPdfUrl.value) {
-      window.URL.revokeObjectURL(previewPdfUrl.value);
-    }
+    if (requestId !== previewRequestId) return;
+    const previousUrl = previewPdfUrl.value;
     previewBlob = blob;
     previewPdfUrl.value = window.URL.createObjectURL(blob);
-    previewOpen.value = true;
+    if (previousUrl) window.URL.revokeObjectURL(previousUrl);
+    previewCurrent.value = true;
   } catch (err) {
-    error.value = err?.response?.data?.message ?? 'Failed to generate IIRUP PDF. Please try again.';
+    if (requestId === previewRequestId) {
+      error.value = err?.response?.data?.message ?? 'Failed to generate IIRUP PDF. Please try again.';
+    }
   } finally {
-    previewing.value = false;
+    if (requestId === previewRequestId) previewing.value = false;
   }
 }
 
+function selectPdfPreview() {
+  previewMode.value = 'pdf';
+  if (!previewCurrent.value && canGenerate.value) previewIIRUP();
+}
+
 function closePreview() {
-  previewOpen.value = false;
+  clearTimeout(previewRefreshTimer);
+  previewRefreshTimer = null;
+  previewRequestId += 1;
+  previewMode.value = 'html';
+  previewCurrent.value = false;
+  previewing.value = false;
   if (previewPdfUrl.value) {
     window.URL.revokeObjectURL(previewPdfUrl.value);
     previewPdfUrl.value = '';
@@ -707,7 +747,7 @@ function closePreview() {
 }
 
 function downloadFromPreview() {
-  if (!previewBlob) return;
+  if (!previewBlob || !previewCurrent.value) return;
   const url = window.URL.createObjectURL(previewBlob);
   const link = document.createElement('a');
   link.href = url;
@@ -741,6 +781,8 @@ async function submit() {
     generating.value = false;
   }
 }
+
+onUnmounted(closePreview);
 </script>
 
 <style scoped>

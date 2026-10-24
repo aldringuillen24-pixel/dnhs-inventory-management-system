@@ -13,7 +13,7 @@
         <div class="flex shrink-0 items-start justify-between gap-4 border-b border-gray-100 p-4 dark:border-gray-800">
           <div>
             <h2 class="text-base font-semibold text-gray-800 dark:text-white/90">Item logs</h2>
-            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ scopeLabel }}</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">All inventory edits and deletions</p>
           </div>
           <button
             type="button"
@@ -36,7 +36,7 @@
           </p>
 
           <p v-else-if="!entries.length" class="rounded-md border border-dashed border-gray-200 px-3 py-8 text-center text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-            No item logs yet for this view. Stock-in, edits, deletes, and disposals will appear here.
+            No inventory edits or deletions have been recorded yet.
           </p>
 
           <article
@@ -76,16 +76,12 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import { nextTick, onUnmounted, ref, watch } from 'vue';
 import api from '../../lib/axios';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
-  workspace: { type: String, default: 'all' },
-  search: { type: String, default: '' },
-  categoryId: { type: [Number, String], default: '' },
   categories: { type: Array, default: () => [] },
-  workspaceLabel: { type: String, default: '' },
 });
 
 const emit = defineEmits(['close']);
@@ -98,7 +94,6 @@ const loadingMore = ref(false);
 const error = ref('');
 const scrollRef = ref(null);
 const asideRef = ref(null);
-let searchTimer = null;
 
 function onDocumentClick(event) {
   const target = event.target;
@@ -147,15 +142,6 @@ function detachDismissListener() {
 
 onUnmounted(() => {
   detachDismissListener();
-  clearTimeout(searchTimer);
-});
-
-const scopeLabel = computed(() => {
-  const parts = [props.workspaceLabel || props.workspace];
-  if (props.search) parts.push(`“${props.search}”`);
-  const category = props.categories.find((item) => String(item.category_id) === String(props.categoryId));
-  if (category) parts.push(category.category_name);
-  return `Scoped to ${parts.join(' · ')}`;
 });
 
 function categoryName(id) {
@@ -258,9 +244,6 @@ async function fetchPage(targetPage, { reset = false } = {}) {
     const { data } = await api.get('/custodian/inventory-logs', {
       params: {
         page: targetPage,
-        search: props.search || undefined,
-        category_id: props.categoryId || undefined,
-        workspace: props.workspace,
       },
     });
     const logs = Array.isArray(data?.logs) ? data.logs : [];
@@ -303,15 +286,6 @@ watch(() => props.open, (isOpen) => {
   }
 });
 
-watch([() => props.workspace, () => props.categoryId], () => {
-  if (props.open) reload();
-});
-
-watch(() => props.search, () => {
-  if (!props.open) return;
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(reload, 300);
-});
 </script>
 
 <style scoped>

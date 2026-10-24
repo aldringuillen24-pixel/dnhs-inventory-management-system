@@ -264,9 +264,9 @@
         }
         .sign-name {
             font-weight: bold;
-            min-height: 0;
+            min-height: 12px;
             margin: 0;
-            line-height: 1;
+            line-height: 12px;
         }
         .sign-line {
             border-bottom: 1px solid #000;
@@ -543,7 +543,7 @@
                             <div class="sign-block">
                                 <div class="sign-name">{{ $requested_by_name ?? '' }}</div>
                                 <div class="sign-line"></div>
-                                <div class="sign-role-label">Signature over Printed Name of Accountable Officer</div>
+                                <div class="sign-role-label">(Signature over Printed Name of Accountable Officer)</div>
                                 <div class="sign-designation">{{ $requested_by_designation ?? 'SCHOOL PROPERTY CUSTODIAN' }}</div>
                                 <div class="designation-label">(Designation of Accountable Officer)</div>
                             </div>
@@ -553,7 +553,7 @@
                             <div class="sign-block">
                                 <div class="sign-name">{{ $approved_by_name ?? '' }}</div>
                                 <div class="sign-line"></div>
-                                <div class="sign-role-label">Signature over Printed Name of Authorized Official</div>
+                                <div class="sign-role-label">(Signature over Printed Name of Authorized Official)</div>
                                 <div class="sign-designation">{{ $approved_by_designation ?? 'PRINCIPAL I' }}</div>
                                 <div class="designation-label">(Designation of Authorized Official)</div>
                             </div>
@@ -571,18 +571,20 @@
                             <div class="sign-block">
                                 <div class="sign-name">{{ $inspection_officer_name ?? '' }}</div>
                                 <div class="sign-line"></div>
-                                <div class="sign-role-label">Signature over Printed Name of Inspection Officer</div>
-                                <div class="sign-designation">{{ $inspection_designation ?? '' }}</div>
+                                <div class="sign-role-label">(Signature over Printed Name of Inspection Officer)</div>
+                                @if (trim((string) ($inspection_designation ?? '')) !== '')
+                                    <div class="sign-designation">{{ $inspection_designation }}</div>
+                                @endif
                             </div>
                         </td>
                         <td>
                             <div class="certification-text">
-                                I CERTIFY that I have witnessed the disposition of the articles enumerated on this report this {{ $witness_disposition_day ?? '_____' }} day of {{ $witness_disposition_date ?? '____________________' }}.
+                                I CERTIFY that I have witnessed the disposition of the articles enumerated on this report this {{ trim((string) ($witness_disposition_day ?? '')) !== '' ? $witness_disposition_day : '_____' }} day of {{ trim((string) ($witness_disposition_date ?? '')) !== '' ? $witness_disposition_date : '____________________' }}.
                             </div>
                             <div class="sign-block">
                                 <div class="sign-name">{{ $witness_name ?? '' }}</div>
                                 <div class="sign-line"></div>
-                                <div class="sign-role-label">Signature over Printed Name of Witness</div>
+                                <div class="sign-role-label">(Signature over Printed Name of Witness)</div>
                             </div>
                         </td>
                     </tr>

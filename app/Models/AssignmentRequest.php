@@ -39,6 +39,7 @@ class AssignmentRequest extends Model
         'room',
         'transaction_id',
         'parent_request_id',
+        'source_assignment_id',
         'quantity',
         'status',
         'notes',
@@ -68,6 +69,16 @@ class AssignmentRequest extends Model
         return $this->belongsTo(self::class, 'parent_request_id');
     }
 
+    public function sourceAssignment()
+    {
+        return $this->belongsTo(self::class, 'source_assignment_id');
+    }
+
+    public function transferRequests()
+    {
+        return $this->hasMany(self::class, 'source_assignment_id');
+    }
+
     public function fulfillmentRequests()
     {
         return $this->hasMany(self::class, 'parent_request_id');
@@ -91,6 +102,11 @@ class AssignmentRequest extends Model
     public function assignmentReturns()
     {
         return $this->hasMany(AssignmentReturn::class, 'assignment_request_id');
+    }
+
+    public function releaseSlip()
+    {
+        return $this->hasOne(TransferReleaseSlip::class, 'request_id');
     }
 
     public function getMatchingInventoryItemsAttribute()

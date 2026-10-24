@@ -36,12 +36,7 @@ const router = createRouter({
             component: () => import('../views/custodian/Transactions.vue'),
             meta: { roles: ['Property Custodian'], title: 'Transactions' },
         },
-        {
-            path: '/reports',
-            name: 'custodian-reports',
-            component: () => import('../views/custodian/Reports.vue'),
-            meta: { roles: ['Property Custodian'], title: 'Reports' },
-        },
+        { path: '/reports', redirect: '/reports/forecast' },
         {
             path: '/reports/forecast',
             name: 'forecast-recommendations',
@@ -102,17 +97,12 @@ const router = createRouter({
             component: () => import('../views/schoolhead/InventoryOverview.vue'),
             meta: { roles: ['School Head'], title: 'Inventory Overview' },
         },
-        {
-            path: '/school-head/reports',
-            name: 'school-head-reports',
-            component: () => import('../views/schoolhead/Reports.vue'),
-            meta: { roles: ['School Head'], title: 'Reports' },
-        },
+        { path: '/school-head/reports', redirect: '/school-head/dashboard' },
         {
             path: '/school-head/audit-logs',
             name: 'school-head-audit-logs',
             component: () => import('../views/schoolhead/AuditLogs.vue'),
-            meta: { roles: ['School Head'], title: 'Audit Logs' },
+            meta: { roles: ['School Head'], title: 'Logs' },
         },
         {
             path: '/inspector/arrival-inspections',

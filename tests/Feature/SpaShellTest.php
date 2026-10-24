@@ -38,6 +38,40 @@ test('spa history subpaths resolve to the shell for the client router', function
         ->assertSee('<div id="app"></div>', false);
 });
 
+test('custodian reports navigation and legacy route lead to demand forecast', function () {
+    $menuItems = collect(\App\Helpers\MenuHelper::getMenuGroups('Property Custodian'))
+        ->flatMap(fn (array $group) => $group['items']);
+
+    expect($menuItems->pluck('name'))->not->toContain('Reports')
+        ->and($menuItems->pluck('name'))->toContain('Demand Forecast');
+
+    $this->actingAs($this->custodian)
+        ->get(route('propertyCustodian.reports'))
+        ->assertRedirect('/spa/reports/forecast');
+});
+
+test('school-head reports navigation is removed and the legacy route returns to dashboard', function () {
+    $menuItems = collect(\App\Helpers\MenuHelper::getMenuGroups('School Head'))
+        ->flatMap(fn (array $group) => $group['items']);
+
+    expect($menuItems->pluck('name'))->not->toContain('Reports');
+
+    $schoolHeadRole = Role::create(['role_name' => 'School Head']);
+    $schoolHead = User::create([
+        'role_id' => $schoolHeadRole->role_id,
+        'first_name' => 'School',
+        'last_name' => 'Head',
+        'username' => 'shell-school-head-reports',
+        'email' => 'shell-school-head-reports@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+
+    $this->actingAs($schoolHead)
+        ->get(route('schoolHead.reports'))
+        ->assertRedirect('/spa/school-head/dashboard');
+});
+
 test('inspector landing, arrival inspections, reports, and profile resolve without the retired inventory page', function () {
     $inspectorRole = Role::create(['role_name' => 'Inspector']);
     $inspector = User::create([

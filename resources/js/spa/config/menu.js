@@ -35,8 +35,7 @@ export const ROLE_MENUS = {
     'School Head': [
         { icon: 'dashboard', name: 'Dashboard', to: '/school-head/dashboard' },
         { icon: 'inventory', name: 'Inventory Overview', to: '/school-head/inventory' },
-        { icon: 'reports', name: 'Reports', to: '/school-head/reports' },
-        { icon: 'assigned-items', name: 'Audit Logs', to: '/school-head/audit-logs' },
+        { icon: 'assigned-items', name: 'Logs', to: '/school-head/audit-logs' },
         { icon: 'user-profile', name: 'Profile', to: '/profile' },
     ],
     Inspector: [
@@ -48,7 +47,6 @@ export const ROLE_MENUS = {
         { icon: 'dashboard', name: 'Dashboard', to: '/dashboard' },
         { icon: 'inventory', name: 'Inventory', to: '/inventory' },
         { icon: 'transactions', name: 'Transaction', to: '/transactions', badge: 'transaction' },
-        { icon: 'reports', name: 'Reports', to: '/reports' },
         { icon: 'forecast', name: 'Demand Forecast', to: '/reports/forecast' },
         { icon: 'user-profile', name: 'Profile', to: '/profile' },
     ],

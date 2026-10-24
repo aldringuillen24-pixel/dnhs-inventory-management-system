@@ -43,11 +43,18 @@ class EndUserController extends Controller
         $pendingRequests = AssignmentRequest::query()
             ->with('targetUser.role')
             ->where('user_id', $user->id)
-            ->whereIn('status', ['waiting for approval', 'waiting for transfer approval', self::STATUS_WAITING_FOR_PROCUREMENT])
+            ->whereIn('status', [
+                'waiting for approval',
+                'waiting for transfer approval',
+                'waiting for custodian approval',
+                'transfer draft',
+                self::STATUS_WAITING_FOR_PROCUREMENT,
+            ])
             ->get(['status', 'target_user_id']);
         $pendingReturns = AssignmentRequest::query()
             ->where('user_id', $user->id)
             ->where('status', 'waiting for custodian approval')
+            ->whereHas('targetUser.role', fn ($query) => $query->where('role_name', 'Property Custodian'))
             ->count();
 
         $pendingRequestData = collect([
@@ -61,7 +68,8 @@ class EndUserController extends Controller
             ],
             [
                 'label' => 'Transfer Requests',
-                'value' => $pendingRequests->filter(fn ($request) => $request->status === 'waiting for transfer approval' || ($request->status === 'waiting for approval' && $request->targetUser?->role?->role_name !== 'Property Custodian'))->count(),
+                'value' => $pendingRequests->filter(fn ($request) => in_array($request->status, ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'], true)
+                    && $request->targetUser?->role?->role_name === 'End User')->count(),
             ],
             ['label' => 'Return Requests', 'value' => $pendingReturns],
             [
@@ -295,6 +303,7 @@ class EndUserController extends Controller
             ])
             ->where('target_user_id', $userId)
             ->whereNull('parent_request_id')
+            ->whereNotIn('status', ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'])
             // Draft allocations are custodian-held prints, not requests the
             // recipient can act on. They live in the custodian Drafts tab.
             ->where('status', '!=', 'draft')
@@ -567,6 +576,7 @@ class EndUserController extends Controller
                 $pendingReturnRequest = AssignmentRequest::where('item_id', $inventory->item_id)
                     ->where('user_id', $user->id)
                     ->where('status', 'waiting for custodian approval')
+                    ->whereHas('targetUser.role', fn ($query) => $query->where('role_name', 'Property Custodian'))
                     ->first();
 
                 return [
@@ -597,6 +607,7 @@ class EndUserController extends Controller
                 $returnRequestStatus = AssignmentRequest::where('item_id', $request->item_id)
                     ->where('user_id', $user->id)
                     ->where('status', 'waiting for custodian approval')
+                    ->whereHas('targetUser.role', fn ($query) => $query->where('role_name', 'Property Custodian'))
                     ->first();
 
                 return [
@@ -796,7 +807,7 @@ class EndUserController extends Controller
                 ->withInput();
         }
 
-        return redirect()->route('endUser.my-assigned-items')->with('success', 'Transfer request sent. Waiting for the recipient to accept.');
+        return redirect()->route('endUser.my-assigned-items')->with('success', 'Transfer request sent to the Property Custodian.');
     }
 
     public function respondRequest(Request $request, $id, InventoryOperationService $inventoryOperations)
@@ -812,23 +823,10 @@ class EndUserController extends Controller
             abort(403);
         }
 
-        // ── TRANSFER REQUEST (step 2 of 3: recipient accepts/declines) ──────────
+        // Transfers are handled by the Property Custodian; the recipient
+        // acknowledges the physical handoff with a handwritten slip signature.
         if ($assignment->status === 'waiting for transfer approval') {
-
-            if ($validated['action'] === 'decline') {
-                if (! $inventoryOperations->declineTransferRequest($assignment->id, $assignment->notes)) {
-                    return redirect()->route('endUser.requests')->with('error', 'Transfer request has already been processed.');
-                }
-
-                return redirect()->route('endUser.requests')->with('success', 'Transfer request declined.');
-            }
-
-            // Accept: advance to custodian approval (step 3 of 3) with race condition protection
-            if (! $inventoryOperations->acceptTransferRequest($assignment->id)) {
-                return redirect()->route('endUser.requests')->with('error', 'Transfer request is no longer awaiting approval.');
-            }
-
-            return redirect()->route('endUser.requests')->with('success', 'Transfer accepted. Waiting for Property Custodian approval.');
+            return redirect()->route('endUser.requests')->with('error', 'Transfer requests are handled by the Property Custodian.');
         }
 
         // ── NORMAL ASSIGNMENT REQUEST (from custodian) ───────────────────────────
@@ -991,7 +989,7 @@ class EndUserController extends Controller
         }
 
         if (! $inventoryOperations->cancelTransferRequest($transferRequest->id, $validated['cancellation_reason'] ?? null)) {
-            return redirect()->back()->with('error', 'Only transfers waiting for recipient approval can be cancelled.');
+            return redirect()->back()->with('error', 'Only transfers awaiting custodian review can be cancelled.');
         }
 
         return redirect()->route('endUser.my-assigned-items')->with('success', 'Transfer request cancelled.');

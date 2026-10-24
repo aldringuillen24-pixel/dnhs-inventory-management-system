@@ -10,6 +10,7 @@ use App\Models\InventoryItemLog;
 use App\Models\MaintenanceRecord;
 use App\Models\StockMovement;
 use App\Models\Transaction;
+use App\Models\TransferReleaseSlip;
 use App\Models\User;
 use App\Support\RequestableItemMatcher;
 use Carbon\Carbon;
@@ -182,7 +183,10 @@ class InventoryOperationService
         ?string $expectedReturnDate = null,
     ): AssignmentRequest|string {
         return DB::transaction(function () use ($itemId, $actorId, $recipientId, $quantity, $transactionDate, $expectedReturnDate): AssignmentRequest|string {
-            $recipient = User::query()->whereKey($recipientId)->firstOrFail();
+            $recipient = User::query()->with('role')->whereKey($recipientId)->firstOrFail();
+            if ($recipient->status !== 'active' || $recipient->role?->role_name !== 'End User') {
+                return false;
+            }
             $inventoryItem = Inventory::with('category')->whereKey($itemId)
                 ->lockForUpdate()
                 ->firstOrFail();
@@ -998,7 +1002,16 @@ class InventoryOperationService
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($transferRequest->status !== 'waiting for custodian approval' || (int) $transferRequest->quantity < 1) {
+            if ($transferRequest->status !== 'transfer draft' || (int) $transferRequest->quantity < 1) {
+                return false;
+            }
+
+            $releaseSlip = TransferReleaseSlip::query()
+                ->where('request_id', $transferRequest->id)
+                ->where('status', 'draft')
+                ->lockForUpdate()
+                ->first();
+            if (! $releaseSlip) {
                 return false;
             }
 
@@ -1011,18 +1024,26 @@ class InventoryOperationService
             $locationBefore = $inventory->only(['building', 'room']);
             $targetBuilding = $recipient->building ?? $transferRequest->building ?? $inventory->building;
             $targetRoom = $recipient->room ?? $transferRequest->room ?? $inventory->room;
-            $originalAssignment = AssignmentRequest::query()
-                ->where('item_id', $transferRequest->item_id)
-                ->where(function ($query) use ($senderId) {
-                    $query->where('user_id', $senderId)->orWhere('target_user_id', $senderId);
-                })
-                ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
-                ->orderByDesc('updated_at')
-                ->orderByDesc('id')
-                ->lockForUpdate()
-                ->first();
+            $originalAssignment = $transferRequest->source_assignment_id
+                ? AssignmentRequest::whereKey($transferRequest->source_assignment_id)->lockForUpdate()->first()
+                : AssignmentRequest::query()
+                    ->where('item_id', $transferRequest->item_id)
+                    ->where(function ($query) use ($senderId) {
+                        $query->where('user_id', $senderId)->orWhere('target_user_id', $senderId);
+                    })
+                    ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
+                    ->orderByDesc('updated_at')
+                    ->orderByDesc('id')
+                    ->lockForUpdate()
+                    ->first();
 
             if (! $originalAssignment) {
+                return false;
+            }
+            if (
+                (int) $originalAssignment->item_id !== (int) $transferRequest->item_id
+                || ! in_array($originalAssignment->status, ['approved', 'accepted', 'transfer pending'], true)
+            ) {
                 return false;
             }
 
@@ -1032,6 +1053,17 @@ class InventoryOperationService
             if ($originTransaction && (int) $originTransaction->quantity < (int) $transferRequest->quantity) {
                 return false;
             }
+            $hasPendingSiblingTransfer = $transferRequest->source_assignment_id
+                && AssignmentRequest::query()
+                    ->where('source_assignment_id', $originalAssignment->id)
+                    ->where('id', '!=', $transferRequest->id)
+                    ->whereIn('status', ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'])
+                    ->exists();
+            $fullAssignmentTransfer = ! $hasPendingSiblingTransfer && (
+                ($originalAssignment->status === 'transfer pending'
+                    && (int) ($originTransaction?->quantity ?? $originalAssignment->quantity) <= (int) $transferRequest->quantity)
+                || (int) $originalAssignment->quantity < 1
+            );
 
             if ($originTransaction) {
                 if ($originTransaction->quantity <= $transferRequest->quantity) {
@@ -1044,7 +1076,7 @@ class InventoryOperationService
                 }
             }
 
-            if ($originalAssignment->status === 'transfer pending') {
+            if ($fullAssignmentTransfer) {
                 $originalAssignment->update([
                     'status' => 'transferred',
                     'responded_at' => now(),
@@ -1076,6 +1108,10 @@ class InventoryOperationService
                 'status' => 'approved',
                 'transaction_id' => $transaction->id,
                 'responded_at' => now(),
+            ]);
+            $releaseSlip->update([
+                'status' => 'completed',
+                'completed_at' => now(),
             ]);
 
             $quantity = (int) $inventory->quantity;
@@ -1125,20 +1161,17 @@ class InventoryOperationService
                 return 'insufficient';
             }
 
-            if ($quantity === (int) $original->quantity) {
-                $original->update(['status' => 'transfer pending']);
-            } else {
-                $original->decrement('quantity', $quantity);
-            }
+            $original->decrement('quantity', $quantity);
 
             AssignmentRequest::create([
                 'item_id' => $itemId,
+                'source_assignment_id' => $original->id,
                 'user_id' => $senderId,
                 'target_user_id' => $recipientId,
                 'building' => $recipient->building,
                 'room' => $recipient->room,
                 'quantity' => $quantity,
-                'status' => 'waiting for transfer approval',
+                'status' => 'waiting for custodian approval',
                 'notes' => $notes,
                 'requested_at' => now(),
             ]);
@@ -1157,24 +1190,23 @@ class InventoryOperationService
                 return false;
             }
 
-            // Re-validate the sender still holds the units before handing the
-            // decision to the custodian. Full-quantity holds keep their
-            // quantity on the 'transfer pending' row, so it must still cover
-            // the transfer; partial transfers carved the units out at request
-            // time, so only the remainder row's existence is re-checked.
+            // Legacy transfers still use this state transition; new requests
+            // go directly to the custodian.
             $senderId = (int) $transferRequest->user_id;
-            $originalAssignment = AssignmentRequest::query()
-                ->where('item_id', $transferRequest->item_id)
-                ->where(function ($query) use ($senderId) {
-                    $query->where('target_user_id', $senderId)
-                        ->orWhere(function ($query) use ($senderId) {
-                            $query->where('user_id', $senderId)
-                                ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
-                        });
-                })
-                ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
-                ->lockForUpdate()
-                ->first();
+            $originalAssignment = $transferRequest->source_assignment_id
+                ? AssignmentRequest::whereKey($transferRequest->source_assignment_id)->lockForUpdate()->first()
+                : AssignmentRequest::query()
+                    ->where('item_id', $transferRequest->item_id)
+                    ->where(function ($query) use ($senderId) {
+                        $query->where('target_user_id', $senderId)
+                            ->orWhere(function ($query) use ($senderId) {
+                                $query->where('user_id', $senderId)
+                                    ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
+                            });
+                    })
+                    ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
+                    ->lockForUpdate()
+                    ->first();
 
             if (! $originalAssignment) {
                 return false;
@@ -1201,23 +1233,25 @@ class InventoryOperationService
             $transferRequest = AssignmentRequest::whereKey($transferRequestId)
                 ->lockForUpdate()
                 ->firstOrFail();
-            if (! in_array($transferRequest->status, ['waiting for transfer approval', 'waiting for custodian approval'], true)) {
+            if (! in_array($transferRequest->status, ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'], true)) {
                 return false;
             }
 
             $senderId = (int) $transferRequest->user_id;
-            $originalAssignment = AssignmentRequest::query()
-                ->where('item_id', $transferRequest->item_id)
-                ->where(function ($query) use ($senderId) {
-                    $query->where('target_user_id', $senderId)
-                        ->orWhere(function ($query) use ($senderId) {
-                            $query->where('user_id', $senderId)
-                                ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
-                        });
-                })
-                ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
-                ->lockForUpdate()
-                ->first();
+            $originalAssignment = $transferRequest->source_assignment_id
+                ? AssignmentRequest::whereKey($transferRequest->source_assignment_id)->lockForUpdate()->first()
+                : AssignmentRequest::query()
+                    ->where('item_id', $transferRequest->item_id)
+                    ->where(function ($query) use ($senderId) {
+                        $query->where('target_user_id', $senderId)
+                            ->orWhere(function ($query) use ($senderId) {
+                                $query->where('user_id', $senderId)
+                                    ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
+                            });
+                    })
+                    ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
+                    ->lockForUpdate()
+                    ->first();
 
             if ($originalAssignment?->status === 'transfer pending') {
                 $originalAssignment->update(['status' => 'approved']);
@@ -1230,6 +1264,7 @@ class InventoryOperationService
                 'notes' => $notes ?? $transferRequest->notes,
                 'responded_at' => now(),
             ]);
+            $transferRequest->releaseSlip()->update(['status' => 'cancelled']);
 
             return true;
         });
@@ -1242,25 +1277,25 @@ class InventoryOperationService
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            // Only a transfer still waiting on the recipient can be withdrawn
-            // by the sender; once accepted, the decision belongs to the custodian.
-            if ($transferRequest->status !== 'waiting for transfer approval') {
+            if (! in_array($transferRequest->status, ['waiting for transfer approval', 'waiting for custodian approval'], true)) {
                 return false;
             }
 
             $senderId = (int) $transferRequest->user_id;
-            $originalAssignment = AssignmentRequest::query()
-                ->where('item_id', $transferRequest->item_id)
-                ->where(function ($query) use ($senderId) {
-                    $query->where('target_user_id', $senderId)
-                        ->orWhere(function ($query) use ($senderId) {
-                            $query->where('user_id', $senderId)
-                                ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
-                        });
-                })
-                ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
-                ->lockForUpdate()
-                ->first();
+            $originalAssignment = $transferRequest->source_assignment_id
+                ? AssignmentRequest::whereKey($transferRequest->source_assignment_id)->lockForUpdate()->first()
+                : AssignmentRequest::query()
+                    ->where('item_id', $transferRequest->item_id)
+                    ->where(function ($query) use ($senderId) {
+                        $query->where('target_user_id', $senderId)
+                            ->orWhere(function ($query) use ($senderId) {
+                                $query->where('user_id', $senderId)
+                                    ->whereHas('targetUser.role', fn ($role) => $role->where('role_name', 'Property Custodian'));
+                            });
+                    })
+                    ->whereIn('status', ['approved', 'accepted', 'transfer pending'])
+                    ->lockForUpdate()
+                    ->first();
 
             if ($originalAssignment?->status === 'transfer pending') {
                 $originalAssignment->update(['status' => 'approved']);

@@ -42,6 +42,7 @@ class RequestTool implements ToolContract
                     'waiting for approval',
                     'waiting for transfer approval',
                     'waiting for custodian approval',
+                    'transfer draft',
                     // An unmet request is still open on the end user's side, so
                     // it belongs in their pending count.
                     AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
@@ -70,6 +71,7 @@ class RequestTool implements ToolContract
             'waiting for approval',
             'waiting for transfer approval',
             'waiting for custodian approval',
+            'transfer draft',
             AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
         ])->get(['item_id', 'requested_item_name', 'requested_unit', 'quantity', 'requested_at', 'user_id'])->load([
             'item:item_id,item_name,unit',

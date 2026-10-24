@@ -180,3 +180,47 @@ Let end users report incidents for assets assigned to them, then give Property C
     - Implementation: Expanded incident workflow coverage for pending repairability inspections and confirmed they do not allow handover or change inventory/assignment state until a conclusive inspection is recorded. The incident suite covers authorized reporters, all report types, quantities, evidence, custodian transitions, repair/disposal paths, all investigation outcomes, partial quantities, timeline immutability, reporter responses, and notifications.
     - Validation: `IssueReportWorkflowTest.php` and `IncidentReporterNotificationTest.php` pass together (28 tests, 358 assertions); the dedicated pending-inspection test passes (1 test, 26 assertions); `CustodianTransactionsApiTest.php` and `EndUserSpaApiTest.php` pass together (30 tests, 291 assertions); SQLite migration regression passes (1 test, 4 assertions). Broader legacy regressions are not fully green: `InventoryReturnsTest.php` has 7 failures where assertions expect legacy HTML views instead of SPA redirects, and `InventoryStockInTest.php` has 6 failures involving existing inventory edit reasons and PDF lifespan fields. These failures are outside the incident workflow changes.
     - **Summary for you:** The report workflow has been tested from submission through investigation, repair/disposal, notification, and resolution, including permissions, evidence, and partial quantities. The incident and current API suites pass. Some separate older inventory tests still fail on legacy view and inventory-edit/PDF expectations.
+
+## Property Release Slip HTML Preview
+
+### Goal
+
+Give the custodian a live, editable HTML document preview of the Property Release Slip, following the editing experience used by IIRUP and RFQ. Keep PDF generation and printing, draft saving, and the explicit allocation-confirmation step intact. Previewing or saving a draft must not issue or transfer property.
+
+### Tasks
+
+1. **Map release-slip data and preview flow — implemented**
+   - Trace how the release-slip modal receives transfer, recipient, item, and quantity data.
+   - Map each editable release detail and signatory field to the existing request payload, preview endpoint, and PDF template.
+   - Identify the current draft-save, print/download, and allocation-confirmation boundaries so the HTML preview does not change transfer behavior.
+   - Findings: `Transactions.vue` passes the selected transfer/draft and custodian display name to `TransferReleaseSlipModal.vue`. The transfer supplies sender (`user`), recipient (`target_user`/`targetUser`), item number/name, and quantity; existing saved slip data initializes editable fields when reopening a draft. Recipient, department/unit, designation, purpose, condition, expected/actual return dates, and released/received/approved printed names and dates are sent together under `slip_fields`. The transfer preview endpoint validates those fields and renders `pdfs.property-release-slip` without saving; the PDF maps condition to the transfer's item row and displays transfer parties, item/cost/amount/quantity, selected purpose, return details, and signatories. The draft endpoint persists the slip and changes the request to `transfer draft`, but explicitly does not allocate inventory. Printing a saved draft uses the release-slip PDF GET endpoint. Allocation is a separate custodian-confirmed action requiring `confirmed: true` and an existing `transfer draft`; it finalizes the slip and performs the transfer.
+   - Scope note: the transfer modal and its validation currently include printed names/dates, but not signature-image/signature-text fields; the shared PDF template can render signature fields for other release-slip flows. Preserve this transfer-flow field contract unless a later task explicitly expands it.
+
+2. **Define the shared draft/edit HTML preview modal — implemented**
+   - Clicking **Draft Release Slip** opens the release-slip modal with an editable HTML document preview, following the live preview style used by IIRUP and RFQ.
+   - Clicking **Edit Slip** for a saved transfer draft opens that same modal and layout, populated with the saved draft fields and transfer details.
+   - Show the transfer parties, item number and description, quantity, release purpose, department/unit, designation, return dates, condition, and signatories in the document preview.
+   - Preserve the release slip's existing wording and distinguish blank fields from data that has not yet been entered.
+   - Implementation: The shared transfer-slip modal now opens in HTML preview mode for both new drafts and saved drafts. The duplicate Transfer, Release details, and Signatories form panels have been removed; editable fields are embedded directly in the document, alongside transfer/item details. The document preserves the release-slip wording and offers a separate PDF preview mode so existing PDF-render and print/download actions remain available.
+   - Validation: `CustodianTransactionsApiTest.php` passes (27 tests, 248 assertions), and the production frontend build passes with Vite's large-chunk warning.
+
+3. **Bind preview values to the release form — implemented**
+   - Reflect form edits immediately in the HTML document without requiring a PDF render.
+   - Include transfer- and item-derived values from the active transfer while keeping editable values connected to the existing `slipFields` state.
+   - Keep the preview usable at narrow viewport sizes and ensure document content remains printable.
+   - Implementation: Recipient, department/unit, designation, purpose, condition, return dates, and signatory printed names/dates are edited inline in the HTML document and bound to the existing payload state. The document remains horizontally scrollable on narrow screens; the modal body owns vertical scrolling to avoid a nested document scrollbar. The separate PDF renderer remains the print-ready output.
+
+4. **Verify release-slip behavior — implemented**
+   - Verify inline edits appear in the HTML preview and are included in the generated PDF.
+   - Verify selecting PDF Preview generates the initial PDF automatically and edits made in HTML mark the PDF stale so it refreshes after a short pause when PDF Preview is selected again; keep the existing PDF visible while refreshing and surface generation errors.
+   - Verify saved drafts reopen with their saved values and that previewing or saving a draft does not allocate property.
+   - Verify explicit custodian confirmation still allocates the transfer exactly once.
+   - Run the focused transfer tests and the production frontend build.
+   - Validation: `CustodianTransactionsApiTest.php` passes (27 tests, 248 assertions), covering preview/draft PDF payload values, no allocation on draft save, and explicit transfer allocation. `npm run build` passes; Vite reports its existing large-chunk warning.
+
+## IIRUP and RFQ HTML/PDF Preview
+
+- Added the same sticky **Document preview** header and **HTML Preview / PDF Preview** tabs to the IIRUP and RFQ editors.
+- Selecting PDF Preview generates the in-modal PDF. Editing the HTML document marks the PDF stale; returning to PDF Preview regenerates it after a brief debounce. The previous PDF remains visible while refreshing, and generation errors remain visible.
+- Kept the direct PDF generation/download actions and added a download action for the currently rendered preview.
+- Validation: `IirupPdfTest.php` and `RfqPdfTest.php` pass together (8 tests, 54 assertions); `npm run build` passes with Vite's large-chunk warning; `git diff --check` passes.

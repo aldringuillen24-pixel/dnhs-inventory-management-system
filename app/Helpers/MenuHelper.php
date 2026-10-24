@@ -118,14 +118,13 @@ class MenuHelper
             'school head' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/school-head/dashboard'],
                 ['icon' => 'inventory', 'name' => 'Inventory Overview', 'path' => '/school-head/inventory/overview'],
-                ['icon' => 'reports', 'name' => 'Reports', 'path' => '/school-head/reports'],
                 ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/school-head/profile'],
             ],
             'property custodian' => [
                 ['icon' => 'dashboard', 'name' => 'Dashboard', 'path' => '/property-custodian/dashboard'],
                 ['icon' => 'inventory', 'name' => 'Inventory', 'path' => '/property-custodian/inventory'],
                 ['icon' => 'transactions', 'name' => 'Transaction', 'path' => '/property-custodian/transactions'],
-                ['icon' => 'reports', 'name' => 'Reports', 'path' => '/property-custodian/reports'],
+                ['icon' => 'forecast', 'name' => 'Demand Forecast', 'path' => '/spa/reports/forecast'],
                 ['icon' => 'user-profile', 'name' => 'Profile', 'path' => '/property-custodian/profile'],
             ],
             'inspector' => [

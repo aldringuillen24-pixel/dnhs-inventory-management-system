@@ -169,7 +169,7 @@ class TransactionsExportRows
                 'item:item_id,inventory_item_no,item_name,quantity,category_id,status',
                 'item.category:category_id,category_name',
             ])
-            ->where('status', 'waiting for custodian approval')
+            ->whereIn('status', ['waiting for transfer approval', 'waiting for custodian approval'])
             ->whereHas('user.role', fn ($q) => $q->where('role_name', 'End User'))
             ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'End User'))
             ->orderBy('requested_at', 'desc')

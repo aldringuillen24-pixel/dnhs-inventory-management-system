@@ -9,8 +9,24 @@
     @close="handleClose"
   >
     <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-900" @keydown.esc.window="selectionDrawerOpen = false">
+      <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-gray-100 px-4 py-2 sm:px-6 dark:border-gray-700 dark:bg-gray-900">
+        <h2 class="text-sm font-bold text-gray-900 dark:text-white">Document preview</h2>
+        <div class="flex gap-1" aria-label="Preview format">
+          <button type="button" class="rounded px-2.5 py-1 text-xs font-semibold" :class="previewMode === 'html' ? 'bg-white text-sky-700 shadow-sm dark:bg-gray-700 dark:text-sky-300' : 'text-gray-600 hover:bg-white/70 dark:text-gray-300 dark:hover:bg-gray-700'" :aria-pressed="previewMode === 'html'" @click="previewMode = 'html'">
+            HTML Preview
+          </button>
+          <button type="button" class="rounded px-2.5 py-1 text-xs font-semibold disabled:cursor-wait disabled:opacity-60" :class="previewMode === 'pdf' ? 'bg-white text-sky-700 shadow-sm dark:bg-gray-700 dark:text-sky-300' : 'text-gray-600 hover:bg-white/70 dark:text-gray-300 dark:hover:bg-gray-700'" :aria-pressed="previewMode === 'pdf'" :disabled="previewing && !pdfUrl" @click="selectPdfPreview">
+            PDF Preview
+          </button>
+        </div>
+      </div>
       <main class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
-        <article class="mx-auto min-h-full max-w-5xl bg-white p-5 text-[12px] text-black shadow-sm sm:p-8">
+        <div v-if="previewMode === 'pdf'" class="relative h-[65vh] min-h-[24rem] overflow-hidden rounded bg-white">
+          <iframe v-if="pdfUrl" :src="pdfUrl" class="h-full w-full border-0" title="RFQ PDF preview" />
+          <div v-else class="flex h-full items-center justify-center px-4 text-center text-sm text-gray-500" role="status">{{ previewing ? 'Generating PDF preview…' : pdfPreviewMessage }}</div>
+          <div v-if="previewing && pdfUrl" class="absolute right-2 top-2 rounded bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-900" role="status">Refreshing PDF preview…</div>
+        </div>
+        <article v-else class="mx-auto min-h-full max-w-5xl bg-white p-5 text-[12px] text-black shadow-sm sm:p-8">
           <header class="relative mb-5 h-[0.88in] w-full text-center">
             <img
               :src="'/images/header/Philippine%20Education%20Department%20Header.png'"
@@ -121,7 +137,13 @@
                     <td class="preview-td"><input v-model.number="row.quantity" type="number" min="0" step="any" class="preview-input w-16 text-right" /></td>
                     <td class="preview-td"><input v-model.number="row.unit_price" type="number" min="0" step="0.01" class="preview-input w-24 text-right" /></td>
                     <td class="preview-td"><input v-model.number="row.price_offered" type="number" min="0" step="0.01" class="preview-input w-24 text-right" /></td>
-                    <td class="preview-td"><input v-model="row.compliance" class="preview-input w-full" /></td>
+                    <td class="preview-td p-0">
+                      <div class="grid h-full grid-cols-3">
+                        <div class="border-r border-black p-1"><input v-model="row.compliance" class="preview-input w-full" /></div>
+                        <div class="border-r border-black p-1" />
+                        <div class="p-1" />
+                      </div>
+                    </td>
                     <td class="preview-td"><button type="button" class="font-semibold text-rose-600" @click="toggleItemById(row.item_id, false)">Remove</button></td>
                   </tr>
                   <tr v-if="selectedItems.length === 0"><td colspan="7" class="preview-td py-4 text-center text-gray-500">Select one or more eligible items to populate this table.</td></tr>
@@ -259,8 +281,8 @@
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ selectedItems.length }} item(s) · Floor price {{ formatMoney(Number(metadata.floor_price || 0)) }}</p>
         <div class="flex gap-2">
           <button type="button" class="rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300" :disabled="busy" @click="handleClose">Cancel</button>
-          <button type="button" class="rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-50 disabled:opacity-50 dark:border-sky-500/30 dark:bg-gray-800 dark:text-sky-300" :disabled="!canGenerate || busy" @click="previewPdf">
-            {{ previewing ? 'Preparing…' : 'Preview RFQ' }}
+          <button v-if="previewMode === 'pdf'" type="button" class="rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-50 disabled:opacity-50 dark:border-sky-500/30 dark:bg-gray-800 dark:text-sky-300" :disabled="!previewBlob || previewing" @click="downloadPreviewPdf">
+            Download Preview PDF
           </button>
           <button type="button" class="rounded-md bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50" :disabled="!canGenerate || busy" @click="downloadPdf">
             {{ generating ? 'Generating…' : 'Generate RFQ PDF' }}
@@ -271,7 +293,7 @@
     <template #overlay>
       <button
         type="button"
-        class="absolute left-0 top-26 z-[100001] flex items-center gap-2 rounded-r-md border border-l-0 border-sky-200 bg-white px-3 py-3 text-xs font-semibold text-sky-700 shadow-lg transition hover:bg-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-sky-500/30 dark:bg-gray-800 dark:text-sky-300 dark:hover:bg-sky-500/10"
+        class="absolute left-0 top-26 z-[100001] flex items-center rounded-r-md border border-l-0 border-sky-200 bg-white px-3 py-3 text-xs font-semibold text-sky-700 shadow-lg transition hover:bg-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-sky-500/30 dark:bg-gray-800 dark:text-sky-300 dark:hover:bg-sky-500/10"
         :aria-expanded="selectionDrawerOpen"
         :aria-label="selectionDrawerOpen ? 'Close item selection drawer' : 'Open item selection drawer'"
         aria-controls="rfq-selection-drawer"
@@ -288,7 +310,6 @@
         >
           <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
         </svg>
-        <span>{{ selectedItems.length }} selected</span>
       </button>
 
       <Transition name="rfq-fade">
@@ -415,22 +436,10 @@
     </template>
   </Modal>
 
-  <Modal :open="previewOpen" title="RFQ PDF Preview" max-width="max-w-6xl" @close="closePreview">
-    <div class="h-[70vh] overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
-      <iframe v-if="pdfUrl" :src="pdfUrl" class="h-full w-full" title="RFQ PDF preview" />
-      <div v-else class="flex h-full items-center justify-center text-sm text-gray-500">Loading preview…</div>
-    </div>
-    <template #footer>
-      <div class="flex justify-end gap-2">
-        <button type="button" class="rounded-md border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 dark:border-gray-700 dark:text-gray-300" @click="closePreview">Close</button>
-        <button type="button" class="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white" @click="downloadPreviewPdf">Download PDF</button>
-      </div>
-    </template>
-  </Modal>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import api from '../../../lib/axios';
 import Modal from '../../../components/ui/dialogs/Modal.vue';
 
@@ -447,12 +456,15 @@ const loadingItems = ref(false);
 const selectionDrawerOpen = ref(false);
 const previewing = ref(false);
 const generating = ref(false);
-const previewOpen = ref(false);
 const pdfUrl = ref('');
+const previewMode = ref('html');
+const previewCurrent = ref(false);
 const error = ref('');
 const totalManuallyEdited = ref(false);
 const floorManuallyEdited = ref(false);
 let previewBlob = null;
+let previewRefreshTimer = null;
+let previewRequestId = 0;
 const busy = computed(() => previewing.value || generating.value);
 
 const metadata = ref({});
@@ -536,6 +548,11 @@ const calculatedTotal = computed(() => selectedItems.value.reduce(
   0,
 ));
 const canGenerate = computed(() => !loadingItems.value && selectedItems.value.length > 0);
+const pdfPreviewMessage = computed(() => {
+  if (loadingItems.value) return 'Loading eligible items…';
+  if (selectedItems.value.length === 0) return 'Select at least one eligible item to generate the RFQ PDF.';
+  return 'PDF preview is not available.';
+});
 
 watch(calculatedTotal, (value) => {
   if (!totalManuallyEdited.value) metadata.value.total = value;
@@ -544,12 +561,27 @@ watch(calculatedTotal, (value) => {
 
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
+    closePreview();
     resetForm();
     fetchEligibleItems();
   } else {
     closePreview();
   }
 });
+
+watch(
+  [metadata, terms, requirements, rowOverrides, selectedIds],
+  () => {
+    previewCurrent.value = false;
+    if (!props.open || previewMode.value !== 'pdf') return;
+    clearTimeout(previewRefreshTimer);
+    previewRefreshTimer = setTimeout(() => {
+      previewRefreshTimer = null;
+      generatePreviewPdf();
+    }, 500);
+  },
+  { deep: true },
+);
 
 async function fetchEligibleItems() {
   loadingItems.value = true;
@@ -688,21 +720,31 @@ async function showRequestError(requestError) {
   error.value = responseData?.message ?? 'Failed to generate RFQ PDF. Please try again.';
 }
 
-async function previewPdf() {
-  if (!canGenerate.value || busy.value) return;
+async function generatePreviewPdf() {
+  if (!canGenerate.value || generating.value) return;
+  const requestId = ++previewRequestId;
   previewing.value = true;
   error.value = '';
   try {
     const blob = await requestPdf();
-    closePreview();
+    if (requestId !== previewRequestId) return;
+    const previousUrl = pdfUrl.value;
     previewBlob = blob;
     pdfUrl.value = URL.createObjectURL(blob);
-    previewOpen.value = true;
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    previewCurrent.value = true;
   } catch (requestError) {
-    await showRequestError(requestError);
+    if (requestId === previewRequestId) {
+      await showRequestError(requestError);
+    }
   } finally {
-    previewing.value = false;
+    if (requestId === previewRequestId) previewing.value = false;
   }
+}
+
+function selectPdfPreview() {
+  previewMode.value = 'pdf';
+  if (!previewCurrent.value && canGenerate.value) generatePreviewPdf();
 }
 
 async function downloadPdf() {
@@ -731,11 +773,16 @@ function downloadBlob(blob) {
 }
 
 function downloadPreviewPdf() {
-  if (previewBlob) downloadBlob(previewBlob);
+  if (previewBlob && previewCurrent.value) downloadBlob(previewBlob);
 }
 
 function closePreview() {
-  previewOpen.value = false;
+  clearTimeout(previewRefreshTimer);
+  previewRefreshTimer = null;
+  previewRequestId += 1;
+  previewMode.value = 'html';
+  previewCurrent.value = false;
+  previewing.value = false;
   if (pdfUrl.value) URL.revokeObjectURL(pdfUrl.value);
   pdfUrl.value = '';
   previewBlob = null;
@@ -747,6 +794,8 @@ function handleClose() {
   closePreview();
   emit('close');
 }
+
+onUnmounted(closePreview);
 
 </script>
 

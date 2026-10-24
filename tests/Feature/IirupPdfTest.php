@@ -65,7 +65,7 @@ test('IIRUP PDF generation returns 200', function () {
     expect($response->headers->get('content-type'))->toContain('pdf');
 });
 
-test('IIRUP PDF generation fails without signatories', function () {
+test('IIRUP PDF generation allows blank signatories', function () {
     $response = $this->actingAs($this->custodian)
         ->postJson('/property-custodian/inventory/iirup-pdf', [
             'report_date' => '2026-10-20',
@@ -73,7 +73,8 @@ test('IIRUP PDF generation fails without signatories', function () {
             'selected_ids' => [$this->item->item_id],
         ]);
 
-    $response->assertUnprocessable();
+    $response->assertOk();
+    expect($response->headers->get('content-type'))->toContain('pdf');
 });
 
 test('IIRUP PDF generation uses item overrides without recalculating edited values', function () {

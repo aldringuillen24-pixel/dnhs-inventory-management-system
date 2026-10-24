@@ -27,8 +27,14 @@
 - Tasks 1–9 in [task.md](./task.md) are implemented/locally verified. Inspector records arrival inspection and IAR; Custodian reviews/signs; approved IARs can be posted through explicit Stock In, once only.
 - The legacy inspection workflow was retired and a cleanup migration was tested locally. **Production cleanup is still gated**: inspect live records and proposed effects, obtain approval, then schedule deployment. Do not run the cleanup migration in production before that review.
 
+## Transfer release workflow
+- Transfer requests go to the custodian, who prepares and saves a Property Release Slip draft. The recipient acknowledges the handoff with a handwritten signature on the slip; there is no in-app recipient acceptance step.
+- Saving the slip does not change ownership. The custodian must explicitly confirm allocation after physical handoff; then the transfer, inventory assignment, transaction, movement, and slip completion are recorded together.
+- Drafts support inline PDF preview/printing and direct download through the release-slip endpoint.
+- Partial transfers remain linked to their exact source assignment via `source_assignment_id`.
+
 ## Recent validation
 - `php artisan test --compact tests/Feature/IssueReportWorkflowTest.php`: 25 passed, 304 assertions.
-- `php artisan test --compact tests/Feature/CustodianTransactionsApiTest.php`: 25 passed, 194 assertions.
+- `php artisan test tests/Feature/CustodianTransactionsApiTest.php`: 27 passed, 237 assertions; focused release-slip preview/download test: 41 assertions.
 - `npm run build`: passed; Vite reports an existing large-chunk warning.
 - Investigation routes registered; changed PHP files linted; `git diff --check` passed.

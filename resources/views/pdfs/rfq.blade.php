@@ -26,6 +26,7 @@
 		position: relative;
 		padding-top: 0.15in;
 	}
+
 </style>
 
 <div class="rfq-page-one">
@@ -153,7 +154,17 @@
 	<section class="rfq-items-page-one" style="width: 100%; margin: 4px 0 0; font-family: 'Times New Roman', serif; color: #000; font-size: 8.5pt;">
 		<p style="margin: 0 0 2px; text-align: left; font-size: 9pt; font-weight: bold;">Bids and Awards Committee</p>
 		<p style="margin: 0 0 4px; text-align: center; font-size: 9pt; font-weight: bold;">Instruction: Indicate “comply” or “not comply” in the space provided below.</p>
-		<table style="width: 100%; border-collapse: collapse; line-height: 1;">
+		<table style="width: 100%; table-layout: fixed; border-collapse: collapse; line-height: 1;">
+			<colgroup>
+				<col style="width: 35%;">
+				<col style="width: 8%;">
+				<col style="width: 9%;">
+				<col style="width: 12%;">
+				<col style="width: 11%;">
+				<col style="width: 8.33%;">
+				<col style="width: 8.33%;">
+				<col style="width: 8.34%;">
+			</colgroup>
 			<thead>
 				<tr>
 					<th style="border: 1px solid #000; padding: 3px; text-align: center;">ITEMS &amp; DESCRIPTION</th>
@@ -172,7 +183,9 @@
 						<td style="border: 1px solid #000; padding: 2px; text-align: center;">{{ $item['quantity'] }}</td>
 						<td style="border: 1px solid #000; padding: 2px; text-align: right;">{{ number_format((float) $item['unit_price'], 2) }}</td>
 						<td style="border: 1px solid #000; padding: 2px; text-align: right;">{{ $item['price_offered'] === '' ? '' : number_format((float) $item['price_offered'], 2) }}</td>
-						<td colspan="3" style="border: 1px solid #000; padding: 2px; text-align: center;">{{ $item['compliance'] }}</td>
+						<td style="border: 1px solid #000; padding: 2px; text-align: center;">{{ $item['compliance'] }}</td>
+						<td style="border: 1px solid #000; padding: 2px;"></td>
+						<td style="border: 1px solid #000; padding: 2px;"></td>
 					</tr>
 				@endforeach
 				<tr>

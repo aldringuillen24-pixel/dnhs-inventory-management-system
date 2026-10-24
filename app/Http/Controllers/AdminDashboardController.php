@@ -91,7 +91,13 @@ class AdminDashboardController extends Controller
             'metrics' => [
                 'activeUsers' => User::where('status', 'active')->count(),
                 'pendingOnboarding' => User::whereNotNull('temporary_password')->count(),
-                'pendingRequests' => AssignmentRequest::whereIn('status', ['waiting for approval', 'waiting for transfer approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT])->count(),
+                'pendingRequests' => AssignmentRequest::whereIn('status', [
+                    'waiting for approval',
+                    'waiting for transfer approval',
+                    'waiting for custodian approval',
+                    'transfer draft',
+                    AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
+                ])->count(),
                 'openMaintenance' => MaintenanceRecord::whereNotIn('status', ['completed', 'cancelled'])->count(),
             ],
             'roleData' => $roleData,

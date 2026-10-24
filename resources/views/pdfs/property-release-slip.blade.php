@@ -43,6 +43,9 @@
 
     <p class="section recipient-information">RECIPIENT INFORMATION</p>
     <p>Name of Requestor / Recipient: <u>{{ $recipientName }}</u></p>
+    @if (!empty($transferFromName))
+        <p>Transferred From: <u>{{ $transferFromName }}</u></p>
+    @endif
     <p>Department / Unit: {!! $fieldLine($slipFields['department_unit'] ?? null, '_______________________') !!}</p>
     <p>Designation: {!! $fieldLine($slipFields['designation'] ?? null, '___________________________') !!}</p>
     <p class="purpose">
