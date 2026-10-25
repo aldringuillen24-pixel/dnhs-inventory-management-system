@@ -318,10 +318,19 @@
                     <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-gray-500 dark:bg-white/10 dark:text-gray-400">gemini</span>
                     <span class="truncate font-medium text-gray-800 dark:text-gray-200">Environment key (GEMINI_API_KEY)</span>
                     <span class="shrink-0 font-mono text-gray-500 dark:text-gray-400">{{ envKey.masked_key }}</span>
-                    <span class="ml-auto shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">In use</span>
+                    <span
+                      class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold"
+                      :class="envKey.in_use
+                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                        : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400'"
+                    >
+                      {{ envKey.in_use ? 'In use' : 'Fallback' }}
+                    </span>
                   </div>
                   <div class="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                    Serving Gemini traffic — pooled keys take precedence once added.
+                    {{ envKey.in_use
+                      ? 'Serving Gemini traffic because there is no active pooled Gemini key.'
+                      : 'Not serving traffic while an active pooled Gemini key is available.' }}
                   </div>
                 </div>
               </div>
@@ -369,52 +378,19 @@
               </div>
                 </div>
               </div>
-              <div>
-                <!-- Setup guide: per-provider key configuration -->
-                <div class="rounded-md border border-gray-100 bg-gray-50/60 p-3 dark:border-white/5 dark:bg-white/[0.03]">
-                <h4 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Setup guide</h4>
-                <ol class="mt-1.5 list-decimal space-y-2 pl-5 text-xs text-gray-600 dark:text-gray-300">
-                  <li>
-                    <span class="font-semibold text-gray-800 dark:text-gray-200">Gemini — get a key.</span>
-                    Create one in Google AI Studio (AI Studio → Get API key) and enable the Generative Language API if prompted.
-                  </li>
-                  <li>
-                    <span class="font-semibold text-gray-800 dark:text-gray-200">Gemini — paste it above.</span>
-                    Add a label, paste the key, then Add key. Each card shows only a masked tail (e.g. <span class="font-mono">…Ab12</span>) — the full value is never displayed again.
-                  </li>
-                  <li>
-                    <span class="font-semibold text-gray-800 dark:text-gray-200">Gemini — verify with Ping.</span>
-                    Use the per-key Ping button (or the header Ping AI Provider). Green means the key, quota, and model access all work — on a fresh deploy this takes you from an empty pool to Ping green.
-                  </li>
-                  <li>
-                    <span class="font-semibold text-gray-800 dark:text-gray-200">Env fallback.</span>
-                    With zero pooled keys the app uses the <span class="font-mono">GEMINI_API_KEY</span> env value (model from <span class="font-mono">GEMINI_MODEL</span>). Once any pooled key exists the pool is authoritative and the env key is ignored — remove all pooled keys to fall back to env.
-                    <div class="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <code class="flex-1 break-all whitespace-pre-line rounded bg-white px-2 py-1.5 font-mono text-[11px] text-gray-800 dark:bg-black/30 dark:text-gray-100">GEMINI_API_KEY=paste-key-here&#10;GEMINI_MODEL=gemini-3.1-flash-lite</code>
-                      <button
-                        type="button"
-                        class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
-                        @click="copyEnvSnippet"
-                      >
-                        <LucideIcon :icon="copiedEnv ? Check : Copy" class="h-3.5 w-3.5" />
-                        {{ copiedEnv ? 'Copied' : 'Copy' }}
-                      </button>
-                    </div>
-                  </li>
-                  <li>
-                    <span class="font-semibold text-gray-800 dark:text-gray-200">Quota failover.</span>
-                    Quota and server errors (429 / 500 / 503) rotate to the next active Gemini key in priority order; a bad request (400) stops rotation so it never burns the pool. Each row shows its last error when a key fails.
-                  </li>
-                  <li>
-                    <span class="font-semibold text-gray-800 dark:text-gray-200">Forecast — no key needed today.</span>
-                    Forecasting runs on local models, so nothing external is required — no key to create, paste, or rotate.
-                  </li>
-                  <li>
-                    <span class="font-semibold text-gray-800 dark:text-gray-200">Rotation.</span>
-                    Disable or delete a compromised key (max 5 active per provider). Gemini traffic fails over to the remaining active keys automatically.
-                  </li>
-                </ol>
-                </div>
+              <div class="rounded-md border border-gray-200 bg-gray-50/60 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+                <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">API setup help</h3>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Learn how to add and test Gemini keys, configure the environment fallback, and understand key rotation.
+                </p>
+                <button
+                  type="button"
+                  class="mt-3 inline-flex items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5"
+                  @click="apiSetupGuideOpen = true"
+                >
+                  <LucideIcon :icon="BrainCircuit" class="h-3.5 w-3.5" />
+                  Show API Setup Guide
+                </button>
               </div>
             </div>
 
@@ -434,6 +410,57 @@
       </div>
     </div>
 
+    <Modal
+      :open="apiSetupGuideOpen"
+      title="API Setup Guide"
+      subtitle="Set up and manage Gemini API access for the assistant."
+      max-width="max-w-2xl"
+      @close="apiSetupGuideOpen = false"
+    >
+      <ol class="list-decimal space-y-4 pl-5 text-sm text-gray-600 dark:text-gray-300">
+        <li>
+          <span class="font-semibold text-gray-800 dark:text-gray-100">Get a Gemini API key.</span>
+          Create one in Google AI Studio. Enable the Generative Language API if prompted.
+        </li>
+        <li>
+          <span class="font-semibold text-gray-800 dark:text-gray-100">Add the key here.</span>
+          Enter a label and paste the key above. Keys are encrypted when stored; the page only shows a masked tail, not the full key.
+        </li>
+        <li>
+          <span class="font-semibold text-gray-800 dark:text-gray-100">Test the key.</span>
+          Use its Ping button to test that key, or use Ping AI Provider at the top to test the active provider route. A successful ping means the request worked at that time; quota can change later.
+        </li>
+        <li>
+          <span class="font-semibold text-gray-800 dark:text-gray-100">Environment fallback.</span>
+          Gemini uses <code class="font-mono">GEMINI_API_KEY</code> and <code class="font-mono">GEMINI_MODEL</code> when there is no active pooled Gemini key. Active pooled Gemini keys take precedence over the environment key.
+          <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <code class="flex-1 break-all whitespace-pre-line rounded-md bg-gray-100 px-3 py-2 font-mono text-xs text-gray-800 dark:bg-black/30 dark:text-gray-100">GEMINI_API_KEY=paste-key-here&#10;GEMINI_MODEL=gemini-3.1-flash-lite</code>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5"
+              @click="copyEnvSnippet"
+            >
+              <LucideIcon :icon="copiedEnv ? Check : Copy" class="h-3.5 w-3.5" />
+              {{ copiedEnv ? 'Copied' : 'Copy example' }}
+            </button>
+          </div>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Set these in your deployment environment settings. Never commit real key values to source control.</p>
+        </li>
+        <li>
+          <span class="font-semibold text-gray-800 dark:text-gray-100">Key failover.</span>
+          On quota/server errors (429, 500, 503), timeouts, or empty responses, Gemini tries the next active pooled key in priority order. A 400 response stops the retry. The key card shows its latest error.
+        </li>
+        <li>
+          <span class="font-semibold text-gray-800 dark:text-gray-100">Forecasting.</span>
+          Forecast calculations use local data and models. Gemini may be used to help write recommendation text; a local response is used if that text is unavailable or rejected.
+        </li>
+        <li>
+          <span class="font-semibold text-gray-800 dark:text-gray-100">Rotate a key.</span>
+          Disable or delete a compromised key. Up to five keys per provider can be active; Gemini requests can fail over to the other active Gemini keys.
+        </li>
+      </ol>
+    </Modal>
+
   </div>
 </template>
 
@@ -445,6 +472,7 @@ import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { useToastStore } from '../../stores/toast';
 import FieldError from '../../components/ui/feedback/FieldError.vue';
 import LucideIcon from '../../components/ui/data-display/LucideIcon.vue';
+import Modal from '../../components/ui/dialogs/Modal.vue';
 
 const toast = useToastStore();
 const working = ref(false);
@@ -463,6 +491,7 @@ const newKeyValue = ref('');
 const keyWorking = ref(false);
 const keyMessage = ref('');
 const copiedEnv = ref(false);
+const apiSetupGuideOpen = ref(false);
 
 const ENV_SNIPPET = 'GEMINI_API_KEY=paste-key-here\nGEMINI_MODEL=gemini-3.1-flash-lite';
 
