@@ -1055,7 +1055,6 @@
           </Teleport>
         </section>
         <InventoryItemLogDrawer
-          v-if="!isIncidentWorkspace"
           :open="logsOpen"
           :categories="categories"
           @close="logsOpen = false"
