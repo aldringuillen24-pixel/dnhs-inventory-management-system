@@ -27,6 +27,8 @@ class AiIntentParserService
         'transfer_history',
         'return_history',
         'ledger_summary',
+        'incident_reports',
+        'investigations',
         'scenario',
         'explanation',
         'continue',
@@ -53,6 +55,8 @@ class AiIntentParserService
         'ready_to_dispose',
         'location',
         'purchase_history',
+        'incident_reports',
+        'investigations',
     ];
 
     private const RESPONSE_TYPES = ['detail', 'count', 'list', 'explanation', 'same_as_topic'];
@@ -1269,13 +1273,14 @@ public function route(string $question, array $activeTopic = [], array $turns = 
     private function systemPrompt(): string
     {
         return 'Classify the user question only. Do not answer it, access data, or propose actions. Return one JSON object with exactly these keys: intent, topic_action, item_name, inventory_id, serial_number, location_query, filters, query, response_type, explanation, explanation_topic, is_compound, sub_requests. '
-            .'intent must be availability, stock, pending_requests, low_stock, forecast, executive_reports, system_summary, inventory_valuation, own_assignments, own_requests, item_status, assignments, maintenance, disposal, ready_to_dispose, location, purchase_history, transfer_history, return_history, ledger_summary, explanation, continue, inherit, unsupported, or unclear. Standalone procurement and restock questions are handed off; for a mixed compound question, classify each forecasting part as forecast. '
+            .'intent must be availability, stock, pending_requests, low_stock, forecast, executive_reports, system_summary, inventory_valuation, own_assignments, own_requests, item_status, assignments, maintenance, disposal, ready_to_dispose, location, purchase_history, transfer_history, return_history, ledger_summary, incident_reports, investigations, explanation, continue, inherit, unsupported, or unclear. Standalone procurement and restock questions are handed off; for a mixed compound question, classify each forecasting part as forecast. '
             .'Use transfer_history for completed custody transfers between users, return_history for completed item returns to the stockroom, and ledger_summary for recent stock movement activity. '
+            .'Use incident_reports for open incident reports and investigations for incidents with status under_investigation. These are read-only record lookups. '
             .'topic_action must be continue_topic, new_topic, or unclear. Use continue when the message only refers to the active topic and inherit when a new named item continues the active topic action. Use an active topic only for follow-ups or action inheritance; otherwise classify the new request independently. '
             .'Map explanation questions to intent explanation and set explanation_topic to the supported fact topic; otherwise explanation_topic must be null. Use only item names, inventory IDs, serial numbers, location names, units, and category IDs explicitly stated in the question; use null when absent. '
             .'filters must contain exactly category_id and unit. query must be null, pending_count, inventory_identifiers, or product_name. Use pending_count only when explicitly counting pending requests; use inventory_identifiers only when asking for an inventory number, ID, or asset tag; use product_name only when asking for the product name. For ordinary availability or stock questions, query must be null, including count questions. '
             .'response_type must be detail, count, list, explanation, or same_as_topic. explanation must be a boolean and true only for intent explanation. '
-            .'is_compound must be true only when the question asks for two or more separate inventory or forecast facts that can be answered independently. When it is false, sub_requests must be an empty array. When it is true, sub_requests must hold one entry per separate question in the order asked, each with exactly the keys intent, item_name, inventory_id, serial_number, location_query, filters, query, response_type; the top-level fields must then describe the first sub-request and topic_action must be new_topic. A sub-request intent must never be explanation, continue, inherit, unsupported or unclear, and its response_type must never be same_as_topic. Forecast sub-requests are handed off to the Forecast service, never to an inventory tool. Never return SQL, permissions, database instructions, answers, or additional keys.';
+            .'is_compound must be true only when the question asks for two or more separate inventory, incident, or forecast facts that can be answered independently. When it is false, sub_requests must be an empty array. When it is true, sub_requests must hold one entry per separate question in the order asked, each with exactly the keys intent, item_name, inventory_id, serial_number, location_query, filters, query, response_type; the top-level fields must then describe the first sub-request and topic_action must be new_topic. A sub-request intent must never be explanation, continue, inherit, unsupported or unclear, and its response_type must never be same_as_topic. Forecast sub-requests are handed off to the Forecast service, never to an inventory tool. Never return SQL, permissions, database instructions, answers, or additional keys.';
     }
 
     private function structuredResponseSchema(): array

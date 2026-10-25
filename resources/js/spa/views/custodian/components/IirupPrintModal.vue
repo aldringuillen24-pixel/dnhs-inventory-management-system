@@ -206,9 +206,6 @@
       >
         Cancel
       </button>
-      <button v-if="previewMode === 'pdf'" type="button" class="rounded-md border border-purple-200 bg-white px-3 py-2 text-xs font-semibold text-purple-700 shadow-sm hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10" :disabled="!previewBlob || previewing" @click="downloadFromPreview">
-        Download Preview PDF
-      </button>
       <button
         type="submit"
         class="rounded-md border border-purple-200 bg-purple-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-500/30 dark:hover:bg-purple-700/80"
@@ -744,18 +741,6 @@ function closePreview() {
     previewPdfUrl.value = '';
   }
   previewBlob = null;
-}
-
-function downloadFromPreview() {
-  if (!previewBlob || !previewCurrent.value) return;
-  const url = window.URL.createObjectURL(previewBlob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `IIRUP_${new Date().toISOString().slice(0, 10)}.pdf`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
 }
 
 async function submit() {

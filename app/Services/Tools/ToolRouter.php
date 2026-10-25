@@ -36,6 +36,7 @@ class ToolRouter
         ReturnTool $returnTool,
         ScenarioTool $scenarioTool,
         ForecastStub $forecastStub,
+        IncidentTool $incidentTool,
     ) {
         $this->tools = [
             $inventoryTool,
@@ -48,6 +49,7 @@ class ToolRouter
             $returnTool,
             $scenarioTool,
             $forecastStub,
+            $incidentTool,
         ];
     }
 

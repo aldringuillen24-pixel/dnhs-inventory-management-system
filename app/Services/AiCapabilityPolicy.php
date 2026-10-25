@@ -28,6 +28,7 @@ class AiCapabilityPolicy
     public const VIEW_RETURN_HISTORY = 'view_return_history';
     public const VIEW_LEDGER_SUMMARY = 'view_ledger_summary';
     public const VIEW_SCENARIO = 'view_scenario';
+    public const VIEW_INCIDENT_REPORTS = 'view_incident_reports';
 
     private const CAPABILITIES = [
         self::VIEW_OWN_ASSIGNMENTS,
@@ -52,6 +53,7 @@ class AiCapabilityPolicy
         self::VIEW_RETURN_HISTORY,
         self::VIEW_LEDGER_SUMMARY,
         self::VIEW_SCENARIO,
+        self::VIEW_INCIDENT_REPORTS,
     ];
 
     private const PROPERTY_CUSTODIAN_CAPABILITIES = [
@@ -76,6 +78,7 @@ class AiCapabilityPolicy
         self::VIEW_RETURN_HISTORY,
         self::VIEW_LEDGER_SUMMARY,
         self::VIEW_SCENARIO,
+        self::VIEW_INCIDENT_REPORTS,
     ];
 
     private const ROLE_CAPABILITIES = [
@@ -118,6 +121,7 @@ class AiCapabilityPolicy
             'return_history' => self::VIEW_RETURN_HISTORY,
             'ledger_summary' => self::VIEW_LEDGER_SUMMARY,
             'scenario' => self::VIEW_SCENARIO,
+            'incident_reports', 'investigations' => self::VIEW_INCIDENT_REPORTS,
             default => null,
         };
     }
@@ -220,6 +224,9 @@ class AiCapabilityPolicy
         }
         if (isset($capabilities[self::VIEW_SCENARIO])) {
             $help[] = 'what-if scenario projections';
+        }
+        if (isset($capabilities[self::VIEW_INCIDENT_REPORTS])) {
+            $help[] = 'incident reports and investigations';
         }
 
         if (isset($capabilities[self::VIEW_OWN_REQUESTS])) {

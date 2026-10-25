@@ -65,6 +65,8 @@ test('each supported parsed intent maps to one allowlisted application capabilit
         'ready_to_dispose' => AiCapabilityPolicy::VIEW_READY_TO_DISPOSE,
         'location' => AiCapabilityPolicy::VIEW_INVENTORY_LOCATION,
         'purchase_history' => AiCapabilityPolicy::VIEW_PURCHASE_HISTORY,
+        'incident_reports' => AiCapabilityPolicy::VIEW_INCIDENT_REPORTS,
+        'investigations' => AiCapabilityPolicy::VIEW_INCIDENT_REPORTS,
     ];
 
     foreach ($intentCapabilities as $intent => $capability) {
@@ -126,7 +128,7 @@ test('the assistant welcome message matches each role capability set', function 
     expect($policy->assistantHelpText(roleScopeUser('End User')))->toBe(
         'I can only provide information available for your role.'
     )->and($policy->assistantHelpText(roleScopeUser('Property Custodian')))->toBe(
-        'I can help with stock availability, inventory stock, inventory locations, pending requests, low-stock items, demand forecasts, reports, inventory valuation, assignment records, maintenance records, disposal records, items ready for disposal, purchase history, item status, requests, and assigned items.'
+        'I can help with stock availability, inventory stock, inventory locations, pending requests, low-stock items, demand forecasts, reports, inventory valuation, assignment records, maintenance records, disposal records, items ready for disposal, purchase history, item status, what-if scenario projections, incident reports and investigations, requests, and assigned items.'
     )->and($policy->assistantHelpText(roleScopeUser('School Head')))->toBe(
         'I can only provide information available for your role.'
     )->and($policy->assistantHelpText(roleScopeUser('Administrator')))->toBe(

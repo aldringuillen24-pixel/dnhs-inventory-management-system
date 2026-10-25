@@ -281,9 +281,6 @@
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ selectedItems.length }} item(s) · Floor price {{ formatMoney(Number(metadata.floor_price || 0)) }}</p>
         <div class="flex gap-2">
           <button type="button" class="rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300" :disabled="busy" @click="handleClose">Cancel</button>
-          <button v-if="previewMode === 'pdf'" type="button" class="rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-50 disabled:opacity-50 dark:border-sky-500/30 dark:bg-gray-800 dark:text-sky-300" :disabled="!previewBlob || previewing" @click="downloadPreviewPdf">
-            Download Preview PDF
-          </button>
           <button type="button" class="rounded-md bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50" :disabled="!canGenerate || busy" @click="downloadPdf">
             {{ generating ? 'Generating…' : 'Generate RFQ PDF' }}
           </button>
@@ -770,10 +767,6 @@ function downloadBlob(blob) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-function downloadPreviewPdf() {
-  if (previewBlob && previewCurrent.value) downloadBlob(previewBlob);
 }
 
 function closePreview() {

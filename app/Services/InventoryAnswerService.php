@@ -1238,6 +1238,8 @@ public function clarificationReply(User $user, array $pending): string
         foreach ([
             'status_items' => 'Inventory status',
             'assignment_records' => 'Assignment',
+            'incident_reports' => 'Incident report',
+            'investigations' => 'Investigation',
             'maintenance_records' => 'Maintenance',
             'disposal_records' => 'Disposal',
             'ready_to_dispose_items' => 'Ready for disposal',
@@ -1249,6 +1251,13 @@ public function clarificationReply(User $user, array $pending): string
         ] as $key => $label) {
             if (isset($answer[$key])) {
                 if ($answer[$key] === []) {
+                    if ($key === 'incident_reports') {
+                        return 'There are no open incident reports.';
+                    }
+                    if ($key === 'investigations') {
+                        return 'There are no active investigations.';
+                    }
+
                     return 'No matching inventory records were found.';
                 }
 
@@ -1267,6 +1276,11 @@ public function clarificationReply(User $user, array $pending): string
                         isset($record['to']) ? 'To: ' . $record['to'] : null,
                         isset($record['quantity']) ? 'Quantity: ' . $record['quantity'] . ' ' . ($record['unit'] ?? 'units') : null,
                         isset($record['date']) ? 'Date: ' . $record['date'] : null,
+                        isset($record['report_id']) ? 'Report ID: ' . $record['report_id'] : null,
+                        isset($record['type']) ? 'Type: ' . $record['type'] : null,
+                        isset($record['reporter']) ? 'Reporter: ' . $record['reporter'] : null,
+                        isset($record['details']) ? 'Details: ' . $record['details'] : null,
+                        isset($record['submitted_at']) ? 'Submitted: ' . $record['submitted_at'] : null,
                         isset($record['issue']) ? 'Issue: ' . $record['issue'] : null,
                         isset($record['notes']) ? 'Notes: ' . $record['notes'] : null,
                     ]);
@@ -1277,6 +1291,9 @@ public function clarificationReply(User $user, array $pending): string
                 // Record lists are capped at the 25 latest: say so rather
                 // than letting the list read as the complete set.
                 if (in_array($key, ['assignment_records', 'transfer_records', 'return_records'], true) && count($answer[$key]) === 25) {
+                    $lines .= "\nShowing the latest 25 records.";
+                }
+                if (in_array($key, ['incident_reports', 'investigations'], true) && ($answer['showing_latest'] ?? false)) {
                     $lines .= "\nShowing the latest 25 records.";
                 }
 
@@ -1324,6 +1341,18 @@ public function clarificationReply(User $user, array $pending): string
                 $count,
                 Str::plural('item', $count)
             );
+        }
+        foreach (['incident_report_count' => 'incident report', 'investigation_count' => 'investigation'] as $key => $label) {
+            if (isset($answer[$key])) {
+                $count = (int) $answer[$key];
+
+                return sprintf(
+                    'There %s %d open %s.',
+                    $count === 1 ? 'is' : 'are',
+                    $count,
+                    Str::plural($label, $count)
+                );
+            }
         }
         if (isset($answer['pending_count'])) {
             return $answer['pending_count'] === 0
