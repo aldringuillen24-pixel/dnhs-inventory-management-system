@@ -94,10 +94,9 @@ services:
     name: dnhs-forecast-train
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: free
     region: singapore
     schedule: "0 2 * * *"
-    startCommand: "php artisan forecast:train --no-interaction"
+    dockerCommand: "php artisan forecast:train --no-interaction"
     envVars:
       - key: APP_NAME
         value: DNHS Inventory
