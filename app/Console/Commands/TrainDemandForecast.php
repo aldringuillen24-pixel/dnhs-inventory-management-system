@@ -22,7 +22,8 @@ class TrainDemandForecast extends Command
 {
     protected $signature = 'forecast:train
         {--sample : Train from the isolated ml/demo_stock_out_data.csv}
-        {--test-dataset : Train the live forecast from the local dummy dataset (local/testing only)}';
+        {--test-dataset : Train the live forecast from the local dummy dataset (local/testing only)}
+        {--local-model : Run the production Python model locally instead of calling the forecast API}';
 
     protected $description = 'Export eligible completed demand and train the production ML forecast.';
 
@@ -55,8 +56,10 @@ class TrainDemandForecast extends Command
 
     public function handle(): int
     {
-        if ($this->option('sample') && $this->option('test-dataset')) {
-            $this->error('The sample and test-dataset options cannot be used together.');
+        $trainingModes = collect(['sample', 'test-dataset', 'local-model'])
+            ->filter(fn (string $option): bool => (bool) $this->option($option));
+        if ($trainingModes->count() > 1) {
+            $this->error('The sample, test-dataset, and local-model options cannot be used together.');
 
             return self::FAILURE;
         }
@@ -81,34 +84,9 @@ class TrainDemandForecast extends Command
             $this->writeLiveTrainingStatus($disk, 'running');
             $this->exportApprovedStockOuts($csvPath);
 
-            $apiUrl = rtrim((string) config('forecast.api_url'), '/');
-            $apiToken = (string) config('forecast.api_token');
-            if ($apiUrl === '' || $apiToken === '') {
-                throw new \RuntimeException('Forecast API URL and token must be configured.');
-            }
-            if (parse_url($apiUrl, PHP_URL_SCHEME) !== 'https' && ! app()->environment(['local', 'testing'])) {
-                throw new \RuntimeException('Forecast API URL must use HTTPS outside local and testing environments.');
-            }
-
-            $csv = fopen($csvPath, 'rb');
-            if ($csv === false) {
-                throw new \RuntimeException("Unable to read forecast export: {$csvPath}");
-            }
-
-            try {
-                $response = Http::connectTimeout(10)
-                    ->timeout(120)
-                    ->withToken($apiToken)
-                    ->attach('file', $csv, basename($csvPath))
-                    ->post($apiUrl.'/forecast', [
-                        'minimum_history' => max(1, (int) config('forecast.minimum_history', 3)),
-                    ]);
-            } finally {
-                fclose($csv);
-            }
-
-            $response->throw();
-            $forecast = $response->json();
+            $forecast = $this->option('local-model')
+                ? $this->trainExportLocally($csvPath)
+                : $this->trainExportViaApi($csvPath);
             if (! is_array($forecast)
                 || ($forecast['schema_version'] ?? null) !== 2
                 || ($forecast['source_type'] ?? null) !== ForecastPayload::SOURCE_LIVE
@@ -118,7 +96,7 @@ class TrainDemandForecast extends Command
                 || ! array_is_list($forecast['forecasts'])
                 || ! is_array($forecast['insufficient_history'] ?? null)
                 || ! array_is_list($forecast['insufficient_history'])) {
-                throw new \UnexpectedValueException('Forecast API returned an invalid forecast document.');
+                throw new \UnexpectedValueException('Forecast trainer returned an invalid forecast document.');
             }
 
             $this->storedForecastService->persistTraining(
@@ -141,6 +119,79 @@ class TrainDemandForecast extends Command
             $this->error('Demand forecast training failed. Check the Laravel log for details.');
 
             return self::FAILURE;
+        }
+    }
+
+    private function trainExportViaApi(string $csvPath): mixed
+    {
+        $apiUrl = rtrim((string) config('forecast.api_url'), '/');
+        $apiToken = (string) config('forecast.api_token');
+        if ($apiUrl === '' || $apiToken === '') {
+            throw new \RuntimeException('Forecast API URL and token must be configured.');
+        }
+        if (parse_url($apiUrl, PHP_URL_SCHEME) !== 'https' && ! app()->environment(['local', 'testing'])) {
+            throw new \RuntimeException('Forecast API URL must use HTTPS outside local and testing environments.');
+        }
+
+        $csv = fopen($csvPath, 'rb');
+        if ($csv === false) {
+            throw new \RuntimeException("Unable to read forecast export: {$csvPath}");
+        }
+
+        try {
+            $response = Http::connectTimeout(10)
+                ->timeout(120)
+                ->withToken($apiToken)
+                ->attach('file', $csv, basename($csvPath))
+                ->post($apiUrl.'/forecast', [
+                    'minimum_history' => max(1, (int) config('forecast.minimum_history', 3)),
+                ]);
+        } finally {
+            fclose($csv);
+        }
+
+        $response->throw();
+
+        return $response->json();
+    }
+
+    private function trainExportLocally(string $csvPath): array
+    {
+        $trainerPath = base_path('ml/forecast_demand.py');
+        $outputPath = tempnam(sys_get_temp_dir(), 'dnhs-forecast-json-');
+        $modelPath = tempnam(sys_get_temp_dir(), 'dnhs-forecast-model-');
+
+        try {
+            if ($outputPath === false || $modelPath === false) {
+                throw new \RuntimeException('Unable to create temporary forecast training outputs.');
+            }
+            if (! is_readable($csvPath) || ! is_readable($trainerPath)) {
+                throw new \RuntimeException('Production forecast export or trainer is missing or unreadable.');
+            }
+
+            $process = new Process([
+                config('forecast.python_binary'),
+                $trainerPath,
+                '--input', $csvPath,
+                '--output', $outputPath,
+                '--model-output', $modelPath,
+                '--minimum-history', (string) max(1, (int) config('forecast.minimum_history', 3)),
+            ], base_path());
+            $process->setTimeout(120);
+            $process->run();
+
+            if (! $process->isSuccessful()) {
+                throw new \RuntimeException(trim($process->getErrorOutput()) ?: trim($process->getOutput()) ?: 'Production forecast training process failed.');
+            }
+
+            return json_decode(file_get_contents($outputPath), true, 512, JSON_THROW_ON_ERROR);
+        } finally {
+            if (is_string($outputPath) && is_file($outputPath)) {
+                unlink($outputPath);
+            }
+            if (is_string($modelPath) && is_file($modelPath)) {
+                unlink($modelPath);
+            }
         }
     }
 

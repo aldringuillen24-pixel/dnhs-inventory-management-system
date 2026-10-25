@@ -55,6 +55,11 @@ __pycache__/
 # Local development tools and internal project files
 .continue/
 .github/
+!.github/
+.github/*
+!.github/workflows/
+.github/workflows/*
+!.github/workflows/demand-forecast.yml
 .qodo/
 .rat/
 .rat.last.json
