@@ -116,8 +116,8 @@ def parse_export(path: str | Path) -> dict[tuple[int, int], dict[str, Any]]:
             unit = row["unit"].strip()
             if inventory_id < 1 or category_id < 1 or not item_name or not category or not unit:
                 raise ValueError(f"Item identity is incomplete on CSV line {line_number}")
-            if not math.isfinite(quantity) or quantity <= 0:
-                continue
+            if not math.isfinite(quantity) or quantity < 0:
+                raise ValueError(f"Quantity must be a finite non-negative number on CSV line {line_number}")
 
             event_month = event_date.strftime("%Y-%m")
             if event_month not in window_months:

@@ -3,6 +3,10 @@
 return [
     'api_url' => env('FORECAST_API_URL'),
     'api_token' => env('FORECAST_API_TOKEN'),
+    'historical_dataset_path' => env(
+        'FORECAST_HISTORICAL_DATASET',
+        storage_path('app/datasets/historical-usage.csv'),
+    ),
     /*
      * Used only by the isolated sample/demo trainer.
      */

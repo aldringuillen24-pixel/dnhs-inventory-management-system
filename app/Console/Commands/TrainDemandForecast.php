@@ -11,7 +11,6 @@ use App\Support\RequestableItemMatcher;
 use App\Support\SampleForecastData;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -37,8 +36,7 @@ class TrainDemandForecast extends Command
 
     public function __construct(
         protected StoredDemandForecastService $storedForecastService,
-    )
-    {
+    ) {
         parent::__construct();
     }
 
@@ -168,6 +166,7 @@ class TrainDemandForecast extends Command
             if (! is_readable($csvPath) || ! is_readable($trainerPath)) {
                 throw new \RuntimeException('Production forecast export or trainer is missing or unreadable.');
             }
+            $historicalRows = $this->mergeHistoricalUsage($csvPath);
 
             $process = new Process([
                 config('forecast.python_binary'),
@@ -184,6 +183,8 @@ class TrainDemandForecast extends Command
                 throw new \RuntimeException(trim($process->getErrorOutput()) ?: trim($process->getOutput()) ?: 'Production forecast training process failed.');
             }
 
+            $this->info("Included {$historicalRows} historical usage records.");
+
             return json_decode(file_get_contents($outputPath), true, 512, JSON_THROW_ON_ERROR);
         } finally {
             if (is_string($outputPath) && is_file($outputPath)) {
@@ -193,6 +194,248 @@ class TrainDemandForecast extends Command
                 unlink($modelPath);
             }
         }
+    }
+
+    private function mergeHistoricalUsage(string $databaseCsvPath): int
+    {
+        $historicalCsvPath = (string) config('forecast.historical_dataset_path');
+        $historicalRows = $this->readForecastCsv($historicalCsvPath);
+        $databaseRows = $this->readForecastCsv($databaseCsvPath);
+        $requiredColumns = [
+            'inventory_id', 'item_name', 'category_id', 'category', 'unit', 'quantity_issued',
+            'stock_out_date', 'history_start_month', 'history_end_month', 'history_complete',
+            'movement_type', 'status',
+        ];
+
+        if ($historicalRows === []) {
+            throw new \UnexpectedValueException('Historical demand dataset contains no usage rows.');
+        }
+
+        $inventory = Inventory::query()
+            ->withoutGlobalScope(SampleForecastData::SCOPE)
+            ->with('category')
+            ->get(['item_id', 'item_name', 'category_id', 'unit']);
+        $inventoryByDescription = [];
+        foreach ($inventory as $item) {
+            $category = $item->category;
+            if (! $category || $category->requires_serial_number || ! $item->unit) {
+                continue;
+            }
+
+            $key = $this->historicalItemKey(
+                (string) $item->item_name,
+                (string) $category->category_name,
+                (string) $item->unit,
+            );
+            $inventoryByDescription[$key][] = [
+                'inventory_id' => $item->item_id,
+                'item_name' => $item->item_name,
+                'category_id' => $item->category_id,
+                'category' => $category->category_name,
+                'unit' => $item->unit,
+            ];
+        }
+
+        $completedMonth = now()->startOfMonth()->subMonth()->format('Y-m');
+        $minimumStartMonths = [];
+        $rowsByInventory = [];
+        $historicalWindows = [];
+        $historicalUsageMonths = [];
+        $historicalInventoryItems = [];
+        foreach ($databaseRows as $row) {
+            $inventoryId = (int) $row['inventory_id'];
+            $rowsByInventory[$inventoryId][] = $row;
+            $minimumStartMonths[$inventoryId] = min(
+                $minimumStartMonths[$inventoryId] ?? $row['history_start_month'],
+                $row['history_start_month'],
+            );
+        }
+
+        foreach ($historicalRows as $index => $row) {
+            foreach ($requiredColumns as $column) {
+                if (! array_key_exists($column, $row)) {
+                    throw new \UnexpectedValueException("Historical dataset is missing the {$column} column.");
+                }
+            }
+
+            $line = $index + 2;
+            $itemName = trim((string) $row['item_name']);
+            $categoryName = trim((string) $row['category']);
+            $unit = trim((string) $row['unit']);
+            $matches = $inventoryByDescription[$this->historicalItemKey($itemName, $categoryName, $unit)] ?? [];
+            if (count($matches) !== 1) {
+                $reason = $matches === [] ? 'does not match an inventory item' : 'matches more than one inventory item';
+                throw new \UnexpectedValueException("Historical dataset row {$line} {$reason}: {$itemName} ({$categoryName}, {$unit}).");
+            }
+
+            $item = $matches[0];
+            $quantity = filter_var($row['quantity_issued'], FILTER_VALIDATE_FLOAT);
+            if ($quantity === false || ! is_finite($quantity) || $quantity < 0) {
+                throw new \UnexpectedValueException("Historical dataset row {$line} has an invalid usage quantity.");
+            }
+
+            $eventDateValue = trim((string) $row['stock_out_date']);
+            $eventDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $eventDateValue);
+            $dateErrors = \DateTimeImmutable::getLastErrors();
+            if ($eventDate === false
+                || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))
+                || $eventDate->format('Y-m-d') !== $eventDateValue
+                || $eventDate->format('Y-m') > $completedMonth) {
+                throw new \UnexpectedValueException("Historical dataset row {$line} must have a valid date in a completed month.");
+            }
+
+            $startMonth = trim((string) $row['history_start_month']);
+            $endMonth = trim((string) $row['history_end_month']);
+            if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $startMonth)
+                || ! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $endMonth)
+                || $startMonth > $eventDate->format('Y-m')
+                || $eventDate->format('Y-m') > $endMonth
+                || $endMonth > $completedMonth) {
+                throw new \UnexpectedValueException("Historical dataset row {$line} has an invalid history window.");
+            }
+            $historyComplete = strtolower(trim((string) $row['history_complete']));
+            if (! in_array($historyComplete, ['true', 'false'], true)) {
+                throw new \UnexpectedValueException("Historical dataset row {$line} has an invalid history completeness value.");
+            }
+
+            $movementType = $this->normaliseHistoricalValue((string) $row['movement_type']);
+            $status = $this->normaliseHistoricalValue((string) $row['status']);
+            if (! in_array($movementType, ['stock out', 'stockout', 'issue', 'issuance'], true)
+                || ! in_array($status, ['approved', 'complete', 'completed'], true)) {
+                throw new \UnexpectedValueException("Historical dataset row {$line} is not an approved demand movement.");
+            }
+
+            $inventoryId = (int) $item['inventory_id'];
+            $window = [
+                'start_month' => $startMonth,
+                'end_month' => $endMonth,
+                'complete' => $historyComplete === 'true',
+            ];
+            if (isset($historicalWindows[$inventoryId]) && $historicalWindows[$inventoryId] !== $window) {
+                throw new \UnexpectedValueException("Historical dataset rows for {$itemName} have conflicting history windows.");
+            }
+            $historicalWindows[$inventoryId] = $window;
+            $historicalUsageMonths[$inventoryId][$eventDate->format('Y-m')] = true;
+            $historicalInventoryItems[$inventoryId] = $item;
+            $minimumStartMonths[$inventoryId] = min(
+                $minimumStartMonths[$inventoryId] ?? $startMonth,
+                $startMonth,
+            );
+            $rowsByInventory[$inventoryId][] = [
+                'inventory_id' => $inventoryId,
+                'item_name' => $item['item_name'],
+                'category_id' => $item['category_id'],
+                'category' => $item['category'],
+                'unit' => $item['unit'],
+                'quantity_issued' => $row['quantity_issued'],
+                'stock_out_date' => $eventDateValue,
+                'history_start_month' => $startMonth,
+                'history_end_month' => $completedMonth,
+                'history_complete' => 'false',
+                'movement_type' => $movementType,
+                'status' => $status,
+            ];
+        }
+
+        foreach ($historicalWindows as $inventoryId => $window) {
+            if (! $window['complete']) {
+                continue;
+            }
+
+            $item = $historicalInventoryItems[$inventoryId];
+            $month = Carbon::createFromFormat('!Y-m', $window['start_month']);
+            while ($month->format('Y-m') <= $window['end_month']) {
+                $monthValue = $month->format('Y-m');
+                if (! isset($historicalUsageMonths[$inventoryId][$monthValue])) {
+                    $rowsByInventory[$inventoryId][] = [
+                        'inventory_id' => $inventoryId,
+                        'item_name' => $item['item_name'],
+                        'category_id' => $item['category_id'],
+                        'category' => $item['category'],
+                        'unit' => $item['unit'],
+                        'quantity_issued' => 0,
+                        'stock_out_date' => $monthValue.'-01',
+                        'history_start_month' => $window['start_month'],
+                        'history_end_month' => $completedMonth,
+                        'history_complete' => 'false',
+                        'movement_type' => 'stock_out',
+                        'status' => 'approved',
+                    ];
+                    $minimumStartMonths[$inventoryId] = min(
+                        $minimumStartMonths[$inventoryId],
+                        $window['start_month'],
+                    );
+                }
+                $month->addMonth();
+            }
+        }
+
+        $handle = fopen($databaseCsvPath, 'w');
+        if ($handle === false) {
+            throw new \RuntimeException("Unable to create merged forecast export: {$databaseCsvPath}");
+        }
+
+        try {
+            fputcsv($handle, self::CSV_COLUMNS);
+            foreach ($rowsByInventory as $inventoryId => $rows) {
+                foreach ($rows as $row) {
+                    $row['history_start_month'] = $minimumStartMonths[$inventoryId];
+                    $row['history_end_month'] = $completedMonth;
+                    $row['history_complete'] = 'false';
+                    fputcsv($handle, array_map(
+                        fn (string $column): mixed => $row[$column],
+                        self::CSV_COLUMNS,
+                    ));
+                }
+            }
+        } finally {
+            fclose($handle);
+        }
+
+        return count($historicalRows);
+    }
+
+    private function readForecastCsv(string $path): array
+    {
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            throw new \RuntimeException("Unable to read forecast dataset: {$path}");
+        }
+
+        try {
+            $headers = fgetcsv($handle, escape: '');
+            if ($headers === false) {
+                return [];
+            }
+            $headers = array_map(
+                fn (string $header): string => strtolower(trim(preg_replace('/^\xEF\xBB\xBF/', '', $header) ?? $header)),
+                $headers,
+            );
+            $rows = [];
+            while (($values = fgetcsv($handle, escape: '')) !== false) {
+                if (count($headers) !== count($values)) {
+                    throw new \UnexpectedValueException("Forecast dataset has a malformed row: {$path}");
+                }
+                $rows[] = array_combine($headers, $values);
+            }
+
+            return $rows;
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    private function historicalItemKey(string $itemName, string $category, string $unit): string
+    {
+        return implode('|', array_map(
+            fn (string $value): string => $this->normaliseHistoricalValue($value),
+            [$itemName, $category, $unit],
+        ));
+    }
+
+    private function normaliseHistoricalValue(string $value): string
+    {
+        return mb_strtolower(trim(str_replace(['_', '-'], ' ', $value)));
     }
 
     private function trainTestDataset($disk): int
@@ -288,8 +531,7 @@ class TrainDemandForecast extends Command
                     throw new \UnexpectedValueException('Dummy dataset trainer returned an invalid item identity.');
                 }
 
-                $matches = $inventory->filter(fn (Inventory $candidate): bool =>
-                    $candidate->category
+                $matches = $inventory->filter(fn (Inventory $candidate): bool => $candidate->category
                     && mb_strtolower(trim((string) $candidate->category->category_name)) === mb_strtolower(trim($item['category']))
                     && RequestableItemMatcher::nameMatches($item['item_name'], (string) $candidate->item_name)
                     && RequestableItemMatcher::unitMatches($item['unit'], $candidate->unit)

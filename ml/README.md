@@ -1,6 +1,14 @@
 # Demand Forecast Pipelines
 
-Python forecasting code and its requirements live in `ml/`; Laravel exports eligible demand, calls the Python forecasting service, validates the returned JSON, and stores the live document in `forecast_payloads.payload` with `source_type=live`. Production Laravel reads live forecasts from that database row only. `storage/app/forecast/` holds local training inputs/status and isolated demo output, while Joblib models belong under `storage/app/models/` for local development only and are never loaded by PHP.
+Python forecasting code and its requirements live in `ml/`. The production
+GitHub Actions workflow combines historical usage from the
+`HISTORICAL_USAGE_CSV` secret with eligible database demand, runs the Python
+model on the runner, validates the result, and stores the live document in
+`forecast_payloads.payload` with `source_type=live`. Production Laravel reads
+live forecasts from that database row only. `storage/app/forecast/` holds
+local training inputs/status and isolated demo output, while Joblib models
+belong under `storage/app/models/` for local development only and are never
+loaded by PHP.
 
 # training model
 python ml\forecast_demand.py --input storage\app\datasets\dummay-datasets.csv --minimum-history 3 --output storage\app\forecast\dummy-forecast.json --model-output storage\app\models\dummy-demand-model.joblib
@@ -70,11 +78,12 @@ model uses the calendar offsets of the observed months. The fitted trend is
 extrapolated for each requested future month and predictions remain decimal
 and non-negative.
 
-The existing Laravel scheduled training flow remains on `POST /forecast`: it
-sends the approved movement CSV and persists the established version-2
-forecast document. This preserves existing storage and display behavior;
-`/predict` is an additional JSON contract and does not silently replace that
-pipeline.
+The GitHub Actions production workflow runs
+`php artisan forecast:train --local-model --no-interaction`. Laravel exports
+approved movement data, invokes this Python trainer directly on the Actions
+runner, and persists the established version-2 forecast document. This avoids
+needing a continuously hosted Python API. The `/forecast` and `/predict`
+endpoints remain available for deployments that choose to host the API.
 
 Example JSON body (the quantities are illustrative input, not model output):
 
@@ -99,22 +108,10 @@ Validation failures return HTTP 422, invalid credentials return HTTP 401, and
 unexpected prediction failures return a generic HTTP 500 response without
 internal exception details.
 
-On Render, the repository blueprint creates the `dnhs-demand-forecast` Python
-web service. After its first deploy, copy its `ML_API_TOKEN` into
-`FORECAST_API_TOKEN` on both the `dnhs-inventory` web service and the
-`dnhs-forecast-train` cron service. Set `FORECAST_API_URL` on both to the
-forecast service URL, without a trailing slash. Keep the token secret and do
-not commit it. The cron job continues to export approved demand locally, then
-posts the CSV to this API over HTTPS; the demo/sample trainer remains isolated
-and local to the Laravel container.
-
-To deploy this service on Railway instead, create a Python service from this
-repository with its root directory set to `ml`. `ml/railway.json` specifies
-the Uvicorn start command and `/health` health check. Set `ML_API_TOKEN` in
-Railway service variables, generate a public HTTPS domain, and set
-`FORECAST_API_URL` and the same `FORECAST_API_TOKEN` in the Laravel Render
-service. The current Laravel cron continues to call `/forecast`; both
-endpoints are hosted by this service.
+The current GitHub Actions workflow does not need this API to be deployed.
+It runs the model directly and connects to the production database using
+GitHub repository secrets. See the [GitHub Actions setup guide](../task/Python-service-setup.md)
+for the database connection requirements and workflow configuration.
 
 To run the API locally:
 
@@ -127,12 +124,14 @@ python -m pip install -r ml\requirements.txt
 uvicorn main:app --app-dir ml --reload
 ```
 
-Set `ML_API_TOKEN` in the environment where Uvicorn runs and set
-`FORECAST_API_URL` and the matching `FORECAST_API_TOKEN` in Laravel. Run
-`php artisan forecast:train` on a schedule outside chat requests. Laravel
-exports completed eligible demand to
-`storage/app/datasets/real-stock-out-data.csv` and persists the API's JSON
-response to the shared forecast database. The separate
+Set `ML_API_TOKEN` when running Uvicorn. For a hosted-API training run, set
+`FORECAST_API_URL` and the matching `FORECAST_API_TOKEN` in Laravel. The
+GitHub Actions workflow instead runs
+`php artisan forecast:train --local-model --no-interaction`, which requires
+Python model dependencies and database access but no API URL or token. Both
+paths export completed eligible demand to
+`storage/app/datasets/real-stock-out-data.csv` and persist the validated
+forecast to the shared database. The separate
 `forecast/training-status.json` marks running, successful, or failed refreshes.
 
 The production CSV and output preserve inventory and category IDs. Only approved completed stock-outs and eligible non-returnable consumable issuance are demand; pending requests are not training data. Grouping is by stable identity and calendar month. The live history window is incomplete, so months without events remain unknown rather than being filled with zero. The configured minimum history defaults to three observed months. When there is an extra month, the model reports a time-ordered one-month holdout MAE.
@@ -145,8 +144,8 @@ The output uses schema version 2 and declares `source_type: live`, model version
 - `FORECAST_MAXIMUM_AGE_HOURS=168`
 - `FORECAST_SAFETY_STOCK_RATE=0.25`
 - `FORECAST_DEMO_MODE=false`
-- `FORECAST_API_URL` and `FORECAST_API_TOKEN` for the protected forecasting service
-- `ML_API_TOKEN` for the FastAPI service
+- `FORECAST_API_URL` and `FORECAST_API_TOKEN` only when using the hosted API path
+- `ML_API_TOKEN` only when running the FastAPI service
 - `FORECAST_MINIMUM_HISTORY` for `/predict`'s minimum distinct observed months
 
 The sample/demo artifacts remain isolated from production paths. In a demonstration deployment, `FORECAST_DEMO_MODE=true` routes general forecast questions to the validated demo result; every response remains explicitly labeled **Sample/Demo** and does not calculate live procurement advice.

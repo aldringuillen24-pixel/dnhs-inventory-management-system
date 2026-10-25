@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Category;
+use App\Models\ForecastPayload;
 use App\Models\Inventory;
 use App\Models\Role;
 use App\Models\StockMovement;
@@ -13,6 +14,109 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
+
+test('production local-model training does not call the forecast API', function () {
+    Storage::fake('forecast');
+    config(['forecast.python_binary' => base_path('missing-forecast-python')]);
+    Http::fake();
+    Log::shouldReceive('error')
+        ->once()
+        ->withArgs(fn (string $message, array $context): bool => $message === 'Demand forecast training failed.'
+            && isset($context['exception'])
+        );
+
+    $this->artisan('forecast:train', ['--local-model' => true])
+        ->expectsOutput('Demand forecast training failed. Check the Laravel log for details.')
+        ->assertExitCode(Command::FAILURE);
+
+    Http::assertNothingSent();
+    expect(json_decode(Storage::disk('forecast')->get('forecast/training-status.json'), true)['status'])
+        ->toBe('failed');
+});
+
+test('forecast training modes cannot be combined', function () {
+    Storage::fake('forecast');
+
+    $this->artisan('forecast:train', [
+        '--local-model' => true,
+        '--test-dataset' => true,
+    ])
+        ->expectsOutput('The sample, test-dataset, and local-model options cannot be used together.')
+        ->assertExitCode(Command::FAILURE);
+
+    expect(Storage::disk('forecast')->exists('datasets/real-stock-out-data.csv'))->toBeFalse();
+});
+
+test('local-model training maps historical items and combines their usage with database exports', function () {
+    Storage::fake('forecast');
+
+    $role = Role::firstOrCreate(['role_name' => 'Property Custodian']);
+    $user = User::factory()->create(['role_id' => $role->role_id]);
+    $category = Category::create([
+        'category_name' => 'Office Supplies',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'user_id' => $user->id,
+        'item_name' => 'Bond Paper',
+        'unit' => 'reams',
+        'quantity' => 10,
+        'unit_cost' => 10,
+        'date_acquired' => now()->subYear()->toDateString(),
+        'status' => 'available',
+    ]);
+    $usageDate = now()->startOfMonth()->subMonth()->endOfMonth();
+    $historyMonth = $usageDate->format('Y-m');
+    $historicalStartMonth = $usageDate->copy()->subMonths(2)->format('Y-m');
+    $databaseUsageDate = $usageDate->copy()->subMonths(4)->endOfMonth();
+    $databaseMovement = StockMovement::create([
+        'inventory_id' => $inventory->item_id,
+        'user_id' => $user->id,
+        'movement_type' => 'stock_out',
+        'quantity' => 3,
+        'quantity_before' => 10,
+        'quantity_after' => 7,
+    ]);
+    $databaseMovement->forceFill([
+        'created_at' => $databaseUsageDate,
+        'updated_at' => $databaseUsageDate,
+    ])->save();
+    $historicalPath = Storage::disk('forecast')->path('datasets/historical-usage.csv');
+    Storage::disk('forecast')->put('datasets/historical-usage.csv', implode(PHP_EOL, [
+        'inventory_id,item_name,category_id,category,unit,quantity_issued,stock_out_date,history_start_month,history_end_month,history_complete,movement_type,status',
+        "9001,Bond Paper,900,Office Supplies,reams,12,{$usageDate->toDateString()},{$historicalStartMonth},{$historyMonth},true,stock_out,approved",
+    ]));
+    config([
+        'forecast.historical_dataset_path' => $historicalPath,
+        'forecast.python_binary' => base_path('missing-forecast-python'),
+    ]);
+    Http::fake();
+    Log::shouldReceive('error')
+        ->once()
+        ->withArgs(fn (string $message, array $context): bool => $message === 'Demand forecast training failed.'
+            && isset($context['exception'])
+        );
+
+    $this->artisan('forecast:train', ['--local-model' => true])
+        ->expectsOutput('Demand forecast training failed. Check the Laravel log for details.')
+        ->assertExitCode(Command::FAILURE);
+
+    Http::assertNothingSent();
+    $rows = array_map(
+        fn (string $line): array => str_getcsv($line, escape: ''),
+        preg_split('/\r\n|\r|\n/', trim(Storage::disk('forecast')->get('datasets/real-stock-out-data.csv'))),
+    );
+    $usageRows = array_slice($rows, 1);
+    expect(count($usageRows))->toBe(4)
+        ->and(array_unique(array_column($usageRows, 0)))->toBe([(string) $inventory->item_id])
+        ->and(array_unique(array_column($usageRows, 2)))->toBe([(string) $category->category_id])
+        ->and(array_unique(array_column($usageRows, 8)))->toBe([$historyMonth])
+        ->and(array_unique(array_column($usageRows, 9)))->toBe(['false'])
+        ->and(array_column($usageRows, 5))->toBe(['3', '12', '0', '0'])
+        ->and(json_decode(Storage::disk('forecast')->get('forecast/training-status.json'), true)['status'])
+        ->toBe('failed');
+});
 
 test('training exports stock-outs and logs forecast API failures', function () {
     Storage::fake('forecast');
@@ -99,8 +203,7 @@ test('training exports stock-outs and logs forecast API failures', function () {
     $expectedCsvPath = Storage::disk('forecast')->path('datasets/real-stock-out-data.csv');
     Log::shouldReceive('error')
         ->once()
-        ->withArgs(fn (string $message, array $context): bool =>
-            $message === 'Demand forecast training failed.'
+        ->withArgs(fn (string $message, array $context): bool => $message === 'Demand forecast training failed.'
             && $context['csv_path'] === $expectedCsvPath
             && isset($context['exception'])
         );
@@ -109,8 +212,7 @@ test('training exports stock-outs and logs forecast API failures', function () {
         ->expectsOutput('Demand forecast training failed. Check the Laravel log for details.')
         ->assertExitCode(Command::FAILURE);
 
-    Http::assertSent(fn ($request): bool =>
-        $request->url() === 'https://forecast.example.test/forecast'
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://forecast.example.test/forecast'
         && $request->hasHeader('Authorization', 'Bearer '.config('forecast.api_token'))
         && $request->method() === 'POST'
     );
@@ -176,8 +278,7 @@ test('sample training uses isolated demo paths and never overwrites live artifac
 
     Log::shouldReceive('error')
         ->once()
-        ->withArgs(fn (string $message, array $context): bool =>
-            $message === 'Demo demand forecast training failed.'
+        ->withArgs(fn (string $message, array $context): bool => $message === 'Demo demand forecast training failed.'
             && $context['csv_path'] === $expectedCsvPath
             && $context['output_path'] === $expectedOutputPath
             && isset($context['exception'])
@@ -214,8 +315,8 @@ test('test dataset training failure does not replace the current live forecast',
         ->and(StockMovement::query()->count())->toBe(0)
         ->and(Storage::disk('forecast')->exists(config('forecast.demo.output_path')))->toBeFalse()
         ->and(Storage::disk('forecast')->exists('forecast/training-status.json'))->toBeFalse()
-        ->and(\App\Models\ForecastPayload::query()->where('source_type', 'live')->value('payload'))->toBe($existingPayload)
-        ->and(\App\Models\ForecastPayload::query()->where('source_type', 'live')->value('training_status'))->toBe('success');
+        ->and(ForecastPayload::query()->where('source_type', 'live')->value('payload'))->toBe($existingPayload)
+        ->and(ForecastPayload::query()->where('source_type', 'live')->value('training_status'))->toBe('success');
 });
 
 test('dummy dataset training is rejected outside local and testing environments', function () {
