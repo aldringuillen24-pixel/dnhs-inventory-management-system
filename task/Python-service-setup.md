@@ -70,17 +70,19 @@ The job:
 3. Writes the `HISTORICAL_USAGE_CSV` secret to a temporary file on the runner.
 4. Runs `php artisan forecast:train --local-model --no-interaction`.
 5. Laravel connects to the production database, exports eligible demand
-   movements, maps historical rows to real inventory by exact item name,
-   category, and unit, then invokes `ml/forecast_demand.py` on the combined
-   history.
+   movements, links uniquely matched historical rows to real inventory, keeps
+   other historical rows as demand-only, then invokes
+   `ml/forecast_demand.py` on the combined history.
 6. Laravel validates the forecast output and saves a successful live result
    to the database.
 
-The historical file's item names, categories, and units must each identify
-exactly one non-serialized inventory item. Matching ignores letter case and
-surrounding whitespace; the file's numeric IDs are ignored. The historical
-usage must be separate from the database usage; overlapping records would be
-counted twice.
+Historical item names, categories, and units are matched to the non-serialized
+inventory. A unique match links the history to the real stock item. If no
+item matches, or more than one item matches, the forecast is still trained
+and shown as **demand-only**; stock and pending requests cannot be checked for
+that row. Matching ignores letter case and surrounding whitespace; numeric
+IDs in the CSV are ignored. The historical usage must be separate from
+database usage; overlapping records would be counted twice.
 
 The workflow configuration is:
 
@@ -198,10 +200,10 @@ recorded usage to forecast November.
 - **Python trainer failure:** check the workflow logs for dependency or model
   errors. Confirm the `ml/forecast_demand.py` file and its dependencies are
   available in the checked-out repository.
-- **Historical row cannot be matched:** verify its item name, category, and
-  unit match exactly one non-serialized inventory item. The IDs in the
-  historical CSV are ignored; Laravel replaces them with the real inventory
-  IDs.
+- **Historical row is demand-only:** the forecast is still displayed, but its
+  item name, category, and unit did not identify exactly one inventory item.
+  Check or correct those fields if you want a stock-linked recommendation.
+  Numeric IDs in the historical CSV are ignored.
 - **No historical data or missing secret:** add the complete CSV, including
   its header, as the `HISTORICAL_USAGE_CSV` repository secret.
 - **Missing or invalid `APP_KEY`:** set the exact deployed Laravel key as the

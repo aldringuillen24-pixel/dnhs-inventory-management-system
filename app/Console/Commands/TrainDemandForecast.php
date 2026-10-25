@@ -166,7 +166,7 @@ class TrainDemandForecast extends Command
             if (! is_readable($csvPath) || ! is_readable($trainerPath)) {
                 throw new \RuntimeException('Production forecast export or trainer is missing or unreadable.');
             }
-            $historicalRows = $this->mergeHistoricalUsage($csvPath);
+            $merge = $this->mergeHistoricalUsage($csvPath);
 
             $process = new Process([
                 config('forecast.python_binary'),
@@ -183,9 +183,16 @@ class TrainDemandForecast extends Command
                 throw new \RuntimeException(trim($process->getErrorOutput()) ?: trim($process->getOutput()) ?: 'Production forecast training process failed.');
             }
 
-            $this->info("Included {$historicalRows} historical usage records.");
+            $forecast = json_decode(file_get_contents($outputPath), true, 512, JSON_THROW_ON_ERROR);
+            foreach (['forecasts', 'insufficient_history'] as $group) {
+                foreach ($forecast[$group] ?? [] as &$item) {
+                    $item['matched_inventory_ids'] = $merge['matched_inventory_ids'][(int) $item['inventory_id']] ?? [];
+                }
+                unset($item);
+            }
+            $this->info("Included {$merge['historical_rows']} historical usage records.");
 
-            return json_decode(file_get_contents($outputPath), true, 512, JSON_THROW_ON_ERROR);
+            return $forecast;
         } finally {
             if (is_string($outputPath) && is_file($outputPath)) {
                 unlink($outputPath);
@@ -196,7 +203,10 @@ class TrainDemandForecast extends Command
         }
     }
 
-    private function mergeHistoricalUsage(string $databaseCsvPath): int
+    /**
+     * @return array{historical_rows: int, matched_inventory_ids: array<int, list<int>>}
+     */
+    private function mergeHistoricalUsage(string $databaseCsvPath): array
     {
         $historicalCsvPath = (string) config('forecast.historical_dataset_path');
         $historicalRows = $this->readForecastCsv($historicalCsvPath);
@@ -242,14 +252,22 @@ class TrainDemandForecast extends Command
         $historicalWindows = [];
         $historicalUsageMonths = [];
         $historicalInventoryItems = [];
+        $matchedInventoryIds = [];
         foreach ($databaseRows as $row) {
             $inventoryId = (int) $row['inventory_id'];
             $rowsByInventory[$inventoryId][] = $row;
+            $matchedInventoryIds[$inventoryId] = [$inventoryId];
             $minimumStartMonths[$inventoryId] = min(
                 $minimumStartMonths[$inventoryId] ?? $row['history_start_month'],
                 $row['history_start_month'],
             );
         }
+        $nextUnmatchedInventoryId = ((int) Inventory::query()
+            ->withoutGlobalScope(SampleForecastData::SCOPE)
+            ->max('item_id')) + 1;
+        $nextUnmatchedCategoryId = ((int) Category::query()->max('category_id')) + 1;
+        $unmatchedInventoryIds = [];
+        $unmatchedCategoryIds = [];
 
         foreach ($historicalRows as $index => $row) {
             foreach ($requiredColumns as $column) {
@@ -262,13 +280,30 @@ class TrainDemandForecast extends Command
             $itemName = trim((string) $row['item_name']);
             $categoryName = trim((string) $row['category']);
             $unit = trim((string) $row['unit']);
-            $matches = $inventoryByDescription[$this->historicalItemKey($itemName, $categoryName, $unit)] ?? [];
-            if (count($matches) !== 1) {
-                $reason = $matches === [] ? 'does not match an inventory item' : 'matches more than one inventory item';
-                throw new \UnexpectedValueException("Historical dataset row {$line} {$reason}: {$itemName} ({$categoryName}, {$unit}).");
+            $descriptionKey = $this->historicalItemKey($itemName, $categoryName, $unit);
+            $matches = $inventoryByDescription[$descriptionKey] ?? [];
+            if (count($matches) === 1) {
+                $item = $matches[0];
+                $inventoryId = (int) $item['inventory_id'];
+                $categoryId = (int) $item['category_id'];
+                $matchedInventoryIds[$inventoryId] = [$inventoryId];
+            } else {
+                if (! isset($unmatchedInventoryIds[$descriptionKey])) {
+                    $unmatchedInventoryIds[$descriptionKey] = $nextUnmatchedInventoryId++;
+                    $unmatchedCategoryIds[$descriptionKey] = $nextUnmatchedCategoryId++;
+                }
+                $inventoryId = $unmatchedInventoryIds[$descriptionKey];
+                $categoryId = $unmatchedCategoryIds[$descriptionKey];
+                $item = [
+                    'inventory_id' => $inventoryId,
+                    'item_name' => $itemName,
+                    'category_id' => $categoryId,
+                    'category' => $categoryName,
+                    'unit' => $unit,
+                ];
+                $matchedInventoryIds[$inventoryId] = [];
             }
 
-            $item = $matches[0];
             $quantity = filter_var($row['quantity_issued'], FILTER_VALIDATE_FLOAT);
             if ($quantity === false || ! is_finite($quantity) || $quantity < 0) {
                 throw new \UnexpectedValueException("Historical dataset row {$line} has an invalid usage quantity.");
@@ -305,7 +340,6 @@ class TrainDemandForecast extends Command
                 throw new \UnexpectedValueException("Historical dataset row {$line} is not an approved demand movement.");
             }
 
-            $inventoryId = (int) $item['inventory_id'];
             $window = [
                 'start_month' => $startMonth,
                 'end_month' => $endMonth,
@@ -324,7 +358,7 @@ class TrainDemandForecast extends Command
             $rowsByInventory[$inventoryId][] = [
                 'inventory_id' => $inventoryId,
                 'item_name' => $item['item_name'],
-                'category_id' => $item['category_id'],
+                'category_id' => $categoryId,
                 'category' => $item['category'],
                 'unit' => $item['unit'],
                 'quantity_issued' => $row['quantity_issued'],
@@ -392,7 +426,10 @@ class TrainDemandForecast extends Command
             fclose($handle);
         }
 
-        return count($historicalRows);
+        return [
+            'historical_rows' => count($historicalRows),
+            'matched_inventory_ids' => $matchedInventoryIds,
+        ];
     }
 
     private function readForecastCsv(string $path): array

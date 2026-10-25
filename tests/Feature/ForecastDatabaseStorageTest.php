@@ -1,4 +1,5 @@
 <?php
+
 namespace Tests\Feature;
 
 use App\Models\Category;
@@ -129,6 +130,32 @@ test('a trained forecast stored in the database is served with no file on disk',
     expect($result['status'])->toBe('success')
         ->and($result['rows'])->toHaveCount(1)
         ->and($result['rows'][0]['item_name'])->toBe('Phase8 Bond Paper');
+});
+
+test('an explicitly unmatched forecast remains visible as demand-only', function () {
+    Storage::fake('forecast');
+
+    ($this->makeItem)(9001);
+    $document = json_decode(
+        phase8Document(now()->toIso8601String(), 9001, (int) $this->category->category_id),
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+    $document['forecasts'][0]['matched_inventory_ids'] = [];
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($document, JSON_THROW_ON_ERROR),
+    );
+
+    $result = app(StoredDemandForecastService::class)->read($this->custodian);
+
+    expect($result['status'])->toBe('success')
+        ->and($result['rows'])->toHaveCount(1)
+        ->and($result['rows'][0]['inventory_match'])->toBe('unmatched')
+        ->and($result['rows'][0]['available_stock'])->toBeNull()
+        ->and($result['rows'][0]['suggested_procurement'])->toBe(40);
 });
 
 test('a local forecast file is ignored when the database has no forecast', function () {

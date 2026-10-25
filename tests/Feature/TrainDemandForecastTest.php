@@ -118,6 +118,42 @@ test('local-model training maps historical items and combines their usage with d
         ->toBe('failed');
 });
 
+test('unmatched historical items are exported with forecast-only identities', function () {
+    Storage::fake('forecast');
+
+    $historicalPath = Storage::disk('forecast')->path('datasets/historical-usage.csv');
+    Storage::disk('forecast')->put('datasets/historical-usage.csv', implode(PHP_EOL, [
+        'inventory_id,item_name,category_id,category,unit,quantity_issued,stock_out_date,history_start_month,history_end_month,history_complete,movement_type,status',
+        '9001,Bond Paper (A4),900,Consumables,reams,120,2026-06-30,2026-06,2026-09,true,stock_out,approved',
+    ]));
+    config([
+        'forecast.historical_dataset_path' => $historicalPath,
+        'forecast.python_binary' => base_path('missing-forecast-python'),
+    ]);
+    Http::fake();
+    Log::shouldReceive('error')
+        ->once()
+        ->withArgs(fn (string $message, array $context): bool => $message === 'Demand forecast training failed.'
+            && isset($context['exception'])
+        );
+
+    $this->artisan('forecast:train', ['--local-model' => true])
+        ->expectsOutput('Demand forecast training failed. Check the Laravel log for details.')
+        ->assertExitCode(Command::FAILURE);
+
+    $rows = array_map(
+        fn (string $line): array => str_getcsv($line, escape: ''),
+        preg_split('/\r\n|\r|\n/', trim(Storage::disk('forecast')->get('datasets/real-stock-out-data.csv'))),
+    );
+    expect(count($rows))->toBe(5)
+        ->and($rows[1][0])->toBe('1')
+        ->and((int) $rows[1][2])->toBeGreaterThan(0)
+        ->and($rows[1][2])->not->toBe('900')
+        ->and($rows[1][1])->toBe('Bond Paper (A4)')
+        ->and($rows[1][3])->toBe('Consumables')
+        ->and($rows[1][5])->toBe('120');
+});
+
 test('training exports stock-outs and logs forecast API failures', function () {
     Storage::fake('forecast');
 

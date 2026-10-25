@@ -128,6 +128,9 @@ database usage. It runs `ml/forecast_demand.py` locally on the runner,
 validates the output, and stores the versioned live forecast in the
 `forecast_payloads` database table. The runner needs external access to the
 production database. Historical rows must not duplicate database usage.
+Rows that match one inventory item link to its live stock recommendation.
+Unmatched or ambiguous rows remain in the forecast as demand-only; the system
+does not guess which stock item they represent.
 PHP reads the saved forecast and joins it with current inventory and request
 data.
 

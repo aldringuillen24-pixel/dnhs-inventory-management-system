@@ -33,7 +33,7 @@ class StoredDemandForecastService
 
             $payload = json_decode($disk->get($path), true, 512, JSON_THROW_ON_ERROR);
             $this->validateDemoPayload($payload);
-        } catch (\Throwable $exception) {
+        } catch (Throwable $exception) {
             report($exception);
 
             return $this->demoResult('error');
@@ -58,8 +58,7 @@ class StoredDemandForecastService
 
         $rows = collect($forecastItems)
             ->map(function (array $item) use ($inventory, $pendingRequests, $unmetRequests): array {
-                $matches = $inventory->filter(fn (Inventory $candidate): bool =>
-                    $candidate->category
+                $matches = $inventory->filter(fn (Inventory $candidate): bool => $candidate->category
                     && mb_strtolower(trim((string) $candidate->category->category_name)) === mb_strtolower(trim($item['category']))
                     && RequestableItemMatcher::nameMatches($item['item_name'], (string) $candidate->item_name)
                     && RequestableItemMatcher::unitMatches($item['unit'], $candidate->unit)
@@ -74,8 +73,7 @@ class StoredDemandForecastService
                     ? (int) $matches->sum(fn (Inventory $candidate): int => $pendingRequests->get($candidate->item_id, 0))
                     : null;
                 $unmet = $isMatched
-                    ? $unmetRequests->filter(fn (AssignmentRequest $request): bool =>
-                        (int) $request->requested_category_id === (int) $matches->first()->category_id
+                    ? $unmetRequests->filter(fn (AssignmentRequest $request): bool => (int) $request->requested_category_id === (int) $matches->first()->category_id
                         && RequestableItemMatcher::nameMatches($item['item_name'], (string) $request->requested_item_name)
                         && RequestableItemMatcher::unitMatches($item['unit'], $request->requested_unit)
                     )
@@ -386,23 +384,17 @@ class StoredDemandForecastService
         foreach ($orderedForecastItems as $item) {
             $matchedIds = $item['matched_inventory_ids'] ?? [(int) $item['inventory_id']];
             $matchingInventory = $inventory->only($matchedIds)
-                ->filter(fn (Inventory $record): bool =>
-                    (int) $record->category_id === (int) $item['category_id']
+                ->filter(fn (Inventory $record): bool => (int) $record->category_id === (int) $item['category_id']
                     && RequestableItemMatcher::nameMatches($item['item_name'], (string) $record->item_name)
                     && RequestableItemMatcher::unitMatches($item['unit'], $record->unit)
                 )
                 ->values();
-            if ($matchingInventory->isEmpty()) {
-                $matchingInventory = $inventory->filter(fn (Inventory $record): bool =>
-                    (int) $record->category_id === (int) $item['category_id']
-                    && RequestableItemMatcher::nameMatches($item['item_name'], (string) $record->item_name)
-                    && RequestableItemMatcher::unitMatches($item['unit'], $record->unit)
-                )->values();
-            }
 
             if ($matchingInventory->isEmpty()) {
                 $orphaned[] = (int) $item['inventory_id'];
-                $rows->push($this->demandOnlyForecastRow($item));
+                if (array_key_exists('matched_inventory_ids', $item) && $matchedIds === []) {
+                    $rows->push($this->demandOnlyForecastRow($item));
+                }
 
                 continue;
             }
@@ -440,7 +432,7 @@ class StoredDemandForecastService
         return [
             'status' => $successfulRows->isNotEmpty() ? 'success' : 'insufficient_data',
             'rows' => $rows->all(),
-            'forecast_period' => $forecastMonth ? Carbon::parse($forecastMonth . '-01')->format('F Y') : null,
+            'forecast_period' => $forecastMonth ? Carbon::parse($forecastMonth.'-01')->format('F Y') : null,
             'generated_at' => $generatedAt->toIso8601String(),
             'source_type' => 'live',
             'model_version' => $payload['model_version'],
@@ -642,7 +634,7 @@ class StoredDemandForecastService
      * serialized categories, where several rows share one item type. Exactly one
      * row holds a given id, so the quantity cannot be counted twice.
      *
-     * @return \Illuminate\Support\Collection<int, array{total_quantity:int,requester_count:int}>
+     * @return Collection<int, array{total_quantity:int,requester_count:int}>
      */
     private function unmetDemandByType(): Collection
     {
@@ -695,9 +687,9 @@ class StoredDemandForecastService
 
     /**
      * @param  array<string, int>|null  $unmet  Unmet quantity this specific row may
-     *                                            claim, or null when another row in
-     *                                            the same name+category+unit group
-     *                                            already claimed it.
+     *                                          claim, or null when another row in
+     *                                          the same name+category+unit group
+     *                                          already claimed it.
      */
     private function demandOnlyForecastRow(array $item): array
     {
@@ -753,8 +745,7 @@ class StoredDemandForecastService
         int $pendingDemand,
         ?array $unmet = null,
         ?Collection $matchingInventory = null,
-    ): array
-    {
+    ): array {
         $isSuccessful = $item['status'] === 'success';
         $forecastDemand = $isSuccessful ? $item['predicted_quantity'] : null;
         $matchingInventory ??= collect([$inventory]);
