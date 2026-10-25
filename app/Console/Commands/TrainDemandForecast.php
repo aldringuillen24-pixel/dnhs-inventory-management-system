@@ -184,12 +184,7 @@ class TrainDemandForecast extends Command
             }
 
             $forecast = json_decode(file_get_contents($outputPath), true, 512, JSON_THROW_ON_ERROR);
-            foreach (['forecasts', 'insufficient_history'] as $group) {
-                foreach ($forecast[$group] ?? [] as &$item) {
-                    $item['matched_inventory_ids'] = $merge['matched_inventory_ids'][(int) $item['inventory_id']] ?? [];
-                }
-                unset($item);
-            }
+            $forecast = $this->annotateForecastInventoryMatches($forecast, $merge['matched_inventory_ids']);
             $this->info("Included {$merge['historical_rows']} historical usage records.");
 
             return $forecast;
@@ -201,6 +196,26 @@ class TrainDemandForecast extends Command
                 unlink($modelPath);
             }
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $forecast
+     * @param  array<int, list<int>>  $matchedInventoryIds
+     * @return array<string, mixed>
+     */
+    private function annotateForecastInventoryMatches(array $forecast, array $matchedInventoryIds): array
+    {
+        foreach (['forecasts', 'insufficient_history'] as $group) {
+            $forecast[$group] = array_map(
+                fn (array $item): array => [
+                    ...$item,
+                    'matched_inventory_ids' => $matchedInventoryIds[(int) $item['inventory_id']] ?? [],
+                ],
+                $forecast[$group] ?? [],
+            );
+        }
+
+        return $forecast;
     }
 
     /**

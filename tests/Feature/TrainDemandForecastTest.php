@@ -1,5 +1,6 @@
 <?php
 
+use App\Console\Commands\TrainDemandForecast;
 use App\Models\Category;
 use App\Models\ForecastPayload;
 use App\Models\Inventory;
@@ -45,6 +46,23 @@ test('forecast training modes cannot be combined', function () {
         ->assertExitCode(Command::FAILURE);
 
     expect(Storage::disk('forecast')->exists('datasets/real-stock-out-data.csv'))->toBeFalse();
+});
+
+test('local-model training marks unmatched forecast items for demand-only display', function () {
+    $command = app(TrainDemandForecast::class);
+    $method = new ReflectionMethod(TrainDemandForecast::class, 'annotateForecastInventoryMatches');
+    $forecast = [
+        'forecasts' => [['inventory_id' => 901, 'item_name' => 'Bond Paper']],
+        'insufficient_history' => [['inventory_id' => 902, 'item_name' => 'Chalk']],
+    ];
+
+    $result = $method->invoke($command, $forecast, [
+        901 => [],
+        902 => [12],
+    ]);
+
+    expect($result['forecasts'][0]['matched_inventory_ids'])->toBe([])
+        ->and($result['insufficient_history'][0]['matched_inventory_ids'])->toBe([12]);
 });
 
 test('local-model training maps historical items and combines their usage with database exports', function () {
