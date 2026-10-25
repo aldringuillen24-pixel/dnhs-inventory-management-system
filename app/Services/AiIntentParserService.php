@@ -754,6 +754,12 @@ public function route(string $question, array $activeTopic = [], array $turns = 
             ];
         }
 
+        if (! $parsed['is_compound'] && $this->explicitlyRequestsAllAssignments($question)) {
+            $parsed['intent'] = 'assignments';
+            $parsed['topic_action'] = 'new_topic';
+            $parsed['response_type'] = 'list';
+        }
+
         if ($parsed['intent'] === 'unsupported') {
             return [
                 ...$common,
@@ -902,6 +908,14 @@ public function route(string $question, array $activeTopic = [], array $turns = 
         ];
 
         return $route;
+    }
+
+    private function explicitlyRequestsAllAssignments(string $question): bool
+    {
+        return preg_match(
+            '/\b(?:all|every)\s+(?:(?:of\s+)?the\s+)?(?:assigned\s+)?(?:items?|equipment|assets?|inventory)\b|\b(?:all|every)\s+(?:items?|equipment|assets?|inventory)\s+(?:that\s+are\s+)?assigned\b/iu',
+            $question
+        ) === 1;
     }
 
     /**

@@ -36,10 +36,10 @@ function llmPingPayload(string $text): array
     return ['candidates' => [['content' => ['parts' => [['text' => $text]]]]]];
 }
 
-function llmPingAssignmentIntent(): array
+function llmPingAssignmentIntent(string $intent = 'assignments'): array
 {
     return [
-        'intent' => 'assignments',
+        'intent' => $intent,
         'topic_action' => 'new_topic',
         'item_name' => null,
         'inventory_id' => null,
@@ -118,6 +118,37 @@ test('llm ping wiring proves the provider path with a grounded marker', function
 
         return str_contains((string) $text, '"assignment_records"');
     });
+});
+
+test('all assigned items lists assignment records even if the parser classifies it as personal custody', function () {
+    config()->set([
+        'services.gemini.api_key' => 'test-key',
+        'services.gemini.model' => 'test/model',
+    ]);
+    llmPingSeed($this->custodian->id);
+
+    Http::fake(function ($request) {
+        $system = $request->data()['systemInstruction']['parts'][0]['text'] ?? '';
+        if (str_contains($system, 'Classify the user question only')) {
+            return Http::response(llmPingPayload(json_encode(
+                llmPingAssignmentIntent('own_assignments'),
+                JSON_THROW_ON_ERROR,
+            )));
+        }
+
+        return Http::response([], 503);
+    });
+
+    foreach (['all assigned items', 'all items assigned'] as $question) {
+        $response = $this->actingAs($this->custodian)
+            ->postJson(route('ai.chat'), ['message' => $question])
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        expect($response->json('reply'))
+            ->toContain('Projector')
+            ->not->toContain('no equipment assigned');
+    }
 });
 
 $llmPingSkip = liveGeminiSkipReason();
