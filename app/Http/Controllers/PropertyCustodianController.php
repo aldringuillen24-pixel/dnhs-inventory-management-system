@@ -1780,6 +1780,121 @@ class PropertyCustodianController extends Controller
         return $pdf->stream('RFQ-' . now()->format('Y-m-d') . '.pdf');
     }
 
+    public function generateItbPdf(Request $request)
+    {
+        $validated = $request->validate([
+            'selected_ids' => ['required', 'array', 'min:1'],
+            'selected_ids.*' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
+            'floor_prices' => ['sometimes', 'array'],
+            'floor_prices.*' => ['required', 'numeric', 'min:0'],
+            'metadata' => ['nullable', 'array'],
+            'metadata.bid_description' => ['nullable', 'string', 'max:1000'],
+            'metadata.bid_submission_copies' => ['nullable', 'string', 'max:255'],
+            'metadata.pullout_period' => ['nullable', 'string', 'max:255'],
+            'metadata.signatories' => ['nullable', 'array', 'size:6'],
+            'metadata.signatories.*.name' => ['nullable', 'string', 'max:255'],
+            'metadata.signatories.*.title' => ['nullable', 'string', 'max:255'],
+            'metadata.signatories.*.role' => ['nullable', 'string', 'max:255'],
+            'metadata.corporation_requirement' => ['nullable', 'string', 'max:500'],
+            'metadata.proprietorship_requirement' => ['nullable', 'string', 'max:500'],
+            'metadata.business_permit_requirement' => ['nullable', 'string', 'max:500'],
+            'metadata.additional_requirements' => ['nullable', 'array'],
+            'metadata.additional_requirements.*' => ['nullable', 'string', 'max:500'],
+            'metadata.school_name' => ['nullable', 'string', 'max:255'],
+            'metadata.school_address' => ['nullable', 'string', 'max:1000'],
+            'metadata.submission_deadline' => ['nullable', 'date'],
+            'metadata.submission_time' => ['nullable', 'string', 'max:50'],
+            'metadata.bid_opening_date' => ['nullable', 'date'],
+            'metadata.bid_opening_time' => ['nullable', 'string', 'max:50'],
+            'metadata.secretariat_name' => ['nullable', 'string', 'max:255'],
+            'metadata.secretariat_role' => ['nullable', 'string', 'max:255'],
+            'metadata.secretariat_role_detail' => ['nullable', 'string', 'max:255'],
+            'metadata.contact_numbers' => ['nullable', 'string', 'max:255'],
+            'metadata.inspection_day' => ['nullable', 'date'],
+            'metadata.inspection_time' => ['nullable', 'string', 'max:50'],
+            'metadata.auction_date' => ['nullable', 'date'],
+            'metadata.auction_time' => ['nullable', 'string', 'max:50'],
+            'metadata.form_acquisition_from' => ['nullable', 'date'],
+            'metadata.form_acquisition_to' => ['nullable', 'date', 'after_or_equal:metadata.form_acquisition_from'],
+        ]);
+
+        $ids = $validated['selected_ids'];
+        $floorPrices = $validated['floor_prices'] ?? null;
+        if ($floorPrices !== null && count($floorPrices) !== count($ids)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'floor_prices' => 'A floor price is required for each selected item.',
+            ]);
+        }
+
+        $selectedItems = Inventory::query()
+            ->whereIn('item_id', $ids)
+            ->whereIn('status', ['ready_to_dispose', 'disposed'])
+            ->get()
+            ->keyBy('item_id');
+
+        if ($selectedItems->count() !== count($ids)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'selected_ids' => 'Only items marked ready to dispose or disposed can be added to an ITB.',
+            ]);
+        }
+
+        $items = collect($ids)->values()->map(function ($itemId, $index) use ($selectedItems, $floorPrices): array {
+            $item = $selectedItems->get($itemId);
+
+            return [
+                'item_id' => $item->item_id,
+                'item_name' => $item->item_name ?? '',
+                'quantity' => (float) ($item->quantity ?? 0),
+                'unit_cost' => (float) ($item->unit_cost ?? 0),
+                'floor_price' => $floorPrices === null
+                    ? (float) ($item->quantity ?? 0) * (float) ($item->unit_cost ?? 0)
+                    : (float) $floorPrices[$index],
+            ];
+        })->values();
+
+        $metadata = array_replace([
+            'bid_description' => 'public bidding for one (1) lot of Disposal of various unserviceable properties and equipment',
+            'corporation_requirement' => 'SEC Registration Certificate for Corporation; or',
+            'proprietorship_requirement' => 'DTI Registration Certificate for Sole Proprietorship;',
+            'business_permit_requirement' => 'Valid Business Permit.',
+            'additional_requirements' => [],
+            'school_name' => 'Dian-ay National High School',
+            'school_address' => 'Barangay Dian-ay, Escalante City',
+            'submission_deadline' => null,
+            'submission_time' => '',
+            'bid_opening_date' => null,
+            'bid_opening_time' => '',
+            'bid_submission_copies' => '(3) (original copy (1) and 2 photocopies)',
+            'pullout_period' => 'seven (7) calendar days',
+            'signatories' => [
+                ['name' => 'LILIBETH L. CASTRO', 'title' => 'Teacher III', 'role' => 'BAC Chairperson'],
+                ['name' => 'RIZALINA P. MAXILOM', 'title' => 'Principal I', 'role' => 'Chairperson, Disposal Committee'],
+                ['name' => 'LEE-RISA M. PRIETOS', 'title' => 'BAC SECRETARIAT', 'role' => ''],
+                ['name' => 'MELISSA L. PRUDENTE', 'title' => 'BAC MEMBER', 'role' => ''],
+                ['name' => 'ROBERTDAWN S. FUAMASING', 'title' => 'BAC Member', 'role' => ''],
+                ['name' => 'CHARISSA MAE I. SAPA', 'title' => 'BAC Member', 'role' => ''],
+            ],
+            'secretariat_name' => '',
+            'secretariat_role' => 'Administrative Assistant II',
+            'secretariat_role_detail' => 'Head, BAC Secretariat',
+            'contact_numbers' => '',
+            'inspection_day' => null,
+            'inspection_time' => '',
+            'auction_date' => null,
+            'auction_time' => '',
+            'form_acquisition_from' => null,
+            'form_acquisition_to' => null,
+        ], $validated['metadata'] ?? []);
+
+        $pdf = Pdf::loadView('pdfs.itb', [
+            'items' => $items,
+            'metadata' => $metadata,
+        ]);
+        $pdf->setPaper('a4', 'portrait');
+
+        return $pdf->stream('ITB-' . now()->format('Y-m-d') . '.pdf');
+    }
+
     public function generateIirupPdf(Request $request)
     {
         $validated = $request->validate([

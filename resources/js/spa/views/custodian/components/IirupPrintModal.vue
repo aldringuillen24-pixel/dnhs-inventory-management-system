@@ -219,7 +219,7 @@
     <template #overlay>
       <button
         type="button"
-        class="absolute left-0 top-26 z-[100001] flex items-center rounded-r-md border border-l-0 border-purple-200 bg-white px-3 py-3 text-xs font-semibold text-purple-700 shadow-lg transition hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10"
+        class="absolute left-0 top-36 z-[100001] flex items-center rounded-r-md border border-l-0 border-purple-200 bg-white px-3 py-3 text-xs font-semibold text-purple-700 shadow-lg transition hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-500 dark:border-purple-500/30 dark:bg-gray-800 dark:text-purple-300 dark:hover:bg-purple-500/10"
         :aria-expanded="selectionDrawerOpen"
         :aria-label="selectionDrawerOpen ? 'Close item selection drawer' : 'Open item selection drawer'"
         aria-controls="iirup-selection-drawer"

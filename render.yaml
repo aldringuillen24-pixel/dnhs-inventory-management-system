@@ -141,3 +141,33 @@ services:
         value: "1"
       - key: FORECAST_SAFETY_STOCK_RATE
         value: "0.25"
+
+  - type: cron
+    name: dnhs-inventory-policy-reminders
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: singapore
+    schedule: "0 1 * * *"
+    dockerCommand: "php artisan inventory:dispatch-policy-reminders --no-interaction"
+    envVars:
+      - key: APP_NAME
+        value: DNHS Inventory
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        sync: false
+        required: true
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_DATABASE
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false

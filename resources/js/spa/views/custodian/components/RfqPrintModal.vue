@@ -290,7 +290,7 @@
     <template #overlay>
       <button
         type="button"
-        class="absolute left-0 top-26 z-[100001] flex items-center rounded-r-md border border-l-0 border-sky-200 bg-white px-3 py-3 text-xs font-semibold text-sky-700 shadow-lg transition hover:bg-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-sky-500/30 dark:bg-gray-800 dark:text-sky-300 dark:hover:bg-sky-500/10"
+        class="absolute left-0 top-36 z-[100001] flex items-center rounded-r-md border border-l-0 border-sky-200 bg-white px-3 py-3 text-xs font-semibold text-sky-700 shadow-lg transition hover:bg-sky-50 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-sky-500/30 dark:bg-gray-800 dark:text-sky-300 dark:hover:bg-sky-500/10"
         :aria-expanded="selectionDrawerOpen"
         :aria-label="selectionDrawerOpen ? 'Close item selection drawer' : 'Open item selection drawer'"
         aria-controls="rfq-selection-drawer"

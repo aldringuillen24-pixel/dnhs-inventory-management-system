@@ -196,6 +196,40 @@
                   class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
                 />
               </div>
+
+              <div>
+                <label for="overdue_escalation_days" class="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Overdue return escalation (days)
+                </label>
+                <input
+                  id="overdue_escalation_days"
+                  v-model.number="inventoryForm.overdue_escalation_days"
+                  type="number" min="1" max="90" required
+                  class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                />
+                <FieldError :errors="formErrors" field="overdue_escalation_days" />
+              </div>
+
+              <div>
+                <label for="inventory_verification_interval_months" class="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Inventory verification reminder
+                </label>
+                <select
+                  id="inventory_verification_interval_months"
+                  v-model.number="inventoryForm.inventory_verification_interval_months"
+                  required
+                  class="w-full rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                >
+                  <option :value="1">Monthly</option>
+                  <option :value="3">Every 3 months</option>
+                  <option :value="6">Every 6 months</option>
+                  <option :value="12">Yearly</option>
+                </select>
+                <FieldError :errors="formErrors" field="inventory_verification_interval_months" />
+                <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                  Sends a reminder only; it does not record inventory verification.
+                </p>
+              </div>
             </div>
 
             <div class="mt-4 flex justify-end border-t border-gray-100 pt-3.5 dark:border-white/5">
@@ -213,11 +247,30 @@
           <!-- AI Configuration Panel -->
           <form v-else-if="activeTab === 'ai'" key="ai" @submit.prevent="saveSection('ai', aiForm)">
             <!-- API key status cards: one card per pooled key (Ping refreshes inline) -->
+            <div class="mt-4 grid items-start gap-4 lg:grid-cols-2">
             <div
-              class="mb-4 rounded-md border border-gray-200 bg-gray-50/60 p-3 dark:border-white/10 dark:bg-white/[0.03]"
+              class="rounded-md border border-gray-200 bg-gray-50/60 p-3 dark:border-white/10 dark:bg-white/[0.03]"
               aria-live="polite"
             >
-              <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">API key status</h3>
+              <div class="flex items-center gap-1.5">
+                <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">API key status</h3>
+                <span class="group relative inline-flex">
+                  <button
+                    type="button"
+                    aria-label="How to get an API key"
+                    class="inline-flex h-5 w-5 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:hover:bg-white/10 dark:hover:text-gray-200"
+                    @click="openApiSetupGuide"
+                  >
+                    <LucideIcon :icon="CircleHelp" class="h-3.5 w-3.5" />
+                  </button>
+                  <span
+                    role="tooltip"
+                    class="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-48 -translate-x-1/2 rounded-md bg-gray-900 px-2.5 py-2 text-center text-[11px] font-medium normal-case tracking-normal text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                  >
+                    How to get a Gemini API key
+                  </span>
+                </span>
+              </div>
               <p class="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">Quota-hit Gemini keys fail over automatically. Keys are stored encrypted and shown masked — the full value is never displayed again. Max 5 active keys per provider.</p>
               <div class="mt-2 flex flex-col gap-2 sm:flex-row">
                 <input
@@ -249,18 +302,24 @@
               >
                 No active key — add one with the form above and Ping to verify.
               </div>
-              <div v-if="statusKeys.length || envKey" class="mt-2 grid gap-2 sm:grid-cols-2">
+              <div v-if="statusKeys.length || envKey" class="mt-2 grid gap-2 xl:grid-cols-2">
                 <div
                   v-for="key in statusKeys"
                   :key="'status-' + key.id"
                   class="rounded-md border border-gray-300 bg-white p-2.5 text-xs shadow-sm dark:border-white/15 dark:bg-gray-900"
                 >
                   <div class="flex flex-wrap items-center gap-2">
-                    <span v-if="key.is_active && key.last_ping_ok === true" class="relative flex h-2 w-2 shrink-0">
-                      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                      <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                    <span
+                      class="relative flex h-2 w-2 shrink-0"
+                      :title="statusKeyRole(key)"
+                      :aria-label="statusKeyRole(key)"
+                    >
+                      <span
+                        v-if="isPrimaryGeminiKey(key) && key.last_ping_ok === true"
+                        class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"
+                      />
+                      <span class="relative inline-flex h-2 w-2 rounded-full" :class="statusDotClass(key)" />
                     </span>
-                    <span v-else class="h-2 w-2 shrink-0 rounded-full" :class="statusDotClass(key)"></span>
                     <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-gray-500 dark:bg-white/10 dark:text-gray-400">{{ key.provider ?? 'gemini' }}</span>
                     <span class="truncate font-medium text-gray-800 dark:text-gray-200">{{ key.label }}</span>
                     <span class="shrink-0 font-mono text-gray-500 dark:text-gray-400">{{ key.masked_key }}</span>
@@ -268,26 +327,32 @@
                       <button
                         type="button"
                         :disabled="keyWorking"
-                        class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        title="Test this API key with Gemini"
+                        aria-label="Test this API key with Gemini"
                         @click="pingKey(key.id)"
                       >
-                        Ping
+                        <LucideIcon :icon="Wifi" class="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
                         :disabled="keyWorking"
-                        class="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        :title="key.is_active ? 'Disable this API key; it will no longer be used' : 'Enable this API key for Gemini requests'"
+                        :aria-label="key.is_active ? 'Disable this API key; it will no longer be used' : 'Enable this API key for Gemini requests'"
                         @click="toggleKey(key)"
                       >
-                        {{ key.is_active ? 'Disable' : 'Enable' }}
+                        <LucideIcon :icon="Power" class="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
                         :disabled="keyWorking"
-                        class="rounded border border-rose-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:bg-gray-800"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:bg-gray-800"
+                        title="Permanently delete this stored API key"
+                        aria-label="Permanently delete this stored API key"
                         @click="deleteKey(key.id)"
                       >
-                        Delete
+                        <LucideIcon :icon="Trash2" class="h-3.5 w-3.5" />
                       </button>
                     </span>
                   </div>
@@ -312,8 +377,14 @@
                 >
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="relative flex h-2 w-2 shrink-0">
-                      <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                      <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                      <span
+                        class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+                        :class="envKey.in_use ? 'bg-emerald-400' : 'bg-blue-400'"
+                      />
+                      <span
+                        class="relative inline-flex h-2 w-2 rounded-full"
+                        :class="envKey.in_use ? 'bg-emerald-500' : 'bg-blue-500'"
+                      />
                     </span>
                     <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-gray-500 dark:bg-white/10 dark:text-gray-400">gemini</span>
                     <span class="truncate font-medium text-gray-800 dark:text-gray-200">Environment key (GEMINI_API_KEY)</span>
@@ -322,7 +393,7 @@
                       class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold"
                       :class="envKey.in_use
                         ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                        : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400'"
+                        : 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'"
                     >
                       {{ envKey.in_use ? 'In use' : 'Fallback' }}
                     </span>
@@ -336,7 +407,6 @@
               </div>
             </div>
 
-            <div class="mt-4 grid items-start gap-4 lg:grid-cols-2">
               <div class="rounded-md border border-gray-200 bg-white p-3 dark:border-white/10 dark:bg-gray-900">
                 <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">Model configuration</h3>
                 <div class="mt-2 grid gap-3">
@@ -378,20 +448,6 @@
               </div>
                 </div>
               </div>
-              <div class="rounded-md border border-gray-200 bg-gray-50/60 p-3 dark:border-white/10 dark:bg-white/[0.03]">
-                <h3 class="text-[11px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400">API setup help</h3>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Learn how to add and test Gemini keys, configure the environment fallback, and understand key rotation.
-                </p>
-                <button
-                  type="button"
-                  class="mt-3 inline-flex items-center justify-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5"
-                  @click="apiSetupGuideOpen = true"
-                >
-                  <LucideIcon :icon="BrainCircuit" class="h-3.5 w-3.5" />
-                  Show API Setup Guide
-                </button>
-              </div>
             </div>
 
             <div class="mt-4 flex justify-end border-t border-gray-100 pt-3.5 dark:border-white/5">
@@ -415,50 +471,124 @@
       title="API Setup Guide"
       subtitle="Set up and manage Gemini API access for the assistant."
       max-width="max-w-2xl"
-      @close="apiSetupGuideOpen = false"
+      :close-on-escape="!guideImagePreviewOpen"
+      @close="closeApiSetupGuide"
     >
-      <ol class="list-decimal space-y-4 pl-5 text-sm text-gray-600 dark:text-gray-300">
-        <li>
-          <span class="font-semibold text-gray-800 dark:text-gray-100">Get a Gemini API key.</span>
-          Create one in Google AI Studio. Enable the Generative Language API if prompted.
-        </li>
-        <li>
-          <span class="font-semibold text-gray-800 dark:text-gray-100">Add the key here.</span>
-          Enter a label and paste the key above. Keys are encrypted when stored; the page only shows a masked tail, not the full key.
-        </li>
-        <li>
-          <span class="font-semibold text-gray-800 dark:text-gray-100">Test the key.</span>
-          Use its Ping button to test that key, or use Ping AI Provider at the top to test the active provider route. A successful ping means the request worked at that time; quota can change later.
-        </li>
-        <li>
-          <span class="font-semibold text-gray-800 dark:text-gray-100">Environment fallback.</span>
-          Gemini uses <code class="font-mono">GEMINI_API_KEY</code> and <code class="font-mono">GEMINI_MODEL</code> when there is no active pooled Gemini key. Active pooled Gemini keys take precedence over the environment key.
-          <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <code class="flex-1 break-all whitespace-pre-line rounded-md bg-gray-100 px-3 py-2 font-mono text-xs text-gray-800 dark:bg-black/30 dark:text-gray-100">GEMINI_API_KEY=paste-key-here&#10;GEMINI_MODEL=gemini-3.1-flash-lite</code>
+      <div class="overflow-hidden">
+        <Transition :name="guideTransition" mode="out-in">
+          <section :key="guideStep" class="flex h-[min(55vh,480px)] flex-col">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <h3 class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                Step {{ guideStep + 1 }}: {{ apiSetupSteps[guideStep].title }}
+              </h3>
+              <span class="shrink-0 text-xs text-gray-500 dark:text-gray-400">Step {{ guideStep + 1 }} of {{ apiSetupSteps.length }}</span>
+            </div>
             <button
+              v-if="apiSetupSteps[guideStep].image"
               type="button"
-              class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5"
-              @click="copyEnvSnippet"
+              class="relative flex min-h-0 w-full flex-1 cursor-zoom-in items-center justify-center overflow-hidden rounded-lg border border-gray-200 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:border-gray-700"
+              :aria-label="`Enlarge image: ${apiSetupSteps[guideStep].alt}`"
+              @click="openGuideImagePreview"
             >
-              <LucideIcon :icon="copiedEnv ? Check : Copy" class="h-3.5 w-3.5" />
-              {{ copiedEnv ? 'Copied' : 'Copy example' }}
+              <img
+                :src="apiSetupSteps[guideStep].image"
+                :alt="apiSetupSteps[guideStep].alt"
+                class="h-full w-full object-contain"
+                :class="{
+                  'guide-search-zoom': guideStep === 0,
+                  'guide-get-started-zoom': guideStep === 1,
+                  'guide-dashboard-sidebar-zoom': guideStep === 4,
+                  'guide-create-key-zoom': guideStep === 5,
+                  'guide-api-label-zoom': guideStep === 8,
+                }"
+              />
+              <svg
+                v-if="guideStep === 0 || guideStep === 1 || guideStep === 5 || guideStep === 8"
+                class="guide-step-arrow absolute h-7 w-7 text-amber-400 drop-shadow-md"
+                :class="{
+                  'left-[8%] top-[4%]': guideStep === 0,
+                  'left-[82%] top-[4%]': guideStep === 1,
+                  'guide-api-key-arrow-sequence': guideStep === 8,
+                }"
+                :style="guideStep === 5 ? { left: '90%', top: '14%', transform: 'rotate(-90deg)' } : null"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 12h16m0 0-7-7m7 7-7 7" />
+              </svg>
+              <svg
+                v-if="guideStep === 4"
+                class="guide-step-arrow absolute left-[10%] top-[46%] h-7 w-7 text-amber-400 drop-shadow-md"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 12H4m0 0 7-7m-7 7 7 7" />
+              </svg>
             </button>
+            <div
+              v-else
+              class="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 p-6 text-center dark:border-gray-700 dark:bg-gray-800/50"
+            >
+              <p class="max-w-md text-base text-gray-700 dark:text-gray-200">{{ apiSetupSteps[guideStep].description }}</p>
+            </div>
+            <p class="mt-3 min-h-5 text-sm text-gray-600 dark:text-gray-300">
+              {{ apiSetupSteps[guideStep].description }}
+            </p>
+          </section>
+        </Transition>
+      </div>
+
+      <template #footer>
+        <div class="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
+            :disabled="guideStep === 0"
+            @click="moveApiSetupStep(-1)"
+          >
+            Previous
+          </button>
+          <div class="flex items-center gap-1.5" aria-label="Setup guide progress">
+            <span
+              v-for="(_, index) in apiSetupSteps"
+              :key="index"
+              class="h-1.5 w-1.5 rounded-full"
+              :class="index === guideStep ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'"
+            />
           </div>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Set these in your deployment environment settings. Never commit real key values to source control.</p>
-        </li>
-        <li>
-          <span class="font-semibold text-gray-800 dark:text-gray-100">Key failover.</span>
-          On quota/server errors (429, 500, 503), timeouts, or empty responses, Gemini tries the next active pooled key in priority order. A 400 response stops the retry. The key card shows its latest error.
-        </li>
-        <li>
-          <span class="font-semibold text-gray-800 dark:text-gray-100">Forecasting.</span>
-          Forecast calculations use local data and models. Gemini may be used to help write recommendation text; a local response is used if that text is unavailable or rejected.
-        </li>
-        <li>
-          <span class="font-semibold text-gray-800 dark:text-gray-100">Rotate a key.</span>
-          Disable or delete a compromised key. Up to five keys per provider can be active; Gemini requests can fail over to the other active Gemini keys.
-        </li>
-      </ol>
+          <button
+            type="button"
+            class="rounded-md bg-brand-500 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-600"
+            @click="guideStep === apiSetupSteps.length - 1 ? closeApiSetupGuide() : moveApiSetupStep(1)"
+          >
+            {{ guideStep === apiSetupSteps.length - 1 ? 'Done' : 'Next' }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+
+    <Modal
+      :open="guideImagePreviewOpen"
+      :title="guideImagePreviewAlt || 'Setup guide image'"
+      max-width="max-w-6xl"
+      z-class="z-[100000]"
+      @close="guideImagePreviewOpen = false"
+    >
+      <img
+        :src="guideImagePreviewSrc"
+        :alt="guideImagePreviewAlt"
+        class="max-h-[75vh] w-full rounded-lg object-contain"
+      />
     </Modal>
 
   </div>
@@ -466,7 +596,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
-import { Activity, BrainCircuit, Check, CheckCircle, Copy, PackageOpen, RefreshCw, Save, Trash2, Wifi } from 'lucide';
+import { Activity, BrainCircuit, Check, CheckCircle, CircleHelp, Copy, PackageOpen, Power, RefreshCw, Save, Trash2, Wifi } from 'lucide';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { useToastStore } from '../../stores/toast';
@@ -481,7 +611,14 @@ const error = ref('');
 const pingResult = ref('');
 const cacheType = ref('all');
 const diagnostics = ref({});
-const inventoryForm = reactive({ low_stock_threshold: 5, default_lifespan_years: 5, return_due_days: 14, auto_reminder_days: 3 });
+const inventoryForm = reactive({
+  low_stock_threshold: 5,
+  default_lifespan_years: 5,
+  return_due_days: 14,
+  auto_reminder_days: 3,
+  overdue_escalation_days: 7,
+  inventory_verification_interval_months: 1,
+});
 const aiForm = reactive({ primary_model: '', fallback_model: '', max_history_messages: 6 });
 const formErrors = ref({});
 const aiKeys = ref([]);
@@ -492,8 +629,98 @@ const keyWorking = ref(false);
 const keyMessage = ref('');
 const copiedEnv = ref(false);
 const apiSetupGuideOpen = ref(false);
+const guideStep = ref(0);
+const guideDirection = ref(1);
+const guideTransition = computed(() => guideDirection.value > 0 ? 'guide-slide-forward' : 'guide-slide-backward');
+const guideImagePreviewOpen = ref(false);
+const guideImagePreviewSrc = ref('');
+const guideImagePreviewAlt = ref('');
 
 const ENV_SNIPPET = 'GEMINI_API_KEY=paste-key-here\nGEMINI_MODEL=gemini-3.1-flash-lite';
+
+const apiSetupSteps = [
+  {
+    title: 'Search for Google AI Studio',
+    image: '/images/setup/step 1 - search .png',
+    alt: 'Search for Google AI Studio',
+    description: 'Search for Google AI Studio in your browser.',
+  },
+  {
+    title: 'Click “Get started”',
+    image: '/images/setup/step-2 Get Started .png',
+    alt: 'Google AI Studio Get started page',
+    description: 'Open Google AI Studio by selecting “Get started.”',
+  },
+  {
+    title: 'Log in to your Gmail account',
+    image: null,
+    alt: '',
+    description: 'Log in to your Gmail account to continue to Google AI Studio.',
+  },
+  {
+    title: 'Open the Google AI Studio dashboard',
+    image: '/images/setup/Step 4 Google AI Studio Dashboard .png',
+    alt: 'Google AI Studio dashboard',
+    description: 'After signing in, open the Google AI Studio dashboard.',
+  },
+  {
+    title: 'Select Dashboard in the sidebar',
+    image: '/images/setup/Step 4 Google AI Studio Dashboard .png',
+    alt: 'Google AI Studio dashboard with Dashboard highlighted in the sidebar',
+    description: 'Select Dashboard in the left sidebar to open the project dashboard.',
+  },
+  {
+    title: 'Open API Keys and create a key',
+    image: '/images/setup/Step 5 Create API.png',
+    alt: 'Google AI Studio API Keys page with Create API key',
+    description: 'Select API Keys, then choose “Create API key.”',
+  },
+  {
+    title: 'Create the API key',
+    image: '/images/setup/step 6 create api key modal.png',
+    alt: 'Create a new Gemini API key',
+    description: 'Enter a name for the key, select a project if prompted, and create it.',
+  },
+  {
+    title: 'Copy the API key',
+    image: '/images/setup/step 7 copy the key .png',
+    alt: 'Google AI Studio API key details with Copy key button',
+    description: 'Copy and save the key securely. Google may only show the full key once.',
+  },
+  {
+    title: 'Add the API key to this app',
+    image: '/images/setup/step 8 put the api.png',
+    alt: 'AI Config API key form',
+    description: 'Return to AI Config, enter a label, paste your copied key, and select “Add key.”',
+  },
+];
+
+function openApiSetupGuide() {
+  guideStep.value = 0;
+  guideDirection.value = 1;
+  apiSetupGuideOpen.value = true;
+}
+
+function closeApiSetupGuide() {
+  apiSetupGuideOpen.value = false;
+}
+
+function moveApiSetupStep(direction) {
+  const nextStep = guideStep.value + direction;
+  if (nextStep < 0 || nextStep >= apiSetupSteps.length) return;
+
+  guideDirection.value = direction;
+  guideStep.value = nextStep;
+}
+
+function openGuideImagePreview() {
+  const step = apiSetupSteps[guideStep.value];
+  if (!step?.image) return;
+
+  guideImagePreviewSrc.value = step.image;
+  guideImagePreviewAlt.value = step.alt;
+  guideImagePreviewOpen.value = true;
+}
 
 const activeTab = ref('diagnostics');
 
@@ -538,12 +765,28 @@ const statusKeys = computed(() => {
   return [...rows].sort((a, b) => Number(b.is_active) - Number(a.is_active));
 });
 
+const primaryGeminiKey = computed(() => statusKeys.value
+  .filter((key) => key.is_active && (key.provider ?? 'gemini') === 'gemini')
+  .sort((a, b) => Number(a.priority) - Number(b.priority) || Number(a.id) - Number(b.id))[0] ?? null);
+
 const hasActiveKeys = computed(() => statusKeys.value.some((key) => key.is_active));
 
 function statusDotClass(key) {
   if (!key.is_active) return 'bg-gray-300 dark:bg-gray-600';
   if (key.last_ping_ok === false) return 'bg-rose-500';
-  return 'bg-emerald-500';
+  return isPrimaryGeminiKey(key) ? 'bg-emerald-500' : 'bg-blue-500';
+}
+
+function isPrimaryGeminiKey(key) {
+  return primaryGeminiKey.value?.id === key.id;
+}
+
+function statusKeyRole(key) {
+  if (!key.is_active) return 'Inactive key';
+  if (key.last_ping_ok === false) return 'Last ping failed';
+  return isPrimaryGeminiKey(key)
+    ? 'Primary Gemini key — tried first'
+    : 'Standby key — available for failover';
 }
 
 async function load(options = {}) {
@@ -696,3 +939,249 @@ async function pingKey(id) {
 
 onMounted(() => load());
 </script>
+
+<style scoped>
+.guide-slide-forward-enter-active,
+.guide-slide-forward-leave-active,
+.guide-slide-backward-enter-active,
+.guide-slide-backward-leave-active {
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.guide-slide-forward-enter-from {
+  opacity: 0;
+  transform: translateX(2rem);
+}
+
+.guide-slide-forward-leave-to {
+  opacity: 0;
+  transform: translateX(-2rem);
+}
+
+.guide-slide-backward-enter-from {
+  opacity: 0;
+  transform: translateX(-2rem);
+}
+
+.guide-slide-backward-leave-to {
+  opacity: 0;
+  transform: translateX(2rem);
+}
+
+.guide-get-started-zoom {
+  transform-origin: 94% 5%;
+  animation: guide-highlight-zoom 7s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+.guide-search-zoom {
+  transform-origin: 20% 5%;
+  animation: guide-highlight-zoom 7s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+.guide-create-key-zoom {
+  transform-origin: 90% 8%;
+  animation: guide-highlight-zoom 7s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+.guide-api-label-zoom {
+  transform-origin: 8% 42%;
+  animation: guide-api-fields-zoom 21s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+.guide-api-key-arrow-sequence {
+  left: 8%;
+  top: 16%;
+  transform: rotate(90deg);
+  animation: guide-api-fields-arrow 21s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+.guide-dashboard-sidebar-zoom {
+  transform-origin: 7% 49%;
+  animation: guide-dashboard-sidebar-zoom 7s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+@keyframes guide-highlight-zoom {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  14.29%,
+  57.14% {
+    transform: scale(1.35);
+  }
+
+  71.43% {
+    transform: scale(1);
+  }
+}
+
+@keyframes guide-dashboard-sidebar-zoom {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  14.29%,
+  57.14% {
+    transform: scale(1.35);
+  }
+
+  71.43% {
+    transform: scale(1);
+  }
+}
+
+@keyframes guide-api-fields-zoom {
+  0%,
+  100% {
+    transform: scale(1);
+    transform-origin: 8% 42%;
+  }
+
+  4.76%,
+  19.05% {
+    transform: scale(1.35);
+    transform-origin: 8% 42%;
+  }
+
+  23.81% {
+    transform: scale(1);
+    transform-origin: 8% 42%;
+  }
+
+  33.33% {
+    transform: scale(1);
+    transform-origin: 35% 42%;
+  }
+
+  38.1%,
+  52.38% {
+    transform: scale(1.35);
+    transform-origin: 35% 42%;
+  }
+
+  57.14% {
+    transform: scale(1);
+    transform-origin: 35% 42%;
+  }
+
+  66.67% {
+    transform: scale(1);
+    transform-origin: 96% 42%;
+  }
+
+  71.43%,
+  85.71% {
+    transform: scale(1.35);
+    transform-origin: 96% 42%;
+  }
+
+  90.48% {
+    transform: scale(1);
+    transform-origin: 96% 42%;
+  }
+}
+
+.guide-step-arrow {
+  opacity: 0;
+  animation: guide-step-arrow 7s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+.guide-api-key-arrow-sequence {
+  animation: guide-api-fields-arrow 21s ease-in-out infinite;
+  animation-delay: 1s;
+}
+
+@keyframes guide-api-fields-arrow {
+  0%,
+  4%,
+  23.81%,
+  100% {
+    left: 8%;
+    opacity: 0;
+  }
+
+  4.76%,
+  19.05% {
+    left: 8%;
+    opacity: 1;
+  }
+
+  28% {
+    left: 19%;
+    opacity: 0;
+  }
+
+  38.1%,
+  52.38% {
+    left: 19%;
+    opacity: 1;
+  }
+
+  57.14% {
+    left: 19%;
+    opacity: 0;
+  }
+
+  66.67%,
+  85.71% {
+    left: 90%;
+    opacity: 1;
+  }
+
+  90.48% {
+    left: 90%;
+    opacity: 0;
+  }
+
+  95% {
+    left: 19%;
+    opacity: 0;
+  }
+}
+
+@keyframes guide-step-arrow {
+  0%,
+  14.29%,
+  58.5%,
+  71.43%,
+  100% {
+    opacity: 0;
+  }
+
+  17.14%,
+  57.14% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-get-started-zoom,
+  .guide-search-zoom,
+  .guide-create-key-zoom,
+  .guide-api-label-zoom,
+  .guide-dashboard-sidebar-zoom {
+    animation: none;
+  }
+
+  .guide-step-arrow {
+    opacity: 1;
+    animation: none;
+  }
+
+  .guide-slide-forward-enter-active,
+  .guide-slide-forward-leave-active,
+  .guide-slide-backward-enter-active,
+  .guide-slide-backward-leave-active {
+    transition-duration: 1ms;
+  }
+}
+</style>

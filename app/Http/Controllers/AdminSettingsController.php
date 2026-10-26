@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AiApiKey;
 use App\Models\Inventory;
+use App\Models\InventoryPolicy;
 use App\Models\User;
 use App\Models\UserAuditLog;
 use App\Services\GeminiApiService;
@@ -48,12 +49,14 @@ class AdminSettingsController extends Controller
             'totalInventory'    => Inventory::count(),
         ];
 
-        $inventoryPolicy = session('admin_settings_inventory', [
-            'low_stock_threshold'    => 5,
-            'require_serial_number'  => '1',
-            'default_lifespan_years' => 5,
-            'return_due_days'        => 14,
-            'auto_reminder_days'     => 3,
+        $inventoryPolicy = InventoryPolicy::current()->only([
+            'low_stock_threshold',
+            'require_serial_number',
+            'default_lifespan_years',
+            'return_due_days',
+            'auto_reminder_days',
+            'overdue_escalation_days',
+            'inventory_verification_interval_months',
         ]);
 
         $securityPolicy = session('admin_settings_security', [
@@ -201,14 +204,17 @@ class AdminSettingsController extends Controller
             $validated = $request->validate([
                 'low_stock_threshold'    => ['required', 'integer', 'min:1', 'max:1000'],
                 'require_serial_number'  => ['nullable', 'in:0,1'],
+                'require_serial_number'  => ['nullable', 'in:0,1'],
                 'default_lifespan_years' => ['required', 'integer', 'min:1', 'max:30'],
                 'return_due_days'        => ['required', 'integer', 'min:1', 'max:365'],
                 'auto_reminder_days'     => ['required', 'integer', 'min:1', 'max:30'],
+                'overdue_escalation_days' => ['required', 'integer', 'min:1', 'max:90'],
+                'inventory_verification_interval_months' => ['required', 'integer', Rule::in([1, 3, 6, 12])],
             ]);
 
-            $validated['require_serial_number'] = $request->has('require_serial_number') ? '1' : '0';
-
-            session(['admin_settings_inventory' => $validated]);
+            $validated['require_serial_number'] = $request->has('require_serial_number')
+                && (string) $request->input('require_serial_number') === '1';
+            InventoryPolicy::current()->update($validated);
             return redirect()->route('admin.settings', ['tab' => 'inventory'])->with('success', 'Inventory & lifecycle policies updated successfully.');
         }
 

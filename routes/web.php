@@ -11,6 +11,7 @@ use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\OnboardingController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\AdminSettingsController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\AiAssistantController;
 use App\Http\Controllers\ArrivalInspectionController;
 use App\Http\Controllers\Auth\PasswordResetController;
@@ -106,6 +107,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::get('/inventory/export', [PropertyCustodianController::class, 'exportInventory'])->name('inventory.export');
     Route::get('/inventory/export-pdf', [PropertyCustodianController::class, 'exportInventoryPdf'])->name('inventory.export-pdf');
     Route::post('/inventory/rfq-pdf', [PropertyCustodianController::class, 'generateRfqPdf'])->name('inventory.rfq-pdf');
+    Route::post('/inventory/itb-pdf', [PropertyCustodianController::class, 'generateItbPdf'])->name('inventory.itb-pdf');
     Route::post('/inventory/iirup-pdf', [PropertyCustodianController::class, 'generateIirupPdf'])->name('inventory.iirup-pdf');
 
     Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
@@ -287,6 +289,9 @@ Route::get('/api/me', function (Request $request) {
 })->name('api.me');
 
 Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group(function () {
+    Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::patch('/notifications/{notificationId}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
+
     Route::get('/incident-evidence/{evidence}', [EndUserController::class, 'downloadIncidentEvidence'])
         ->name('incident-evidence.download');
 
@@ -297,6 +302,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::get('/inventory/export', [PropertyCustodianController::class, 'exportInventory'])->name('inventory.export');
     Route::get('/inventory/export-pdf', [PropertyCustodianController::class, 'exportInventoryPdf'])->name('inventory.export-pdf');
     Route::post('/inventory/rfq-pdf', [PropertyCustodianController::class, 'generateRfqPdf'])->name('inventory.rfq-pdf');
+    Route::post('/inventory/itb-pdf', [PropertyCustodianController::class, 'generateItbPdf'])->name('inventory.itb-pdf');
     Route::post('/inventory/iirup-pdf', [PropertyCustodianController::class, 'generateIirupPdf'])->name('inventory.iirup-pdf');
         Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
         Route::post('/inventory/stock-in/import', [PropertyCustodianController::class, 'stockInImport'])->name('inventory.stock-in.import');
