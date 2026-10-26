@@ -11,7 +11,7 @@
           compact ? 'p-3 min-[480px]:p-6' : 'p-6',
         ]"
       >
-        <div class="mb-4 flex shrink-0 items-start justify-between gap-4" :class="compact ? 'mb-2 gap-3 min-[480px]:mb-4 min-[480px]:gap-4' : ''">
+        <div class="mb-4 flex shrink-0 items-start justify-between gap-4" :class="[compact ? 'mb-2 gap-3 min-[480px]:mb-4 min-[480px]:gap-4' : '', headerClass]">
           <div>
             <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90" :class="compact ? 'text-base min-[480px]:text-lg' : ''">{{ title }}</h2>
             <p v-if="subtitle" class="mt-1 text-sm text-gray-500 dark:text-gray-400" :class="compact ? 'text-xs min-[480px]:text-sm' : ''">{{ subtitle }}</p>
@@ -35,7 +35,7 @@
         <div v-else class="min-h-0 flex-1" :class="scrollable ? 'overflow-y-auto' : 'overflow-visible'">
           <slot />
         </div>
-        <footer v-if="$slots.footer" class="shrink-0 border-t border-gray-100 pt-3 dark:border-gray-800">
+        <footer v-if="$slots.footer" class="shrink-0 border-t border-gray-100 pt-3 dark:border-gray-800" :class="footerClass">
           <slot name="footer" />
         </footer>
         <slot name="overlay" />
@@ -64,6 +64,8 @@ const props = defineProps({
     // scroll; inner regions own their own scrolling.
     fixedBody: { type: Boolean, default: false },
     compact: { type: Boolean, default: false },
+    headerClass: { type: String, default: '' },
+    footerClass: { type: String, default: '' },
     // Lets a stacked dialog underneath stay open on Escape while a dialog on
     // top owns the keypress (e.g. Stock-In stays mounted behind the manager).
     closeOnEscape: { type: Boolean, default: true },

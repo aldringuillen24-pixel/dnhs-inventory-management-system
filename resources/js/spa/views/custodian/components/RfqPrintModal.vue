@@ -4,6 +4,8 @@
     title="Print RFQ"
     subtitle="Select disposal-eligible items and edit the request before previewing or downloading the PDF."
     max-width="max-w-7xl"
+    header-class="-mx-6 -mt-6 mb-4 border-b border-gray-200/70 bg-gray-100/70 px-6 py-4 backdrop-blur-sm dark:border-gray-700/70 dark:bg-gray-800/60"
+    footer-class="-mx-6 -mb-6 mt-3 border-gray-200/70 bg-gray-100/70 px-6 pb-6 pt-3 backdrop-blur-sm dark:border-gray-700/70 dark:bg-gray-800/60"
     :fixed-body="true"
     :close-on-escape="!selectionDrawerOpen"
     @close="handleClose"
@@ -27,7 +29,7 @@
           <div v-if="previewing && pdfUrl" class="absolute right-2 top-2 rounded bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-900" role="status">Refreshing PDF preview…</div>
         </div>
         <article v-else class="mx-auto min-h-full max-w-5xl bg-white p-5 text-[12px] text-black shadow-sm sm:p-8">
-          <header class="relative mb-5 h-[0.88in] w-full text-center">
+          <header class="relative mb-5 h-[0.88in] w-full text-center opacity-60">
             <img
               :src="'/images/header/Philippine%20Education%20Department%20Header.png'"
               alt="Department of Education, Schools Division of Escalante City"
@@ -35,7 +37,7 @@
             />
           </header>
 
-          <section class="border-b border-gray-300 pb-3">
+          <section class="pb-3">
             <p class="font-bold">Bids and Awards Committee</p>
             <label class="mt-2 flex items-center gap-1 font-semibold">
               <span class="shrink-0">Project Name:</span>
@@ -63,7 +65,7 @@
             </div>
           </section>
 
-          <section class="mt-3 border-t border-gray-300 pt-3">
+          <section class="mt-3 pt-3">
             <p class="font-semibold">To all Eligible Service Providers:</p>
             <div class="mt-1 grid grid-cols-[14px_1fr] gap-1 leading-relaxed">
               <span>I.</span>
@@ -248,7 +250,7 @@
             <textarea v-model="terms.reservation" rows="2" class="preview-input w-full resize-y text-justify" aria-label="BAC reservation terms" />
           </section>
 
-          <footer class="mt-5 w-full border-collapse font-serif text-[8.5pt] leading-[1.25] text-black">
+          <footer class="mt-5 w-full border-collapse border-t border-gray-400 pt-2 font-serif text-[8.5pt] leading-[1.25] text-black opacity-60">
             <table class="w-full border-collapse">
               <tbody>
                 <tr>
