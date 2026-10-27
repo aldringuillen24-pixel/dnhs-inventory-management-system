@@ -95,6 +95,7 @@ test('end user can report a damaged assigned item without moving stock', functio
         'incident_status' => 'reported',
         'diagnosis' => 'damaged',
         'quantity' => 2,
+        'repair_return_destination' => 'custodian_available',
     ]);
     $this->assertDatabaseHas('maintenance_record_events', [
         'event_type' => 'report_submitted',
@@ -105,6 +106,218 @@ test('end user can report a damaged assigned item without moving stock', functio
     expect($item->fresh()->status)->toBe('assigned')
         ->and((int) $item->fresh()->quantity)->toBe(0)
         ->and(StockMovement::where('inventory_id', $item->item_id)->count())->toBe($movementsBefore);
+});
+
+test('consumable items cannot be reported as damaged', function () {
+    $this->category = Category::firstOrCreate(
+        ['category_name' => 'Consumables'],
+        [
+            'requires_serial_number' => false,
+            'is_maintenance_eligible' => false,
+        ],
+    );
+    $item = makeIssuedItem($this, 'Consumable Pens', 2);
+    AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'transaction_id' => Transaction::where('item_id', $item->item_id)->value('id'),
+        'quantity' => 2,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.assigned-items'))
+        ->assertOk()
+        ->assertJsonFragment([
+            'item_id' => $item->item_id,
+            'is_consumable' => true,
+        ]);
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.inventory.report', $item->item_id), [
+            'type' => 'damaged',
+            'quantity' => 1,
+            'notes' => 'One pen is broken.',
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('type');
+
+    $this->assertDatabaseMissing('maintenance_records', [
+        'inventory_id' => $item->item_id,
+        'reported_by' => $this->endUser->id,
+    ]);
+});
+
+test('end user cannot submit a repair report for a category that is not maintenance eligible', function () {
+    $item = makeIssuedItem($this, 'Consumable Supply', 3);
+    AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'transaction_id' => Transaction::where('item_id', $item->item_id)->value('id'),
+        'quantity' => 3,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.assigned-items'))
+        ->assertOk()
+        ->assertJsonFragment([
+            'item_id' => $item->item_id,
+            'maintenance_eligible' => false,
+        ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), [
+            'type' => 'needs_repair',
+            'quantity' => 1,
+            'notes' => 'This supply needs repair.',
+        ])
+        ->assertSessionHasErrors('type');
+
+    $this->assertDatabaseMissing('maintenance_records', [
+        'inventory_id' => $item->item_id,
+        'reported_by' => $this->endUser->id,
+    ]);
+});
+
+test('end user can submit a repair report for a maintenance eligible category', function () {
+    $category = Category::create([
+        'category_name' => 'Repairable Equipment',
+        'requires_serial_number' => false,
+        'is_maintenance_eligible' => true,
+    ]);
+    $this->category = $category;
+    $item = makeIssuedItem($this, 'Repairable Chair', 1);
+    AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'transaction_id' => Transaction::where('item_id', $item->item_id)->value('id'),
+        'quantity' => 1,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.assigned-items'))
+        ->assertOk()
+        ->assertJsonFragment([
+            'item_id' => $item->item_id,
+            'maintenance_eligible' => true,
+        ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), [
+            'type' => 'needs_repair',
+            'quantity' => 1,
+            'notes' => 'The chair has a broken leg.',
+            'repair_return_destination' => 'assigned_user',
+        ])
+        ->assertRedirect(route('endUser.my-assigned-items'))
+        ->assertSessionHas('success', 'Issue reported for custodian triage.');
+
+    $this->assertDatabaseHas('maintenance_records', [
+        'inventory_id' => $item->item_id,
+        'reported_by' => $this->endUser->id,
+        'diagnosis' => 'needs_repair',
+        'repair_return_destination' => 'assigned_user',
+    ]);
+});
+
+test('repaired incident units can be assigned back to the reporting user when requested', function () {
+    Mail::fake();
+    $this->category->update(['is_maintenance_eligible' => true]);
+    $item = makeIssuedItem($this, 'Return After Repair Chair', 2);
+    $transaction = Transaction::where('item_id', $item->item_id)->firstOrFail();
+    AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'transaction_id' => $transaction->id,
+        'quantity' => 2,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), [
+            'type' => 'needs_repair',
+            'quantity' => 1,
+            'notes' => 'One chair has a cracked support.',
+            'repair_return_destination' => 'assigned_user',
+        ])
+        ->assertRedirect(route('endUser.my-assigned-items'));
+
+    $report = \App\Models\MaintenanceRecord::firstOrFail();
+    $this->actingAs($this->custodian)
+        ->postJson("/api/custodian/incident-reports/{$report->id}/review")
+        ->assertOk();
+    $this->actingAs($this->custodian)
+        ->postJson("/api/custodian/incident-reports/{$report->id}/inspection", [
+            'findings' => 'The support can be replaced.',
+            'repairability' => 'repairable',
+        ])
+        ->assertOk();
+    $this->actingAs($this->custodian)
+        ->postJson("/api/custodian/incident-reports/{$report->id}/handover", [
+            'details' => 'Received one chair for repair.',
+        ])
+        ->assertOk()
+        ->assertJsonPath('incident_status', 'processing_repair');
+
+    $handover = \App\Models\MaintenanceRecordEvent::query()
+        ->where('maintenance_record_id', $report->id)
+        ->where('event_type', 'incident_handover_confirmed')
+        ->firstOrFail();
+    $processingInventoryId = (int) $handover->metadata['processing_inventory_id'];
+
+    $this->actingAs($this->custodian)
+        ->postJson("/api/custodian/inventory/{$processingInventoryId}/mark-repaired", [
+            'repair_notes' => 'Replaced the cracked support and checked stability.',
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $repairedItem = Inventory::findOrFail($processingInventoryId);
+    $returnTransaction = Transaction::query()
+        ->where('item_id', $processingInventoryId)
+        ->where('user_id', $this->endUser->id)
+        ->where('status', 'assigned')
+        ->firstOrFail();
+    $this->assertDatabaseHas('requests', [
+        'item_id' => $processingInventoryId,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'transaction_id' => $returnTransaction->id,
+        'quantity' => 1,
+        'status' => 'approved',
+    ]);
+
+    expect($repairedItem->status)->toBe('assigned')
+        ->and((int) $repairedItem->assigned_to_user_id)->toBe((int) $this->endUser->id)
+        ->and((int) $repairedItem->quantity)->toBe(0)
+        ->and((int) $returnTransaction->quantity)->toBe(1)
+        ->and($report->fresh()->incident_status)->toBe('resolved')
+        ->and($report->fresh()->incident_outcome)->toBe('repaired');
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.assigned-items'))
+        ->assertOk()
+        ->assertJsonFragment([
+            'item_id' => $processingInventoryId,
+            'quantity' => 1,
+        ])
+        ->assertJsonFragment([
+            'repair_return_destination' => 'assigned_user',
+        ]);
 });
 
 test('incident updates email the reporter once per event with a link to their reports', function () {
@@ -240,6 +453,84 @@ test('duplicate open issue reports are rejected', function () {
     $this->actingAs($this->endUser)
         ->post(route('endUser.inventory.report', $item->item_id), ['type' => 'lost', 'quantity' => 1, 'notes' => 'The item is missing.'])
         ->assertSessionHas('error', 'You already have an open report for this item.');
+});
+
+test('failed reporter email delivery does not fail issue report submission', function () {
+    $item = makeIssuedItem($this, 'Email Failure Chair', 1);
+    Mail::shouldReceive('to')
+        ->once()
+        ->with($this->endUser->email)
+        ->andThrow(new RuntimeException('SMTP unavailable'));
+
+    $response = $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.inventory.report', $item->item_id), [
+            'type' => 'damaged',
+            'quantity' => 1,
+            'notes' => 'The chair frame is cracked.',
+        ]);
+
+    $response->assertOk()->assertJson([
+        'status' => 'success',
+        'message' => 'Issue reported for custodian triage.',
+    ]);
+
+    $event = MaintenanceRecordEvent::where('event_type', 'report_submitted')->firstOrFail();
+    app(IncidentReporterNotificationService::class)->notify($event);
+
+    $this->assertDatabaseHas('maintenance_records', [
+        'inventory_id' => $item->item_id,
+        'reported_by' => $this->endUser->id,
+        'incident_status' => 'reported',
+    ]);
+    expect(\Illuminate\Support\Facades\DB::table('incident_notification_deliveries')
+        ->where('event_id', $event->id)
+        ->where('status', 'failed')
+        ->where('error', 'SMTP unavailable')
+        ->exists())->toBeTrue();
+
+    expect(\App\Models\MaintenanceRecord::where('inventory_id', $item->item_id)->count())->toBe(1);
+});
+
+test('assigned items expose an open report and duplicate report API returns a clear validation response', function () {
+    $item = makeIssuedItem($this, 'Open Report Chair', 2);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), [
+            'type' => 'damaged',
+            'quantity' => 1,
+            'notes' => 'A leg is broken.',
+        ])
+        ->assertRedirect(route('endUser.my-assigned-items'));
+
+    AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'transaction_id' => Transaction::where('item_id', $item->item_id)->value('id'),
+        'quantity' => 2,
+        'status' => 'approved',
+        'requested_at' => now(),
+        'responded_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.assigned-items'))
+        ->assertOk()
+        ->assertJsonPath('activityRows.0.has_open_report', true)
+        ->assertJsonPath('activityRows.0.quantity', 1);
+
+    expect((int) Transaction::where('item_id', $item->item_id)->value('quantity'))->toBe(2)
+        ->and($item->fresh()->status)->toBe('assigned')
+        ->and((int) $item->fresh()->quantity)->toBe(0);
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.inventory.report', $item->item_id), [
+            'type' => 'lost',
+            'quantity' => 1,
+            'notes' => 'The item is missing.',
+        ])
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'You already have an open report for this item.');
 
     expect(\App\Models\MaintenanceRecord::where('inventory_id', $item->item_id)->count())->toBe(1);
 });
@@ -356,6 +647,7 @@ test('dashboard condition data shows reported damage while assigned', function (
 
 test('end user can submit each supported incident type with required details', function () {
     foreach (['damaged', 'needs_repair', 'lost', 'stolen'] as $type) {
+        $this->category->update(['is_maintenance_eligible' => $type === 'needs_repair']);
         $item = makeIssuedItem($this, "Reported {$type}", 2);
 
         $this->actingAs($this->endUser)
@@ -405,6 +697,7 @@ test('incident report details are required and evidence is stored privately with
     expect(\App\Models\MaintenanceRecord::count())->toBe(0);
 
     Storage::fake('local');
+    $this->category->update(['is_maintenance_eligible' => true]);
     $this->actingAs($this->endUser)
         ->post(route('endUser.inventory.report', $item->item_id), [
             'type' => 'needs_repair',
@@ -625,6 +918,7 @@ test('reporter can respond to an information request and see the append-only att
 });
 
 test('custodian can accept a report without changing assignment or inventory quantities', function () {
+    $this->category->update(['is_maintenance_eligible' => true]);
     $item = makeIssuedItem($this, 'Accepted Incident Chair', 3);
     $this->actingAs($this->endUser)
         ->post(route('endUser.inventory.report', $item->item_id), [
@@ -639,8 +933,15 @@ test('custodian can accept a report without changing assignment or inventory qua
         ->assertOk()
         ->assertJsonPath('status', 'success');
 
+    $eventCount = MaintenanceRecordEvent::where('maintenance_record_id', $report->id)->count();
+    $this->actingAs($this->custodian)
+        ->postJson("/api/custodian/incident-reports/{$report->id}/review")
+        ->assertOk()
+        ->assertJsonPath('message', 'Incident is already accepted for custodian review.');
+
     expect($report->fresh()->incident_status)->toBe('under_review')
         ->and($report->fresh()->status)->toBe('in_progress')
+        ->and(MaintenanceRecordEvent::where('maintenance_record_id', $report->id)->count())->toBe($eventCount)
         ->and($item->fresh()->status)->toBe('assigned')
         ->and((int) $item->fresh()->quantity)->toBe(0)
         ->and((int) Transaction::where('item_id', $item->item_id)->value('quantity'))->toBe(3)
@@ -655,7 +956,8 @@ test('custodian can accept a report without changing assignment or inventory qua
 
     $this->actingAs($this->custodian)
         ->postJson("/api/custodian/incident-reports/{$report->id}/review")
-        ->assertUnprocessable();
+        ->assertOk()
+        ->assertJsonPath('message', 'Incident is already accepted for custodian review.');
     expect(\App\Models\MaintenanceRecordEvent::where('maintenance_record_id', $report->id)->count())->toBe(2);
 });
 
@@ -821,7 +1123,7 @@ test('partial handover isolates only affected units and repair completion resolv
             'details' => 'Received two chairs from the assigned user.',
         ])
         ->assertOk()
-        ->assertJsonPath('incident_status', 'under_review');
+        ->assertJsonPath('incident_status', 'processing_repair');
 
     $report->refresh();
     $handover = \App\Models\MaintenanceRecordEvent::query()
@@ -838,15 +1140,16 @@ test('partial handover isolates only affected units and repair completion resolv
         ->getJson('/api/custodian/incident-reports')
         ->assertOk()
         ->assertJsonPath('reports.0.handover.confirmed', true)
-        ->assertJsonPath('reports.0.handover.processing_inventory_id', $processingInventoryId);
+        ->assertJsonPath('reports.0.handover.processing_inventory_id', $processingInventoryId)
+        ->assertJsonPath('reports.0.status', 'processing_repair');
 
     expect($item->fresh()->status)->toBe('assigned')
         ->and((int) $item->fresh()->assigned_to_user_id)->toBe((int) $this->endUser->id)
         ->and((int) $item->fresh()->quantity)->toBe(0)
         ->and((int) Transaction::where('item_id', $item->item_id)->value('quantity'))->toBe(1)
         ->and((int) $processingInventory->quantity)->toBe(2)
-        ->and($processingInventory->status)->toBe('available')
-        ->and($report->fresh()->incident_status)->toBe('under_review');
+        ->and($processingInventory->status)->toBe('under_repair')
+        ->and($report->fresh()->incident_status)->toBe('processing_repair');
 
     $this->actingAs($this->custodian)
         ->postJson("/api/custodian/maintenance/{$report->id}/decline", [
@@ -854,11 +1157,6 @@ test('partial handover isolates only affected units and repair completion resolv
         ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors(['status']);
-
-    $this->actingAs($this->custodian)
-        ->postJson("/api/custodian/incident-reports/{$report->id}/start-repair")
-        ->assertOk()
-        ->assertJsonPath('status', 'success');
 
     expect(Inventory::findOrFail($processingInventoryId)->status)->toBe('under_repair')
         ->and((int) Inventory::findOrFail($processingInventoryId)->quantity)->toBe(2)
@@ -963,11 +1261,11 @@ test('confirmed unrepairable partial quantity enters existing disposal without d
         ->assertJsonPath('incidentReports.0.timeline.5.actor_id', $this->custodian->id);
 });
 
-test('repair initiation blocked by category eligibility keeps report open and records blocker', function () {
+test('handover is blocked when a repairable item category is not eligible for repair', function () {
     $item = makeIssuedItem($this, 'Repair Ineligible Chair', 1);
     $this->actingAs($this->endUser)
         ->post(route('endUser.inventory.report', $item->item_id), [
-            'type' => 'needs_repair',
+            'type' => 'damaged',
             'quantity' => 1,
             'notes' => 'The frame is broken.',
         ]);
@@ -985,10 +1283,6 @@ test('repair initiation blocked by category eligibility keeps report open and re
         ->postJson("/api/custodian/incident-reports/{$report->id}/handover", [
             'details' => 'Received the affected chair.',
         ])
-        ->assertOk();
-
-    $this->actingAs($this->custodian)
-        ->postJson("/api/custodian/incident-reports/{$report->id}/start-repair")
         ->assertUnprocessable()
         ->assertJsonValidationErrors(['repair']);
 
@@ -1030,10 +1324,6 @@ test('repair failure requires incident reassessment before affected units enter 
         ->where('event_type', 'incident_handover_confirmed')
         ->firstOrFail();
     $processingInventoryId = (int) $handover->metadata['processing_inventory_id'];
-
-    $this->actingAs($this->custodian)
-        ->postJson("/api/custodian/incident-reports/{$report->id}/start-repair")
-        ->assertOk();
 
     $this->actingAs($this->custodian)
         ->postJson("/api/custodian/inventory/{$processingInventoryId}/mark-ready-to-dispose", [

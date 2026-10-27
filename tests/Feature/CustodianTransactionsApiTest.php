@@ -446,6 +446,246 @@ test('custodian can prepare a draft release slip without approving the request',
         ->and($item->fresh()->quantity)->toBe(3);
 });
 
+test('fulfilling a request saves its release slip as a draft before inventory is allocated', function () {
+    $item = makeAvailableItem($this, 'Drafted Request Chairs', 3);
+    $item->update([
+        'unit_cost' => 250,
+        'inventory_item_no' => 'INV-REQUEST-DRAFT',
+    ]);
+    $request = AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->custodian->id,
+        'requested_item_name' => 'Drafted Request Chairs',
+        'requested_category_id' => $this->category->category_id,
+        'requested_unit' => 'piece',
+        'quantity' => 2,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $response = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.requests.draft', $request->id), [
+            'inventory_ids' => [$item->item_id],
+            'slip_fields' => [
+                'recipient_name' => 'End User',
+                'purpose' => 'Official Use (Off-site)',
+                'conditions' => [$item->item_id => 'Good condition'],
+            ],
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $draft = $request->fresh();
+    expect($draft->status)->toBe('draft')
+        ->and((int) $draft->user_id)->toBe($this->custodian->id)
+        ->and((int) $draft->target_user_id)->toBe($this->endUser->id)
+        ->and($draft->release_slip_fields['purpose'])->toBe('Official Use (Off-site)')
+        ->and((int) $item->fresh()->quantity)->toBe(3)
+        ->and(Transaction::query()->count())->toBe(0)
+        ->and($draft->fulfillmentRequests()->count())->toBe(1)
+        ->and((int) $draft->fulfillmentRequests()->sole()->quantity)->toBe(2)
+        ->and($draft->fulfillmentRequests()->sole()->status)->toBe('draft');
+
+    $this->actingAs($this->custodian)
+        ->getJson(route('api.custodian.transactions'))
+        ->assertOk()
+        ->assertJsonPath('draftRequests.0.id', $request->id);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.drafts.allocate', $response->json('draft_id')))
+        ->assertOk();
+
+    expect($draft->fresh()->status)->toBe('approved')
+        ->and((int) $item->fresh()->quantity)->toBe(1)
+        ->and((int) Transaction::query()->where('item_id', $item->item_id)->value('quantity'))->toBe(2);
+});
+
+test('direct inventory requests can also be staged as drafts before allocation', function () {
+    $item = makeAvailableItem($this, 'Direct Request Chair', 2);
+    $request = AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->custodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+
+    $draftResponse = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.requests.draft', $request->id), [
+            'slip_fields' => ['purpose' => 'Official Use (Off-site)'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($request->fresh()->status)->toBe('draft')
+        ->and((int) $item->fresh()->quantity)->toBe(2)
+        ->and(Transaction::query()->count())->toBe(0);
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.drafts.allocate', $draftResponse->json('draft_id')))
+        ->assertOk();
+
+    expect($request->fresh()->status)->toBe('approved')
+        ->and((int) $item->fresh()->quantity)->toBe(1)
+        ->and((int) Transaction::query()->where('item_id', $item->item_id)->value('quantity'))->toBe(1);
+});
+
+test('custodian can reprint a multi-item draft using its saved inventory lines', function () {
+    $chairs = makeAvailableItem($this, 'Chairs', 3);
+    $chairs->update(['unit_cost' => 250, 'inventory_item_no' => 'INV-DRAFT-CHAIR']);
+    $tables = makeAvailableItem($this, 'Tables', 4);
+    $tables->update(['unit_cost' => 500, 'inventory_item_no' => 'INV-DRAFT-TABLE']);
+
+    $draftResponse = $this->actingAs($this->custodian)
+        ->postJson(route('propertyCustodian.assignments.draft'), [
+            'user_id' => $this->endUser->id,
+            'items' => [
+                ['item_id' => $chairs->item_id, 'quantity' => 1],
+                ['item_id' => $tables->item_id, 'quantity' => 2],
+            ],
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+    $draftId = $draftResponse->json('draft_id');
+
+    $pdf = \Mockery::mock(\Barryvdh\DomPDF\PDF::class);
+    $pdf->shouldReceive('stream')
+        ->once()
+        ->with(sprintf('PRS-%s-%06d.pdf', now()->format('Y'), $draftId))
+        ->andReturn(response('%PDF-preview', 200, ['Content-Type' => 'application/pdf']));
+    Pdf::shouldReceive('loadView')
+        ->once()
+        ->with('pdfs.property-release-slip', \Mockery::on(
+            fn (array $data): bool => count($data['lines']) === 2
+                && $data['lines'][0]['item_no'] === 'INV-DRAFT-CHAIR'
+                && $data['lines'][0]['qty'] === 1
+                && $data['lines'][1]['item_no'] === 'INV-DRAFT-TABLE'
+                && $data['lines'][1]['qty'] === 2
+                && $data['total'] === 1250.0
+        ))
+        ->andReturn($pdf);
+
+    $this->actingAs($this->custodian)
+        ->get(route('propertyCustodian.requests.slip-pdf', $draftId).'?preview=1')
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
+});
+
+test('custodian can edit a draft slip without allocating inventory', function () {
+    $chairs = makeAvailableItem($this, 'Chairs', 3);
+    $tables = makeAvailableItem($this, 'Tables', 4);
+
+    $draftResponse = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.assignments.draft'), [
+            'user_id' => $this->endUser->id,
+            'transaction_date' => '2026-10-20',
+            'items' => [
+                ['item_id' => $chairs->item_id, 'quantity' => 2],
+            ],
+            'slip_fields' => [
+                'recipient_name' => 'End User',
+                'department_unit' => 'Science',
+                'purpose' => 'Official Use (Off-site)',
+            ],
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+    $draftId = $draftResponse->json('draft_id');
+
+    $this->actingAs($this->custodian)
+        ->putJson(route('api.custodian.drafts.update', $draftId), [
+            'user_id' => $this->endUser->id,
+            'transaction_date' => '2026-10-21',
+            'expected_return_date' => '2027-10-21',
+            'items' => [
+                ['item_id' => $tables->item_id, 'quantity' => 2],
+            ],
+            'slip_fields' => [
+                'recipient_name' => 'Updated Recipient',
+                'department_unit' => 'Library',
+                'purpose' => 'Transfer / Relocation',
+                'conditions' => [$tables->item_id => 'Good'],
+            ],
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $draft = AssignmentRequest::query()->findOrFail($draftId);
+    expect($draft->status)->toBe('draft')
+        ->and((int) $draft->quantity)->toBe(2)
+        ->and($draft->requested_at->toDateString())->toBe('2026-10-21')
+        ->and($draft->expected_return_date)->toBe('2027-10-21')
+        ->and($draft->release_slip_fields['recipient_name'])->toBe('Updated Recipient')
+        ->and((int) $draft->fulfillmentRequests()->sole()->item_id)->toBe($tables->item_id)
+        ->and((int) $draft->fulfillmentRequests()->sole()->quantity)->toBe(2);
+    expect((int) $chairs->fresh()->quantity)->toBe(3)
+        ->and((int) $tables->fresh()->quantity)->toBe(4)
+        ->and(Transaction::query()->count())->toBe(0);
+});
+
+test('editing a draft cannot consume another request hold', function () {
+    $item = makeAvailableItem($this, 'Held Chairs', 3);
+
+    $firstDraft = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.assignments.draft'), [
+            'user_id' => $this->endUser->id,
+            'items' => [['item_id' => $item->item_id, 'quantity' => 2]],
+        ])
+        ->assertOk()
+        ->json('draft_id');
+    $secondDraft = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.assignments.draft'), [
+            'user_id' => $this->endUser->id,
+            'items' => [['item_id' => $item->item_id, 'quantity' => 1]],
+        ])
+        ->assertOk()
+        ->json('draft_id');
+
+    $this->actingAs($this->custodian)
+        ->putJson(route('api.custodian.drafts.update', $firstDraft), [
+            'user_id' => $this->endUser->id,
+            'transaction_date' => now()->toDateString(),
+            'items' => [['item_id' => $item->item_id, 'quantity' => 3]],
+            'slip_fields' => ['recipient_name' => 'End User'],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.0.quantity.0', 'The requested quantity exceeds free stock after accounting for other holds.');
+
+    expect((int) AssignmentRequest::query()->where('id', $firstDraft)->value('quantity'))->toBe(2)
+        ->and((int) AssignmentRequest::query()->where('id', $secondDraft)->value('quantity'))->toBe(1)
+        ->and((int) $item->fresh()->quantity)->toBe(3)
+        ->and(Transaction::query()->count())->toBe(0);
+});
+
+test('assigned items excludes summary records after a multi-item draft is allocated', function () {
+    $chairs = makeAvailableItem($this, 'Assigned Chair Set', 2);
+    $tables = makeAvailableItem($this, 'Assigned Table Set', 1);
+
+    $draftId = $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.assignments.draft'), [
+            'user_id' => $this->endUser->id,
+            'items' => [
+                ['item_id' => $chairs->item_id, 'quantity' => 2],
+                ['item_id' => $tables->item_id, 'quantity' => 1],
+            ],
+        ])
+        ->assertOk()
+        ->json('draft_id');
+
+    $this->actingAs($this->custodian)
+        ->postJson(route('api.custodian.drafts.allocate', $draftId))
+        ->assertOk();
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.assigned-items'))
+        ->assertOk()
+        ->assertJsonCount(2, 'activityRows')
+        ->assertJsonFragment(['item_name' => 'Assigned Chair Set'])
+        ->assertJsonFragment(['item_name' => 'Assigned Table Set'])
+        ->assertJsonMissing(['item_name' => 'Unknown item']);
+});
+
 test('draft slip preview includes entered item conditions in the PDF data', function () {
     $item = makeAvailableItem($this, 'Bondpaper', 4);
     $item->update(['inventory_item_no' => 'INV-000588']);

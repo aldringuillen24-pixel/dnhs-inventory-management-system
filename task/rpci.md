@@ -20,10 +20,14 @@ final report.
   review, and certify it.
 - [ ] Confirm the required RPCI form, report columns, signatories, and submission
   deadlines with the school or division.
+- [ ] Prepare a clearly labeled, sample-data RPCI-PPE PDF template and review its
+  layout before connecting it to inventory or count-cycle data.
 - [ ] Decide how teachers receive the sheet and reminders (in-app, email, or both).
 
 **Checkpoint:** Do not generate an official-looking RPCI until these rules and
-the report format have been confirmed.
+the report format have been confirmed. A sample-data PDF may be used to review
+the layout, but must remain clearly marked as a draft and disconnected from live
+inventory data.
 
 ## Phase 2: Create a count cycle
 

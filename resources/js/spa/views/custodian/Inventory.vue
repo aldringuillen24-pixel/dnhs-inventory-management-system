@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6">
+  <div class="space-y-4 min-[480px]:space-y-6">
     <!-- Header -->
     <div class="flex flex-wrap items-center justify-between gap-4">
       <div>
@@ -9,6 +9,7 @@
             v-if="metrics.total !== undefined"
             class="rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
           >
+            {{ format(metrics.total) }}
           </span>
         </div>
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Stock records grouped by item, category, unit, and condition.</p>
@@ -4703,6 +4704,9 @@ onMounted(() => {
   if (typeof ResizeObserver !== 'undefined' && tabStripRef.value) {
     pillObserver = new ResizeObserver(() => updatePill());
     pillObserver.observe(tabStripRef.value);
+    tabStripRef.value.querySelectorAll('[data-workspace-tab]').forEach((tab) => {
+      pillObserver.observe(tab);
+    });
   } else {
     window.addEventListener('resize', updatePill);
   }
@@ -4716,6 +4720,10 @@ onUnmounted(() => {
 
 watch(workspace, () => {
   closeIncidentDetails();
+  nextTick(updatePill);
+});
+
+watch(tabs, () => {
   nextTick(updatePill);
 });
 

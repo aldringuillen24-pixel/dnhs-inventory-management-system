@@ -109,6 +109,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::post('/inventory/rfq-pdf', [PropertyCustodianController::class, 'generateRfqPdf'])->name('inventory.rfq-pdf');
     Route::post('/inventory/itb-pdf', [PropertyCustodianController::class, 'generateItbPdf'])->name('inventory.itb-pdf');
     Route::post('/inventory/iirup-pdf', [PropertyCustodianController::class, 'generateIirupPdf'])->name('inventory.iirup-pdf');
+    Route::post('/inventory/rcpi-ppe-pdf', [PropertyCustodianController::class, 'generateRcpiPpePdf'])->name('inventory.rcpi-ppe-pdf');
 
     Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
 
@@ -123,6 +124,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
     Route::post('/transactions/{transactionId}/manual-return', [PropertyCustodianController::class, 'returnManualIssue'])->name('transactions.manual-return');
 
     Route::post('/requests/{id}/approve', [PropertyCustodianController::class, 'approveRequest'])->name('requests.approve');
+    Route::post('/requests/{id}/draft', [PropertyCustodianController::class, 'draftRequest'])->name('requests.draft');
 
     Route::post('/requests/{id}/cancel', [PropertyCustodianController::class, 'cancelItemRequest'])->name('requests.cancel');
 
@@ -132,6 +134,7 @@ Route::middleware(['auth', 'role:Property Custodian'])->prefix('property-custodi
 
     Route::post('/assignments/draft', [PropertyCustodianController::class, 'storeDraft'])->name('assignments.draft');
     Route::post('/assignments/draft/preview', [PropertyCustodianController::class, 'draftSlipPreview'])->name('assignments.draft.preview');
+    Route::put('/drafts/{id}', [PropertyCustodianController::class, 'updateDraft'])->name('drafts.update');
 
     Route::post('/drafts/{id}/allocate', [PropertyCustodianController::class, 'allocateDraft'])->name('drafts.allocate');
 
@@ -227,6 +230,13 @@ Route::middleware(['auth', 'role:School Head'])->prefix('school-head')->name('sc
 });
 
 
+// Inspector Routes (require inspector role)
+Route::middleware(['auth', 'role:Inspector'])->prefix('inspector')->name('inspector.')->group(function () {
+    Route::get('/profile', fn () => redirect('/spa/profile'))->name('profile');
+
+    Route::patch('/profile', [ArrivalInspectionController::class, 'updateProfile'])->name('profile.update');
+});
+
 // Admin Routes (require admin role)
 Route::middleware(['auth', 'role:Administrator'])->prefix('admin')->name('admin.')->group(function () {
     Route::get('/dashboard', fn () => redirect('/spa/admin/dashboard'))->name('dashboard');
@@ -304,6 +314,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
     Route::post('/inventory/rfq-pdf', [PropertyCustodianController::class, 'generateRfqPdf'])->name('inventory.rfq-pdf');
     Route::post('/inventory/itb-pdf', [PropertyCustodianController::class, 'generateItbPdf'])->name('inventory.itb-pdf');
     Route::post('/inventory/iirup-pdf', [PropertyCustodianController::class, 'generateIirupPdf'])->name('inventory.iirup-pdf');
+        Route::post('/inventory/rcpi-ppe-pdf', [PropertyCustodianController::class, 'generateRcpiPpePdf'])->name('inventory.rcpi-ppe-pdf');
         Route::post('/inventory/stock-in', [PropertyCustodianController::class, 'stockIn'])->name('inventory.stock-in');
         Route::post('/inventory/stock-in/import', [PropertyCustodianController::class, 'stockInImport'])->name('inventory.stock-in.import');
         Route::get('/inventory/stock-in/approved-iars', [PropertyCustodianController::class, 'approvedIarsForStockIn'])->name('inventory.stock-in.approved-iars');
@@ -341,12 +352,14 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/transactions/assign', [PropertyCustodianController::class, 'assignItem'])->name('transactions.assign');
         Route::post('/transactions/{transactionId}/manual-return', [PropertyCustodianController::class, 'returnManualIssue'])->name('transactions.manual-return');
         Route::post('/requests/{id}/approve', [PropertyCustodianController::class, 'approveRequest'])->name('requests.approve');
+        Route::post('/requests/{id}/draft', [PropertyCustodianController::class, 'draftRequest'])->name('requests.draft');
         Route::get('/requests/{id}/slip', [PropertyCustodianController::class, 'releaseSlipData'])->name('requests.slip');
         Route::post('/requests/{id}/slip-pdf', [PropertyCustodianController::class, 'releaseSlipPdf'])->name('requests.slip-pdf');
         Route::post('/requests/{id}/cancel', [PropertyCustodianController::class, 'cancelItemRequest'])->name('requests.cancel');
         Route::post('/requests/{id}/decline', [PropertyCustodianController::class, 'declineRequest'])->name('requests.decline');
         Route::post('/assignments/draft', [PropertyCustodianController::class, 'storeDraft'])->name('assignments.draft');
         Route::post('/assignments/draft/preview', [PropertyCustodianController::class, 'draftSlipPreview'])->name('assignments.draft.preview');
+        Route::put('/drafts/{id}', [PropertyCustodianController::class, 'updateDraft'])->name('drafts.update');
         Route::post('/drafts/{id}/allocate', [PropertyCustodianController::class, 'allocateDraft'])->name('drafts.allocate');
         Route::post('/transfers/{id}/draft', [PropertyCustodianController::class, 'storeTransferReleaseSlip'])->name('transfers.draft');
         Route::post('/transfers/{id}/release-slip-preview', [PropertyCustodianController::class, 'transferReleaseSlipPreview'])->name('transfers.release-slip-preview');
@@ -390,6 +403,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::get('/assigned-items', [EndUserController::class, 'myAssignedItems'])->name('assigned-items');
         Route::get('/assigned-items/export-pdf', [EndUserController::class, 'exportAssignedItemsPdf'])->name('assigned-items.export-pdf');
         Route::post('/transfer', [EndUserController::class, 'transferAssignedItem'])->name('transfer');
+        Route::post('/transfer/{id}/cancel', [EndUserController::class, 'cancelTransfer'])->name('transfer.cancel');
         Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');
         Route::post('/inventory/{itemId}/cancel-return', [EndUserController::class, 'cancelReturnRequest'])->name('inventory.cancel-return');
         Route::post('/inventory/{itemId}/report', [EndUserController::class, 'reportIssue'])->name('inventory.report');
@@ -417,6 +431,9 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::patch('/arrival-inspections/{arrivalInspection}', [ArrivalInspectionController::class, 'update'])->name('arrival-inspections.update');
         Route::delete('/arrival-inspections/{arrivalInspection}', [ArrivalInspectionController::class, 'destroy'])->name('arrival-inspections.destroy');
         Route::get('/reports', [SchoolHeadController::class, 'reports'])->name('reports');
+
+        Route::get('/profile', fn () => redirect('/spa/profile'))->name('profile');
+        Route::patch('/profile', [ArrivalInspectionController::class, 'updateProfile'])->name('profile.update');
     });
 
     Route::middleware('role:Administrator')->prefix('admin')->name('admin.')->group(function () {

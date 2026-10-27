@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class EndUserController extends Controller
@@ -491,6 +492,18 @@ class EndUserController extends Controller
         ->whereKeyNot(Auth::id())
         ->get();
 
+        $openReportItemIds = MaintenanceRecord::query()
+            ->where('reported_by', $user->id)
+            ->whereIn('status', ['reported', 'in_progress'])
+            ->pluck('inventory_id')
+            ->map(fn ($itemId): int => (int) $itemId)
+            ->all();
+        $activityRows = $activityRows->map(function (array $row) use ($openReportItemIds): array {
+            $row['has_open_report'] = in_array((int) ($row['item_id'] ?? 0), $openReportItemIds, true);
+
+            return $row;
+        });
+
         return response()->json([
             'title' => 'My Assigned Items',
             'activityRows' => $activityRows,
@@ -509,6 +522,7 @@ class EndUserController extends Controller
                     'type' => $report->diagnosis,
                     'quantity' => $report->quantity,
                     'details' => $report->issue_description,
+                    'repair_return_destination' => $report->repair_return_destination,
                     'status' => $report->incident_status ?? $report->status,
                     'outcome' => $report->incident_outcome,
                     'submitted_at' => $report->created_at,
@@ -565,37 +579,67 @@ class EndUserController extends Controller
         ]);
     }
 
-    private function inventoryAssignmentRows($user)
+    private function inventoryAssignmentRows($user, $pendingReturns)
     {
         return Inventory::query()
+            ->with('category:category_id,category_name,is_maintenance_eligible')
             ->where('status', 'assigned')
             ->where('assigned_to_user_id', $user->id)
             ->where('quantity', '>', 0)
             ->get()
-            ->map(function (Inventory $inventory) use ($user) {
-                $pendingReturnRequest = AssignmentRequest::where('item_id', $inventory->item_id)
-                    ->where('user_id', $user->id)
-                    ->where('status', 'waiting for custodian approval')
-                    ->whereHas('targetUser.role', fn ($query) => $query->where('role_name', 'Property Custodian'))
+            ->map(function (Inventory $inventory) use ($user, $pendingReturns) {
+                $pendingQuantity = (int) $pendingReturns
+                    ->where('item_id', $inventory->item_id)
+                    ->sum('quantity');
+                $assignedQuantity = max(0, (int) $inventory->quantity - $pendingQuantity);
+
+                if ($assignedQuantity === 0) {
+                    return null;
+                }
+
+                $assignment = AssignmentRequest::where('item_id', $inventory->item_id)
+                    ->where('target_user_id', $user->id)
+                    ->whereIn('status', ['approved', 'accepted'])
+                    ->where('quantity', '>', 0)
+                    ->latest('responded_at')
                     ->first();
 
                 return [
                     'type'      => 'Assigned',
                     'item_id'   => $inventory->item_id,
                     'item_name' => $inventory->item_name,
-                    'quantity'  => $inventory->quantity,
-                    'date'      => now(),
-                    'status'    => $pendingReturnRequest ? 'Waiting for Return Approval' : 'Approved',
-                    'request'   => $pendingReturnRequest,
+                    'inventory_item_no' => $inventory->inventory_item_no,
+                    'unit'      => $inventory->unit,
+                    'is_consumable' => $inventory->category?->isConsumable() ?? false,
+                    'maintenance_eligible' => (bool) $inventory->category?->is_maintenance_eligible,
+                    'quantity'  => $assignedQuantity,
+                    'date'      => $assignment?->responded_at ?? $assignment?->requested_at,
+                    'status'    => 'Approved',
+                    'request'   => $assignment,
                 ];
-            })->toBase();
+            })->filter()->values()->toBase();
     }
 
-    private function userAssignmentRows($user)
+    private function pendingReturnRequests($user)
     {
         return AssignmentRequest::query()
-            ->with(['item:item_id,item_name,inventory_item_no', 'transaction'])
+            ->with('item:item_id,item_name,inventory_item_no,category_id')
+            ->where('user_id', $user->id)
+            ->where('status', 'waiting for custodian approval')
+            ->whereHas('targetUser.role', fn ($query) => $query->where('role_name', 'Property Custodian'))
+            ->get();
+    }
+
+    private function userAssignmentRows($user, $pendingReturns)
+    {
+        return AssignmentRequest::query()
+            ->with([
+                'item:item_id,item_name,inventory_item_no,category_id,unit',
+                'item.category:category_id,category_name,is_maintenance_eligible',
+                'transaction',
+            ])
             ->where('target_user_id', $user->id)
+            ->whereNotNull('item_id')
             ->where('quantity', '>', 0)
             // Only assignments the end user already accepted. Custodian
             // assignments still awaiting acceptance live in the Requests
@@ -603,35 +647,54 @@ class EndUserController extends Controller
             // Hide transferred items — user no longer possesses them
             ->whereIn('status', ['approved', 'accepted'])
             ->get()
-            ->map(function ($request) use ($user) {
-                $returnRequestStatus = AssignmentRequest::where('item_id', $request->item_id)
-                    ->where('user_id', $user->id)
-                    ->where('status', 'waiting for custodian approval')
-                    ->whereHas('targetUser.role', fn ($query) => $query->where('role_name', 'Property Custodian'))
-                    ->first();
+            ->map(function ($request) use ($pendingReturns) {
+                $pendingQuantity = (int) $pendingReturns
+                    ->filter(fn (AssignmentRequest $returnRequest): bool => $request->transaction_id
+                        ? (int) $returnRequest->transaction_id === (int) $request->transaction_id
+                        : (int) $returnRequest->item_id === (int) $request->item_id)
+                    ->sum('quantity');
+                $assignedQuantity = max(0, (int) $request->quantity - $pendingQuantity);
+
+                if ($assignedQuantity === 0) {
+                    return null;
+                }
 
                 return [
                     'type'      => 'Assigned',
                     'item_id'   => $request->item_id,
                     'item_name' => optional($request->item)->item_name ?? 'Unknown item',
-                    'quantity'  => $request->quantity,
+                    'inventory_item_no' => optional($request->item)->inventory_item_no,
+                    'unit'      => optional($request->item)->unit,
+                    'is_consumable' => $request->item?->category?->isConsumable() ?? false,
+                    'maintenance_eligible' => (bool) $request->item?->category?->is_maintenance_eligible,
+                    'quantity'  => $assignedQuantity,
                     'date'      => $request->responded_at ?? $request->requested_at ?? now(),
-                    'status'    => $returnRequestStatus ? 'Waiting for Return Approval' : $request->status,
+                    'status'    => $request->status,
                     'request'   => $request,
                 ];
-            })->toBase();
+            })->filter()->values()->toBase();
     }
 
     private function requestedItemRows($user)
     {
         return AssignmentRequest::query()
-            ->with(['item:item_id,item_name,inventory_item_no', 'targetUser.role'])
+            ->with([
+                'item:item_id,item_name,inventory_item_no,category_id',
+                'item.category:category_id,category_name,is_maintenance_eligible',
+                'targetUser.role',
+            ])
             ->where('user_id', $user->id)
             // Only items requisitioned from the Property Custodian (not outgoing transfers sent to colleagues)
             ->whereHas('targetUser.role', fn ($q) => $q->where('role_name', 'Property Custodian'))
             // Hide live/processed return requests from this table; they belong to the request list instead.
             // Cancelled requests are also excluded from the assigned-items activity list.
-            ->whereNotIn('status', ['waiting for custodian approval', 'declined', 'cancelled'])
+            ->whereNotIn('status', [
+                'waiting for approval',
+                self::STATUS_WAITING_FOR_PROCUREMENT,
+                'waiting for custodian approval',
+                'declined',
+                'cancelled',
+            ])
             // Exclude transferred items (no longer in possession)
             ->where('status', '!=', 'transferred')
             // Fulfilled item-type requests are represented by their exact inventory fulfillment rows.
@@ -645,6 +708,8 @@ class EndUserController extends Controller
                     'type'      => 'Requested',
                     'item_id'   => $request->item_id,
                     'item_name' => $request->requested_item_name ?? optional($request->item)->item_name ?? 'Unknown item',
+                    'is_consumable' => $request->item?->category?->isConsumable() ?? false,
+                    'maintenance_eligible' => (bool) $request->item?->category?->is_maintenance_eligible,
                     'quantity'  => $request->quantity,
                     'date'      => $request->requested_at ?? now(),
                     'status'    => $request->status,
@@ -655,13 +720,31 @@ class EndUserController extends Controller
 
     private function buildAssignedActivityRows($user)
     {
-        $assignedItems = $this->inventoryAssignmentRows($user)->merge($this->userAssignmentRows($user));
+        $pendingReturns = $this->pendingReturnRequests($user);
+        $assignedItems = $this->inventoryAssignmentRows($user, $pendingReturns)
+            ->merge($this->userAssignmentRows($user, $pendingReturns));
+
+        $reportedQuantities = MaintenanceRecord::query()
+            ->where('reported_by', $user->id)
+            ->whereIn('diagnosis', MaintenanceRecord::INCIDENT_TYPES)
+            ->whereIn('status', ['reported', 'in_progress'])
+            ->selectRaw('inventory_id, SUM(quantity) as reported_quantity')
+            ->groupBy('inventory_id')
+            ->pluck('reported_quantity', 'inventory_id');
 
         return $assignedItems
             ->merge($this->requestedItemRows($user))
-            ->groupBy(fn ($row) => $row['type'] . '|' . ($row['item_id'] ?? $row['item_name']))
+            ->groupBy(fn ($row) => $row['type'].'|'.($row['item_id'] ?? $row['item_name']))
             ->map(function ($group) {
                 return $group->sortByDesc(fn ($row) => $row['date'])->first();
+            })
+            ->map(function (array $row) use ($reportedQuantities): array {
+                if ($row['type'] === 'Assigned') {
+                    $reportedQuantity = (int) $reportedQuantities->get($row['item_id'], 0);
+                    $row['quantity'] = max(0, (int) $row['quantity'] - $reportedQuantity);
+                }
+
+                return $row;
             })
             ->values()
             ->sortByDesc(fn ($row) => $row['date'])
@@ -693,13 +776,8 @@ class EndUserController extends Controller
         })->values();
 
         $holder = trim($user->first_name . ' ' . $user->last_name) ?: $user->username;
-        $filterSummary = 'Holder: ' . $holder
-            . ($status ? "; Status: {$status}" : '')
-            . ($search !== '' ? "; Search: \"{$validated['search']}\"" : '');
-
         $pdf = Pdf::loadView('pdfs.end-user-assigned-items', [
             'rows' => $rows,
-            'filterSummary' => $filterSummary,
             'generatedAt' => now()->format('F j, Y g:i A'),
             'holder' => $holder,
         ]);
@@ -866,6 +944,7 @@ class EndUserController extends Controller
         ]);
 
         $inventory = Inventory::findOrFail($itemId);
+        $inventory->loadMissing('category:category_id,is_maintenance_eligible');
         $user = Auth::user();
 
         $approvedAssignment = AssignmentRequest::where('item_id', $inventory->item_id)
@@ -964,6 +1043,10 @@ class EndUserController extends Controller
             ->first();
 
         if (!$returnRequest) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'No pending return request was found for this item.'], 404);
+            }
+
             return redirect()->back()->with('error', 'No pending return request was found for this item.');
         }
 
@@ -971,6 +1054,13 @@ class EndUserController extends Controller
             'status' => 'cancelled',
             'responded_at' => now(),
         ]);
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Return request cancelled successfully.',
+            ]);
+        }
 
         return redirect()->route('endUser.my-assigned-items')->with('success', 'Return request cancelled successfully.');
     }
@@ -989,7 +1079,18 @@ class EndUserController extends Controller
         }
 
         if (! $inventoryOperations->cancelTransferRequest($transferRequest->id, $validated['cancellation_reason'] ?? null)) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => 'Only transfers awaiting custodian review can be cancelled.'], 422);
+            }
+
             return redirect()->back()->with('error', 'Only transfers awaiting custodian review can be cancelled.');
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Transfer request cancelled.',
+            ]);
         }
 
         return redirect()->route('endUser.my-assigned-items')->with('success', 'Transfer request cancelled.');
@@ -1008,11 +1109,18 @@ class EndUserController extends Controller
             'type' => ['required', 'string', 'in:damaged,needs_repair,lost,stolen'],
             'quantity' => ['required', 'integer', 'min:1'],
             'notes' => ['required', 'string', 'min:5', 'max:2000'],
+            'repair_return_destination' => ['nullable', 'in:custodian_available,assigned_user'],
             'evidence' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
         ]);
 
         $inventory = Inventory::findOrFail($itemId);
         $user = Auth::user();
+
+        if ($validated['type'] === 'damaged' && $inventory->category?->isConsumable()) {
+            throw ValidationException::withMessages([
+                'type' => 'Damaged reports are not available for consumable items. Select Lost or Stolen instead.',
+            ]);
+        }
 
         $approvedAssignment = AssignmentRequest::where('item_id', $inventory->item_id)
             ->where('target_user_id', $user->id)
@@ -1025,11 +1133,28 @@ class EndUserController extends Controller
         $isAssignedToUser = (int) ($inventory->assigned_to_user_id ?? 0) === (int) $user->id;
 
         if (!$isAssignedToUser && !$hasApprovedAssignment) {
-            return redirect()->back()->with('error', 'You can only report issues on items assigned to you.');
+            $message = 'You can only report issues on items assigned to you.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 422)
+                : redirect()->back()->with('error', $message);
         }
 
         if ($inventory->status !== 'assigned' && !$hasApprovedAssignment) {
-            return redirect()->back()->with('error', 'Only assigned items can be reported.');
+            $message = 'Only assigned items can be reported.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 422)
+                : redirect()->back()->with('error', $message);
+        }
+
+        if (
+            $validated['type'] === 'needs_repair'
+            && $inventory->category?->is_maintenance_eligible !== true
+        ) {
+            throw ValidationException::withMessages([
+                'type' => 'Repair reports are not available for this item category.',
+            ]);
         }
 
         $assignmentTransaction = $approvedAssignment?->transaction_id
@@ -1049,7 +1174,11 @@ class EndUserController extends Controller
         );
         $reportQuantity = $validated['quantity'] ?? $assignedQuantity;
         if ($reportQuantity < 1 || $reportQuantity > $assignedQuantity) {
-            return redirect()->back()->with('error', 'Report quantity must be between 1 and the assigned quantity.');
+            $message = 'Report quantity must be between 1 and the assigned quantity.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 422)
+                : redirect()->back()->with('error', $message);
         }
 
         $alreadyReported = MaintenanceRecord::where('inventory_id', $inventory->item_id)
@@ -1058,7 +1187,11 @@ class EndUserController extends Controller
             ->exists();
 
         if ($alreadyReported) {
-            return redirect()->back()->with('error', 'You already have an open report for this item.');
+            $message = 'You already have an open report for this item.';
+
+            return $request->expectsJson()
+                ? response()->json(['message' => $message], 422)
+                : redirect()->back()->with('error', $message);
         }
 
         $evidence = $request->file('evidence');
@@ -1073,6 +1206,9 @@ class EndUserController extends Controller
                     'status' => 'reported',
                     'issue_description' => $validated['notes'],
                     'diagnosis' => $validated['type'],
+                    'repair_return_destination' => in_array($validated['type'], ['damaged', 'needs_repair'], true)
+                        ? ($validated['repair_return_destination'] ?? 'custodian_available')
+                        : null,
                     'started_at' => now(),
                 ]);
 
@@ -1100,6 +1236,13 @@ class EndUserController extends Controller
             }
 
             throw $exception;
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Issue reported for custodian triage.',
+            ]);
         }
 
         return redirect()->route('endUser.my-assigned-items')->with('success', 'Issue reported for custodian triage.');

@@ -124,16 +124,8 @@
     <template #footer>
       <div class="flex justify-end gap-2.5">
         <button type="button" class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" @click="closeModal">Cancel</button>
-        <button type="button" class="min-w-28 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300" :disabled="busy || approvalComplete || !canApprove" @click="showSlip = true">PDF Slip</button>
-        <button type="button" class="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-md transition-all hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50" :disabled="busy || approvalComplete || !canApprove" @click="approve">
-          <svg v-if="busy" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          <svg v-else class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-          {{ busy ? 'Preparing…' : isItemType ? 'Allocate & Approve' : 'Confirm & Approve' }}
+        <button type="button" class="inline-flex min-w-40 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-md transition-all hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50" :disabled="busy || !canApprove" @click="showSlip = true">
+          Prepare Draft
         </button>
       </div>
     </template>
@@ -142,7 +134,7 @@
   <SlipDocument
       :open="showSlip"
       title="Review Item Request"
-      subtitle="Allocate stock to fulfill this request."
+      subtitle="Review the release slip and save it as a draft. Inventory will not be allocated yet."
       :doc-no="slipDocNo"
       :document-date="today"
       :lines="previewInventory"
@@ -150,10 +142,11 @@
       :request-id="request?.id"
       :recipient-name="requesterName"
       :custodian-name="auth.displayName"
-      :draft-mode="false"
-      primary-label="Allocate & Approve"
+      :draft-mode="true"
+      :primary-disabled="busy"
+      :primary-label="busy ? 'Saving Draft…' : 'Save Draft'"
       @back="closePreview"
-      @primary="approve"
+      @primary="saveDraft"
       @close="showSlip = false"
     />
 </template>
@@ -162,6 +155,7 @@
 import { computed, ref, watch } from 'vue';
 import api from '../../lib/axios';
 import { useAuthStore } from '../../stores/auth';
+import { useToastStore } from '../../stores/toast';
 import Modal from '../../components/ui/dialogs/Modal.vue';
 import FieldError from '../../components/ui/feedback/FieldError.vue';
 import SlipDocument from '../../views/shared/SlipDocument.vue';
@@ -171,8 +165,9 @@ const props = defineProps({
     request: { type: Object, default: null },
 });
 
-const emit = defineEmits(['close', 'approved']);
+const emit = defineEmits(['close', 'drafted']);
 const auth = useAuthStore();
+const toast = useToastStore();
 
 const selected = ref([]);
 // Last slip-fed allocation per request id. In-memory only: it survives modal
@@ -180,7 +175,6 @@ const selected = ref([]);
 const lastAllocation = ref(new Map());
 const busy = ref(false);
 const errors = ref({});
-const approvalComplete = ref(false);
 const showSlip = ref(false);
 const purposes = [
     'Official Use (Off-site)',
@@ -255,7 +249,7 @@ const canApprove = computed(() => {
     if (freeStock.value < Number(props.request.quantity)) {
         return false;
     }
-    return isItemType.value ? selected.value.length > 0 : true;
+    return isItemType.value ? selectedQuantity.value >= Number(props.request.quantity) : true;
 });
 
 const releasePurposes = [
@@ -270,20 +264,38 @@ const slipDocNo = computed(() => props.request ? `PRS-${new Date().getFullYear()
 const today = computed(() => new Date().toISOString().slice(0, 10));
 
 const previewInventory = computed(() => {
-    if (!props.request || !isItemType.value) {
+    if (!props.request) {
         return [];
     }
+    if (!isItemType.value) {
+        const item = props.request.item;
+        if (!item) {
+            return [];
+        }
+        const quantity = Number(props.request.quantity);
+        return [{
+            item_id: item.item_id,
+            item_no: item.inventory_item_no ?? String(item.item_id),
+            description: item.item_name ?? itemName.value,
+            qty: quantity,
+            unit_cost: item.unit_cost ?? null,
+            amount: Number(item.unit_cost ?? 0) * quantity,
+        }];
+    }
+    let remaining = Number(props.request.quantity);
     return selected.value.map(itemId => {
         const stock = matches.value.find(s => s.item_id === itemId);
+        const quantity = Math.min(remaining, Number(stock?.quantity ?? 0));
+        remaining -= quantity;
         return {
             item_id: stock?.item_id,
             item_no: stock?.inventory_item_no ?? String(itemId),
             description: stock?.item_name ?? 'Unknown item',
-            qty: stock?.quantity ?? 1,
+            qty: quantity,
             unit_cost: stock?.unit_cost ?? null,
-            amount: (stock?.unit_cost ?? 0) * (stock?.quantity ?? 1),
+            amount: (stock?.unit_cost ?? 0) * quantity,
         };
-    });
+    }).filter((line) => line.qty > 0);
 });
 
 watch(
@@ -293,50 +305,40 @@ watch(
             selected.value = [...rememberedIds.value];
             errors.value = {};
             busy.value = false;
-            approvalComplete.value = false;
             showSlip.value = false;
         }
     },
 );
 
-async function approve() {
+async function saveDraft(slipFields = {}) {
     busy.value = true;
     errors.value = {};
 
     try {
-        await api.post(`/custodian/requests/${props.request.id}/approve`, isItemType.value ? { inventory_ids: selected.value } : {});
+        const payload = { slip_fields: slipFields };
+        if (isItemType.value) {
+            payload.inventory_ids = selected.value;
+        }
+        const { data } = await api.post(`/custodian/requests/${props.request.id}/draft`, payload, { skipToast: true });
+        toast.success('Draft saved', data.message ?? 'Print the slip, collect sign-off, then allocate from Drafts.');
         clearRemembered();
-        approvalComplete.value = true;
-        showSlip.value = true;
+        showSlip.value = false;
+        emit('drafted');
     } catch (requestError) {
         errors.value = requestError?.response?.data?.errors ?? {};
+        if (Object.keys(errors.value).length === 0) {
+            toast.error('Draft could not be saved', requestError?.response?.data?.message ?? 'Refresh the request and try again.');
+        }
     } finally {
         busy.value = false;
     }
 }
 
 function closeModal() {
-    if (approvalComplete.value) {
-        finish();
-        return;
-    }
-
     emit('close');
 }
 
-function finish() {
-    if (approvalComplete.value) {
-        emit('approved');
-    } else {
-        emit('close');
-    }
-}
-
 function closePreview() {
-    if (approvalComplete.value) {
-        finish();
-        return;
-    }
     showSlip.value = false;
 }
 </script>

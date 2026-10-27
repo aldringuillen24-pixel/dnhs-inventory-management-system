@@ -349,6 +349,138 @@ class InventoryOperationService
         });
     }
 
+    public function updateDraft(
+        int $draftId,
+        int $recipientId,
+        array $lines,
+        string $transactionDate,
+        ?string $expectedReturnDate,
+        array $slipFields,
+    ): AssignmentRequest|string|array {
+        return DB::transaction(function () use ($draftId, $recipientId, $lines, $transactionDate, $expectedReturnDate, $slipFields): AssignmentRequest|string|array {
+            $draft = AssignmentRequest::query()
+                ->whereKey($draftId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($draft->status !== 'draft') {
+                return 'stale';
+            }
+
+            $recipient = User::query()->with('role')->whereKey($recipientId)->firstOrFail();
+            if ($recipient->status !== 'active' || $recipient->role?->role_name !== 'End User') {
+                return 'invalid_recipient';
+            }
+
+            $children = AssignmentRequest::query()
+                ->where('parent_request_id', $draft->id)
+                ->where('status', 'draft')
+                ->lockForUpdate()
+                ->orderBy('id')
+                ->get();
+            if ($children->isEmpty()) {
+                return 'stale';
+            }
+
+            $ids = array_values(array_unique(array_map(
+                fn ($line) => (int) ($line['item_id'] ?? 0),
+                $lines,
+            )));
+            sort($ids);
+            $items = Inventory::query()
+                ->with('category')
+                ->whereIn('item_id', $ids)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('item_id');
+
+            $errors = [];
+            $selectedQuantities = [];
+            $ordered = array_values($lines);
+            foreach ($ordered as $index => $line) {
+                $itemId = (int) ($line['item_id'] ?? 0);
+                $quantity = $line['quantity'] ?? null;
+                $item = $items->get($itemId);
+                if (! $item || $item->status !== 'available' || (int) $item->quantity < 1) {
+                    $errors[$index]['item_id'][] = 'The selected item is no longer available.';
+
+                    continue;
+                }
+                if (! is_numeric($quantity) || (int) $quantity != $quantity || (int) $quantity < 1) {
+                    $errors[$index]['quantity'][] = 'Quantity must be a whole number of at least 1.';
+
+                    continue;
+                }
+
+                $quantity = (int) $quantity;
+                $totalHeld = (int) AssignmentRequest::query()
+                    ->whereIn('status', ['waiting for approval', 'draft'])
+                    ->where('item_id', $item->item_id)
+                    ->sum('quantity');
+                $ownHeld = (int) $children->where('item_id', $item->item_id)->sum('quantity');
+                $alreadySelected = (int) ($selectedQuantities[$item->item_id] ?? 0);
+                $free = max(0, (int) $item->quantity - ($totalHeld - $ownHeld));
+                if ($quantity + $alreadySelected > $free) {
+                    $errors[$index]['quantity'][] = 'The requested quantity exceeds free stock after accounting for other holds.';
+
+                    continue;
+                }
+                if ($item->category?->requires_serial_number
+                    && ($quantity !== 1 || (int) $item->quantity !== 1 || ! $item->serial_number)
+                ) {
+                    $errors[$index]['quantity'][] = 'Serialized stock must be selected as its exact individual asset with quantity 1.';
+
+                    continue;
+                }
+
+                $selectedQuantities[$item->item_id] = $alreadySelected + $quantity;
+            }
+
+            if ($errors !== []) {
+                return ['errors' => $errors];
+            }
+
+            $firstItem = $items->get((int) $ordered[0]['item_id']);
+            $totalQuantity = array_sum(array_map(fn ($line) => (int) $line['quantity'], $ordered));
+            $draft->update([
+                'target_user_id' => $recipientId,
+                'requested_item_name' => count($ordered) > 1
+                    ? $firstItem->item_name.' +'.(count($ordered) - 1).' more'
+                    : $firstItem->item_name,
+                'requested_category_id' => $firstItem->category_id,
+                'requested_unit' => $firstItem->unit,
+                'building' => $recipient->building ?? $firstItem->building,
+                'room' => $recipient->room ?? $firstItem->room,
+                'quantity' => $totalQuantity,
+                'requested_at' => Carbon::parse($transactionDate),
+                'expected_return_date' => $expectedReturnDate,
+                'release_slip_fields' => $slipFields,
+            ]);
+
+            AssignmentRequest::query()
+                ->where('parent_request_id', $draft->id)
+                ->where('status', 'draft')
+                ->delete();
+
+            foreach ($ordered as $line) {
+                AssignmentRequest::create([
+                    'user_id' => $draft->user_id,
+                    'target_user_id' => $recipientId,
+                    'item_id' => (int) $line['item_id'],
+                    'building' => $draft->building,
+                    'room' => $draft->room,
+                    'parent_request_id' => $draft->id,
+                    'quantity' => (int) $line['quantity'],
+                    'status' => 'draft',
+                    'requested_at' => $draft->requested_at,
+                    'expected_return_date' => $expectedReturnDate,
+                ]);
+            }
+
+            return $draft->fresh();
+        });
+    }
+
     /**
      * Allocate a draft: the single custody-writing step of the draft flow.
      *
@@ -2049,9 +2181,15 @@ class InventoryOperationService
         return null;
     }
 
-    public function markRepaired(int $itemId, int $actorId, ?string $repairNotes, ?float $maintenanceCost): ?string
+    public function markRepaired(
+        int $itemId,
+        int $actorId,
+        ?string $repairNotes,
+        ?float $maintenanceCost,
+        ?int $returnToUserId = null,
+    ): ?string
     {
-        return DB::transaction(function () use ($itemId, $actorId, $repairNotes, $maintenanceCost): ?string {
+        return DB::transaction(function () use ($itemId, $actorId, $repairNotes, $maintenanceCost, $returnToUserId): ?string {
             $inventory = Inventory::whereKey($itemId)->lockForUpdate()->firstOrFail();
             if ($inventory->status !== 'under_repair') {
                 return 'Item is not currently under repair.';
@@ -2080,9 +2218,78 @@ class InventoryOperationService
             }
 
             $quantity = (int) $inventory->quantity;
-            // An item repaired while some of its units are still issued out
-            // returns to its holder instead of reading as available stock.
-            $inventory->update(['status' => $hasActiveAssignments ? 'assigned' : 'available']);
+            $assignmentTransaction = null;
+            $inventoryStatus = $hasActiveAssignments ? 'assigned' : 'available';
+            if ($returnToUserId !== null) {
+                if ($quantity < 1 || $hasActiveAssignments) {
+                    return 'The repaired incident units cannot be returned to the reporter because their assignment state changed.';
+                }
+
+                $recipient = User::query()->whereKey($returnToUserId)->lockForUpdate()->firstOrFail();
+                $quantityAfter = 0;
+                $locationBefore = $inventory->only(['building', 'room']);
+                $targetBuilding = $recipient->building ?? $inventory->building;
+                $targetRoom = $recipient->room ?? $inventory->room;
+                $inventory->quantity = $quantityAfter;
+                $inventory->building = $targetBuilding;
+                $inventory->room = $targetRoom;
+                if ($quantityAfter === 0) {
+                    $inventory->assigned_to_user_id = $returnToUserId;
+                    $inventoryStatus = 'assigned';
+                } else {
+                    $inventory->assigned_to_user_id = null;
+                    $inventoryStatus = 'available';
+                }
+                $inventory->status = $inventoryStatus;
+                $inventory->save();
+
+                $assignmentTransaction = Transaction::create([
+                    'item_id' => $inventory->item_id,
+                    'from_user_id' => $actorId,
+                    'user_id' => $returnToUserId,
+                    'quantity' => $quantity,
+                    'issued_quantity' => $quantity,
+                    'from_building' => $locationBefore['building'],
+                    'from_room' => $locationBefore['room'],
+                    'building' => $targetBuilding,
+                    'room' => $targetRoom,
+                    'transaction_date' => now(),
+                    'status' => 'assigned',
+                    'expected_return_date' => self::defaultExpectedReturnDate(now()),
+                ]);
+
+                AssignmentRequest::create([
+                    'item_id' => $inventory->item_id,
+                    'user_id' => $actorId,
+                    'target_user_id' => $returnToUserId,
+                    'building' => $targetBuilding,
+                    'room' => $targetRoom,
+                    'transaction_id' => $assignmentTransaction->id,
+                    'quantity' => $quantity,
+                    'status' => 'approved',
+                    'notes' => 'Returned to the reporter after incident repair.',
+                    'requested_at' => now(),
+                    'responded_at' => now(),
+                    'expected_return_date' => $assignmentTransaction->expected_return_date,
+                ]);
+
+                $this->recordMovement(
+                    $inventory->item_id,
+                    $actorId,
+                    'assignment',
+                    $quantity,
+                    $quantity,
+                    $quantityAfter,
+                    'maintenance_record',
+                    $maintenanceRecord->id,
+                    "Repaired incident units assigned to user #{$returnToUserId}; transaction #{$assignmentTransaction->id}",
+                    $locationBefore,
+                );
+            } else {
+                // An item repaired while some of its units are still issued out
+                // returns to its holder instead of reading as available stock.
+                $inventory->update(['status' => $inventoryStatus]);
+            }
             $maintenanceRecord->update([
                 'status' => 'completed',
                 'repair_notes' => $repairNotes ?? $maintenanceRecord->repair_notes,
@@ -2105,12 +2312,24 @@ class InventoryOperationService
         });
     }
 
-    public function markItemsRepaired(array $itemIds, int $actorId, ?string $repairNotes, ?float $maintenanceCost): ?string
+    public function markItemsRepaired(
+        array $itemIds,
+        int $actorId,
+        ?string $repairNotes,
+        ?float $maintenanceCost,
+        array $returnToUserIds = [],
+    ): ?string
     {
         try {
-            DB::transaction(function () use ($itemIds, $actorId, $repairNotes, $maintenanceCost): void {
+            DB::transaction(function () use ($itemIds, $actorId, $repairNotes, $maintenanceCost, $returnToUserIds): void {
                 foreach (array_values(array_unique(array_map('intval', $itemIds))) as $itemId) {
-                    $error = $this->markRepaired($itemId, $actorId, $repairNotes, $maintenanceCost);
+                    $error = $this->markRepaired(
+                        $itemId,
+                        $actorId,
+                        $repairNotes,
+                        $maintenanceCost,
+                        isset($returnToUserIds[$itemId]) ? (int) $returnToUserIds[$itemId] : null,
+                    );
                     if ($error !== null) {
                         throw new \DomainException($error);
                     }

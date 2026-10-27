@@ -31,6 +31,7 @@ class MaintenanceRecord extends Model
         'status',
         'incident_status',
         'incident_outcome',
+        'repair_return_destination',
         'issue_description',
         'diagnosis',
         'repair_notes',

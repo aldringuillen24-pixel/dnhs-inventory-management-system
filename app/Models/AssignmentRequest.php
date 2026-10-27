@@ -47,11 +47,13 @@ class AssignmentRequest extends Model
         'requested_at',
         'responded_at',
         'expected_return_date',
+        'release_slip_fields',
     ];
 
     protected $casts = [
         'requested_at' => 'datetime',
         'responded_at' => 'datetime',
+        'release_slip_fields' => 'array',
     ];
 
     public function item()

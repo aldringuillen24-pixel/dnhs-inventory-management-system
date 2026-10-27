@@ -1,5 +1,5 @@
 <template>
-  <Modal :open="open && !showSlip" title="Assign Stockroom Items" subtitle="Issue one or more items to a registered staff member or record a manual loan." max-width="max-w-3xl" @close="$emit('close')">
+  <Modal :open="open && !showSlip" :title="editDraft ? 'Edit Draft' : 'Assign Stockroom Items'" :subtitle="editDraft ? 'Update the held inventory and review the property release slip.' : 'Issue one or more items to a registered staff member or record a manual loan.'" max-width="max-w-3xl" @close="$emit('close')">
     <!-- Mode Switcher -->
     <div class="mb-5 flex rounded-md bg-gray-100 p-1 dark:bg-white/5 border border-gray-200/60 dark:border-gray-800">
       <button
@@ -284,13 +284,14 @@
     :purposes="purposes"
     :recipient-name="slipData.recipientName"
     :custodian-name="auth.displayName"
+    :initial-fields="draftSlipFields ?? {}"
     :draft-mode="true"
     :primary-label="manualMode
       ? (busy ? 'Recording…' : 'Record Manual Assignment')
-      : (drafting ? 'Saving…' : 'Save Draft')"
+      : (drafting ? 'Saving…' : (editDraft ? 'Save Draft Changes' : 'Save Draft'))"
     :primary-disabled="busy || drafting"
     @back="backFromSlip"
-    @primary="manualMode ? saveManualFromSlip($event) : saveDraftFromSlip()"
+    @primary="manualMode ? saveManualFromSlip($event) : saveDraftFromSlip($event)"
     @close="showSlip = false"
   />
 </template>
@@ -308,6 +309,7 @@ const props = defineProps({
     open: { type: Boolean, default: false },
     items: { type: Array, default: () => [] },
     endUsers: { type: Array, default: () => [] },
+    editDraft: { type: Object, default: null },
 });
 
 const emit = defineEmits(['close', 'saved', 'drafted']);
@@ -345,7 +347,29 @@ function freeQuantity(item) {
     return Math.max(0, Number(item.quantity ?? 0) - Number(item.pending_hold ?? 0));
 }
 
-const assignableItems = computed(() => props.items.filter((item) => freeQuantity(item) > 0));
+const assignableItems = computed(() => {
+    const items = new Map(props.items.map((item) => [String(item.item_id), item]));
+    if (props.editDraft) {
+        const ownHoldByItem = new Map();
+        const children = props.editDraft.fulfillment_requests ?? props.editDraft.fulfillmentRequests ?? [];
+        for (const child of children) {
+            const key = String(child.item_id);
+            ownHoldByItem.set(key, (ownHoldByItem.get(key) ?? 0) + Number(child.quantity ?? 0));
+            if (!items.has(key) && child.item) {
+                items.set(key, child.item);
+            }
+        }
+        for (const [key, ownHold] of ownHoldByItem) {
+            const item = items.get(key);
+            if (item) {
+                const free = freeQuantity(item);
+                items.set(key, { ...item, free_quantity: free + ownHold });
+            }
+        }
+    }
+
+    return [...items.values()].filter((item) => item.status === 'available' && freeQuantity(item) > 0);
+});
 
 const registered = reactive({ user_id: '', transaction_date: todayISO() });
 
@@ -363,9 +387,10 @@ let nextLineKey = 1;
 const blankLine = () => ({ key: nextLineKey++, item_id: '', quantity: 1 });
 const lines = ref([blankLine()]);
 const lineErrors = ref({});
+const draftSlipFields = ref(null);
 
 function lineItem(line) {
-    return props.items.find((item) => String(item.item_id) === String(line.item_id)) ?? null;
+    return assignableItems.value.find((item) => String(item.item_id) === String(line.item_id)) ?? null;
 }
 
 function lineFree(line) {
@@ -475,9 +500,9 @@ const canManualPreview = computed(() => {
 });
 
 watch(
-    () => props.open,
+    () => [props.open, props.editDraft],
     (open) => {
-        if (open) {
+        if (open[0]) {
             errors.value = {};
             lineErrors.value = {};
             busy.value = false;
@@ -486,8 +511,36 @@ watch(
             showSlip.value = false;
             slipData.value = null;
             slipMode.value = null;
-            registered.transaction_date = todayISO();
-            lines.value = [blankLine()];
+            draftSlipFields.value = null;
+            if (props.editDraft) {
+                const children = props.editDraft.fulfillment_requests ?? props.editDraft.fulfillmentRequests ?? [];
+                registered.user_id = String(props.editDraft.target_user_id ?? '');
+                registered.transaction_date = String(props.editDraft.requested_at ?? todayISO()).slice(0, 10);
+                lines.value = children.map((child) => ({
+                    key: nextLineKey++,
+                    item_id: String(child.item_id),
+                    quantity: Number(child.quantity ?? 1),
+                }));
+                if (!lines.value.length) {
+                    lines.value = [blankLine()];
+                }
+                draftSlipFields.value = {
+                    ...(props.editDraft.release_slip_fields ?? {}),
+                    recipient_name: props.editDraft.release_slip_fields?.recipient_name
+                        ?? props.endUsers.find((person) => String(person.id) === registered.user_id)?.name
+                        ?? '',
+                    expected_return_date: props.editDraft.release_slip_fields?.expected_return_date
+                        ?? props.editDraft.expected_return_date
+                        ?? '',
+                };
+                slipMode.value = 'registered';
+                slipData.value = buildDraftSlip();
+                showSlip.value = true;
+            } else {
+                registered.user_id = '';
+                registered.transaction_date = todayISO();
+                lines.value = [blankLine()];
+            }
         }
     },
 );
@@ -514,6 +567,7 @@ function resetAssignForm() {
     showSlip.value = false;
     slipData.value = null;
     slipMode.value = null;
+    draftSlipFields.value = null;
     registered.user_id = '';
     registered.transaction_date = todayISO();
     manual.manual_recipient_name = '';
@@ -555,7 +609,9 @@ function buildSlipLine(line) {
 
 function buildDraftSlip() {
     return {
-        docNo: 'DRAFT-PREVIEW',
+        docNo: props.editDraft
+            ? `PRS-${new Date().getFullYear()}-${String(props.editDraft.id).padStart(6, '0')}`
+            : 'DRAFT-PREVIEW',
         documentDate: registered.transaction_date || todayISO(),
         recipientName: draftRecipientName.value,
         lines: lines.value.map(buildSlipLine),
@@ -597,7 +653,11 @@ function openManualSlip() {
     showSlip.value = true;
 }
 
-function backFromSlip() {
+function backFromSlip(fields) {
+    if (fields && !manualMode.value) {
+        draftSlipFields.value = fields;
+        registered.transaction_date = slipData.value?.documentDate ?? registered.transaction_date;
+    }
     showSlip.value = false;
 }
 
@@ -643,14 +703,20 @@ function applyServerErrors(failures) {
     return Object.keys(headerErrors).length + Object.keys(found).length;
 }
 
-async function saveDraftFromSlip() {
+async function saveDraftFromSlip(slipFields = {}) {
     drafting.value = true;
 
-    const payload = buildDraftPayload();
+    const payload = {
+        ...buildDraftPayload(),
+        expected_return_date: slipFields.expected_return_date || null,
+        slip_fields: slipFields,
+    };
 
     try {
-        const { data } = await api.post('/custodian/assignments/draft', payload, { skipToast: true });
-        toast.success('Draft saved', data.message ?? 'Print the slip, then allocate once the signed slip is collected.');
+        const { data } = props.editDraft
+            ? await api.put(`/custodian/drafts/${props.editDraft.id}`, payload, { skipToast: true })
+            : await api.post('/custodian/assignments/draft', payload, { skipToast: true });
+        toast.success(props.editDraft ? 'Draft updated' : 'Draft saved', data.message ?? 'Print the slip, then allocate once the signed slip is collected.');
         resetAssignForm();
         emit('drafted');
     } catch (requestError) {

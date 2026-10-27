@@ -34,11 +34,23 @@ const classes = computed(() => {
         case 'completed':
         case 'active':
         case 'inspected':
+        case 'resolved':
             return 'bg-emerald-50 text-emerald-700 border border-emerald-200/60 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20';
         case 'assigned':
             return 'bg-indigo-50 text-indigo-700 border border-indigo-200/60 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/20';
         case 'under_repair':
+        case 'processing_repair':
+        case 'processing repair':
             return 'bg-amber-50 text-amber-700 border border-amber-200/60 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20';
+        case 'under_review':
+        case 'under review':
+            return 'bg-blue-50 text-blue-700 border border-blue-200/60 dark:bg-blue-500/10 dark:text-blue-300 dark:border-blue-500/20';
+        case 'awaiting_reporter':
+        case 'awaiting reporter':
+            return 'bg-purple-50 text-purple-700 border border-purple-200/60 dark:bg-purple-500/10 dark:text-purple-300 dark:border-purple-500/20';
+        case 'under_investigation':
+        case 'under investigation':
+            return 'bg-indigo-50 text-indigo-700 border border-indigo-200/60 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/20';
         case 'under_inspection':
             return 'bg-purple-50 text-purple-700 border border-purple-200/60 dark:bg-purple-500/10 dark:text-purple-300 dark:border-purple-500/20';
         case 'transfer draft':
@@ -76,11 +88,23 @@ const dotClass = computed(() => {
         case 'completed':
         case 'active':
         case 'inspected':
+        case 'resolved':
             return 'bg-emerald-500';
         case 'assigned':
             return 'bg-indigo-500';
         case 'under_repair':
-            return 'bg-amber-500';
+        case 'processing_repair':
+        case 'processing repair':
+            return 'bg-amber-500 animate-pulse';
+        case 'under_review':
+        case 'under review':
+            return 'bg-blue-500';
+        case 'awaiting_reporter':
+        case 'awaiting reporter':
+            return 'bg-purple-500 animate-pulse';
+        case 'under_investigation':
+        case 'under investigation':
+            return 'bg-indigo-500';
         case 'under_inspection':
             return 'bg-purple-500';
         case 'transfer draft':

@@ -1791,7 +1791,7 @@ test('assigned inventory is never counted as available stock', function () {
     ]);
 });
 
-test('end user sees both assigned and requested items in their activity table', function () {
+test('end user activity hides requests that are still pending in the requests page', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -1836,13 +1836,20 @@ test('end user sees both assigned and requested items in their activity table', 
         'requested_at' => now(),
     ]);
 
-    $response = $this->actingAs($this->endUser)->get(route('endUser.my-assigned-items'));
+    AssignmentRequest::create([
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'requested_item_name' => 'Projector',
+        'quantity' => 1,
+        'status' => AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
+        'requested_at' => now(),
+    ]);
 
-    $response->assertOk();
-    $response->assertSee('Assigned');
-    $response->assertSee('Requested');
-    $response->assertSee('Laptop');
-    $response->assertSee('Monitor');
+    $response = $this->actingAs($this->endUser)->get(route('api.end-user.assigned-items'));
+
+    $response->assertOk()->assertJsonCount(1, 'activityRows');
+    expect($response->json('activityRows.0.type'))->toBe('Assigned')
+        ->and($response->json('activityRows.0.item_name'))->toBe('Laptop');
 });
 
 test('request APIs include approved transfers for sender and recipient', function () {
@@ -2212,6 +2219,55 @@ test('declining a partial transfer restores the sender assignment quantity', fun
     ]);
 });
 
+test('end user can cancel a pending transfer through the API', function () {
+    $recipient = User::create([
+        'role_id' => $this->endUserRole->role_id,
+        'first_name' => 'Transfer',
+        'last_name' => 'Recipient',
+        'username' => 'cancel-transfer-recipient',
+        'email' => 'cancel-transfer-recipient@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => Category::create([
+            'category_name' => 'Transfer Cancellation Equipment',
+            'requires_serial_number' => false,
+        ])->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Laptop',
+        'quantity' => 5,
+        'status' => 'assigned',
+        'date_acquired' => '2026-08-10',
+    ]);
+    $originalAssignment = AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $this->propertyCustodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 3,
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+    $transfer = AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'source_assignment_id' => $originalAssignment->id,
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $recipient->id,
+        'quantity' => 2,
+        'status' => 'waiting for custodian approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.transfer.cancel', $transfer->id))
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($transfer->fresh()->status)->toBe('cancelled')
+        ->and((int) $originalAssignment->fresh()->quantity)->toBe(5);
+});
+
 test('a recipient does not see a declined transfer in assigned items', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
@@ -2564,6 +2620,47 @@ test('end user can cancel a pending return request', function () {
     ]);
 });
 
+test('end user can cancel a pending return request from the requests API', function () {
+    $category = Category::create([
+        'category_name' => 'API Return Equipment',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Long Bondpaper',
+        'quantity' => 1,
+        'status' => 'assigned',
+        'assigned_to_user_id' => $this->endUser->id,
+        'date_acquired' => '2026-08-10',
+    ]);
+    $returnRequest = AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $this->endUser->id,
+        'target_user_id' => $this->propertyCustodian->id,
+        'quantity' => 1,
+        'status' => 'waiting for custodian approval',
+        'requested_at' => now(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.requests'))
+        ->assertOk()
+        ->assertJsonFragment([
+            'id' => $returnRequest->id,
+            'item_id' => $inventory->item_id,
+            'status' => 'waiting for custodian approval',
+        ]);
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.inventory.cancel-return', $inventory->item_id))
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    expect($returnRequest->fresh()->status)->toBe('cancelled');
+});
+
 test('end user does not see zero-quantity assignment rows in assigned items', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
@@ -2587,7 +2684,7 @@ test('end user does not see zero-quantity assignment rows in assigned items', fu
     $response->assertDontSee('Printer Stand');
 });
 
-test('pending return requests mark the assigned item as waiting for return approval and disable request return', function () {
+test('a full pending return is hidden from my assigned items', function () {
     $category = Category::create([
         'category_name' => 'ICT Equipment',
         'requires_serial_number' => false,
@@ -2613,11 +2710,11 @@ test('pending return requests mark the assigned item as waiting for return appro
         'requested_at' => now(),
     ]);
 
-    $response = $this->actingAs($this->endUser)->get(route('endUser.my-assigned-items'));
-
+    $response = $this->actingAs($this->endUser)->get(route('api.end-user.assigned-items'));
     $response->assertOk();
-    $response->assertSee('Waiting for Return Approval');
-    $response->assertDontSee('Request Return');
+
+    $rows = collect($response->json('activityRows'));
+    expect($rows)->toBeEmpty();
 });
 
 test('end user cannot duplicate return request for same item', function () {
@@ -2862,6 +2959,24 @@ test('end user can request a partial return and the remainder stays assigned', f
         ->and($transaction->fresh()->status)->toBe('returned')
         ->and((int) $inventory->fresh()->quantity)->toBe(5)
         ->and($inventory->fresh()->status)->toBe('available');
+});
+
+test('my assigned items shows only the remaining quantity for a pending partial return', function () {
+    [$inventory] = makeAssignedStock($this, 4);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.request-return', $inventory->item_id), ['quantity' => 1])
+        ->assertRedirect(route('endUser.my-requests'));
+
+    $response = $this->actingAs($this->endUser)->get(route('api.end-user.assigned-items'));
+    $response->assertOk();
+
+    $rows = collect($response->json('activityRows'));
+    $assignedRow = $rows->firstWhere('type', 'Assigned');
+
+    expect($rows)->toHaveCount(1)
+        ->and($assignedRow['item_id'])->toBe($inventory->item_id)
+        ->and($assignedRow['quantity'])->toBe(3);
 });
 
 test('return quantity above the assigned quantity is rejected', function () {

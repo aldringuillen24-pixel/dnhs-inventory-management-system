@@ -38,13 +38,15 @@ const profileEndpoint = computed(() => {
       return '/school-head/profile';
     case 'Administrator':
       return '/admin/profile';
+    case 'Inspector':
+      return '/inspector/profile';
     default:
       return null;
   }
 });
 
-const needsUsername = computed(() => ['Administrator', 'Property Custodian', 'End User'].includes(auth.role));
-const needsNameFields = computed(() => ['Administrator', 'Property Custodian', 'School Head'].includes(auth.role));
+const needsUsername = computed(() => ['Administrator', 'Property Custodian', 'End User', 'Inspector'].includes(auth.role));
+const needsNameFields = computed(() => ['Administrator', 'Property Custodian', 'School Head', 'Inspector'].includes(auth.role));
 const needsPasswordConfirmation = true;
 
 function syncFromUser() {

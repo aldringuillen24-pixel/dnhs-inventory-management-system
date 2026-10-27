@@ -226,6 +226,14 @@
   background-color: #f4f8f5;
 }
 
+body:has(.custodian-theme) {
+  background-color: #f4f8f5;
+}
+
+.dark body:has(.custodian-theme) {
+  background-color: #0b1411;
+}
+
 .dark .custodian-theme {
   background-color: #0b1411;
 }
@@ -252,6 +260,43 @@
   border-color: #293b34;
   background-color: #111c18;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+.inventory-scroll-locked {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inventory-scroll-locked > div {
+  height: 100%;
+  min-height: 0;
+}
+
+.inventory-page-layout > * {
+  display: flex;
+  gap: 1rem;
+  min-height: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+}
+
+.inventory-page-layout > * > * {
+  margin-block: 0;
+}
+
+@media (min-width: 480px) {
+  .inventory-page-layout > * {
+    gap: 1.5rem;
+  }
+}
+
+.inventory-page-layout .custodian-panel {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 0%;
 }
 
 .custodian-theme button,

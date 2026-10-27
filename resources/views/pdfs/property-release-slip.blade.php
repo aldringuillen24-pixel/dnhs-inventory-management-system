@@ -12,7 +12,7 @@
         .recipient-information { margin-top: 12pt; }
         .authorization { margin-top: 12pt; }
         .purpose { margin-bottom: 8pt; }
-        table.items { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 4pt 0 8pt; }
+        table.items { border-collapse: collapse; width: 100%; margin: 4pt 0 8pt; }
         table.items th, table.items td { border: 1px solid #000; padding: 4pt 3pt; vertical-align: top; }
         table.items th { text-align: center; font-size: 9pt; }
         table.items tbody td { text-align: center; }

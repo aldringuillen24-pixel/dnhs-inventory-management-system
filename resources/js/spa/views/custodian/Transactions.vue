@@ -345,6 +345,14 @@
                           {{ draft.draft_kind === 'transfer' ? 'Print / Download' : 'Reprint' }}
                         </a>
                         <button
+                          v-if="draft.draft_kind !== 'transfer'"
+                          type="button"
+                          class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                          @click="draftEditTarget = draft"
+                        >
+                          Edit Draft
+                        </button>
+                        <button
                           v-if="draft.draft_kind === 'transfer'"
                           type="button"
                           class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -1024,8 +1032,16 @@
     </template>
 
     <!-- Modals -->
-    <AssignModal :open="assignOpen" :items="availableItems" :end-users="endUsers" @close="assignOpen = false" @saved="onAssignSaved" @drafted="onDraftSaved" />
-    <ApproveRequestModal :open="reviewRequest !== null" :request="reviewRequest" @close="reviewRequest = null" @approved="onApproveSaved" />
+    <AssignModal
+      :open="assignOpen || draftEditTarget !== null"
+      :items="availableItems"
+      :end-users="endUsers"
+      :edit-draft="draftEditTarget"
+      @close="closeAssignModal"
+      @saved="onAssignSaved"
+      @drafted="onDraftSaved"
+    />
+    <ApproveRequestModal :open="reviewRequest !== null" :request="reviewRequest" @close="reviewRequest = null" @drafted="onRequestDrafted" />
     <TransferReleaseSlipModal
       :open="transferSlipTarget !== null"
       :transfer="transferSlipTarget"
@@ -1244,6 +1260,7 @@ const returnsSearch = ref('');
 const ledgerSearch = ref('');
 
 const assignOpen = ref(false);
+const draftEditTarget = ref(null);
 const reviewRequest = ref(null);
 const transferSlipTarget = ref(null);
 const prompt = ref(null);
@@ -1797,17 +1814,30 @@ function reloadAfterChange() {
 
 function onAssignSaved() {
   assignOpen.value = false;
+  draftEditTarget.value = null;
   reloadAfterChange();
 }
 
 function onDraftSaved() {
   assignOpen.value = false;
+  draftEditTarget.value = null;
   activeTab.value = 'drafts';
   reloadAfterChange();
 }
 
+function closeAssignModal() {
+  assignOpen.value = false;
+  draftEditTarget.value = null;
+}
+
 function onApproveSaved() {
   reviewRequest.value = null;
+  reloadAfterChange();
+}
+
+function onRequestDrafted() {
+  reviewRequest.value = null;
+  activeTab.value = 'drafts';
   reloadAfterChange();
 }
 

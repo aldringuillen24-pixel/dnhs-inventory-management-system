@@ -37,3 +37,35 @@ test('an authenticated property custodian is directed to the SPA profile and can
         ->username->toBe('updated-custodian')
         ->email->toBe('updated@example.com');
 });
+
+test('an authenticated inspector is directed to the SPA profile and can update it', function () {
+    $role = Role::create(['role_name' => 'Inspector']);
+    $user = User::factory()->create([
+        'role_id' => $role->role_id,
+        'first_name' => 'Inventory',
+        'last_name' => 'Inspector',
+        'username' => 'inspector',
+        'email' => 'inspector@example.com',
+    ]);
+
+    $this->actingAs($user);
+
+    $this->get(route('inspector.profile'))
+        ->assertRedirect('/spa/profile');
+
+    $this->patch(route('inspector.profile.update'), [
+        'first_name' => 'Updated',
+        'last_name' => 'Inspector',
+        'username' => 'updated-inspector',
+        'email' => 'updated-inspector@example.com',
+        'current_password' => '',
+        'password' => '',
+        'password_confirmation' => '',
+    ])->assertRedirect(route('inspector.profile'))
+        ->assertSessionHas('success', 'Profile updated successfully.');
+
+    expect($user->fresh())
+        ->first_name->toBe('Updated')
+        ->username->toBe('updated-inspector')
+        ->email->toBe('updated-inspector@example.com');
+});

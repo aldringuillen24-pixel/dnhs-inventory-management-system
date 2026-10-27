@@ -22,43 +22,6 @@
     </div>
 
     <div v-else class="compact-panel">
-      <div class="flex flex-wrap gap-1.5 border-b border-gray-200/80 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-gray-900/50">
-        <button
-          type="button"
-          class="group inline-flex min-w-0 items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-xs font-semibold transition-all sm:justify-start sm:px-3.5"
-          :class="activeTab === 'my-requests' ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30' : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
-          :aria-pressed="activeTab === 'my-requests'"
-          @click="activeTab = 'my-requests'"
-        >
-          <span>My Requests</span>
-          <span
-            class="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors"
-            :class="activeTab === 'my-requests' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-400'"
-          >
-            {{ myRequests.length }}
-          </span>
-        </button>
-        <button
-          type="button"
-          class="group inline-flex min-w-0 items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-xs font-semibold transition-all sm:justify-start sm:px-3.5"
-          :class="activeTab === 'incoming' ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30' : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
-          :aria-pressed="activeTab === 'incoming'"
-          @click="activeTab = 'incoming'"
-        >
-          <span>Incoming Requests</span>
-          <span
-            class="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold transition-colors"
-            :class="pendingIncoming > 0
-              ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-              : activeTab === 'incoming'
-                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
-                : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-400'"
-          >
-            {{ incomingRequests.length }}
-          </span>
-        </button>
-      </div>
-
       <div class="flex flex-wrap items-center gap-2 border-b border-gray-200/80 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-gray-900/50">
         <div class="relative w-full sm:max-w-xs">
           <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -80,23 +43,14 @@
           <option value="">All Statuses</option>
           <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
         </select>
-        <a
-          :href="exportRequestsHref"
-          class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5 min-[480px]:py-2 min-[480px]:text-sm"
-        >
-          <svg class="h-4 w-4 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-          </svg>
-          Export PDF
-        </a>
         <span class="ml-auto text-xs text-gray-500 dark:text-gray-400">
-          Showing {{ activeTab === 'my-requests' ? filteredMyRequests.length : filteredIncomingRequests.length }} of {{ activeTab === 'my-requests' ? myRequests.length : incomingRequests.length }}
+          Showing {{ filteredMyRequests.length }} of {{ myRequests.length }}
         </span>
       </div>
 
-      <div v-if="activeTab === 'my-requests'" class="overflow-x-auto">
+      <div class="max-h-[28rem] overflow-x-auto overflow-y-auto">
         <table class="w-full min-w-[56rem] text-left text-xs">
-          <thead class="sticky top-0 z-10">
+          <thead class="sticky top-0 z-10 bg-white dark:bg-gray-900">
             <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400">
               <th class="px-4 py-3.5">Item Requested</th>
               <th class="px-4 py-3.5">Qty</th>
@@ -126,10 +80,10 @@
               <td class="px-4 py-3.5 text-md text-gray-500 dark:text-gray-400">{{ request.status === 'cancelled' ? request.cancellation_reason || '—' : request.notes || '—' }}</td>
               <td class="px-4 py-3.5 text-center">
                 <button
-                  v-if="['waiting for approval', 'waiting for procurement', 'waiting for transfer approval'].includes(request.status) || (request.status === 'waiting for custodian approval' && request.target_user?.role?.role_name === 'End User')"
+                  v-if="['waiting for approval', 'waiting for procurement', 'waiting for transfer approval'].includes(request.status) || (request.status === 'waiting for custodian approval' && ['End User', 'Property Custodian'].includes(request.target_user?.role?.role_name))"
                   type="button"
                   class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-rose-950/30"
-                  :disabled="cancellingId === request.id"
+                  :disabled="cancelling"
                   @click="cancelTarget = request"
                 >
                   Cancel
@@ -143,67 +97,6 @@
           </tbody>
         </table>
       </div>
-
-      <div v-else class="overflow-x-auto">
-        <table class="w-full min-w-[56rem] text-left text-xs">
-          <thead class="sticky top-0 z-10">
-            <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400">
-              <th class="px-4 py-3.5">Item</th>
-              <th class="px-4 py-3.5">From</th>
-              <th class="px-4 py-3.5">Qty</th>
-              <th class="px-4 py-3.5">Requested On</th>
-              <th class="px-4 py-3.5">Status</th>
-              <th class="px-4 py-3.5 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody v-if="loading" aria-hidden="true">
-            <tr v-for="row in 5" :key="row">
-              <td v-for="column in 6" :key="column" class="px-4 py-3.5">
-                <div class="compact-skeleton h-3" :class="column === 6 ? 'mx-auto w-20' : 'w-3/4'" />
-              </td>
-            </tr>
-          </tbody>
-          <tbody v-else>
-            <tr v-for="request in filteredIncomingRequests" :key="request.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
-              <td class="px-4 py-3.5">
-                <div class="font-semibold text-gray-900 dark:text-white">{{ request.item?.item_name ?? request.requested_item_name ?? 'Unknown item' }}</div>
-                <span v-if="request.item?.inventory_item_no" class="text-xs text-gray-500 dark:text-gray-400">{{ request.item.inventory_item_no }}</span>
-              </td>
-              <td class="px-4 py-3.5">
-                <div class="font-medium text-gray-900 dark:text-white">{{ senderName(request) }}</div>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ request.user?.email ?? '' }}</span>
-              </td>
-              <td class="px-4 py-3.5 font-bold text-gray-900 dark:text-white">{{ request.quantity }}</td>
-              <td class="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(request.requested_at) }}</td>
-              <td class="px-4 py-3.5"><StatusBadge :status="request.status" /></td>
-              <td class="px-4 py-3.5">
-                <div v-if="['waiting for approval', 'waiting for transfer approval'].includes(request.status)" class="flex items-center justify-center gap-1.5">
-                  <button
-                    type="button"
-                    class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-                    :disabled="workingId === request.id"
-                    @click="respond(request.id, 'accept')"
-                  >
-                    Accept
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                    :disabled="workingId === request.id"
-                    @click="respond(request.id, 'decline')"
-                  >
-                    Decline
-                  </button>
-                </div>
-                <span v-else class="text-xs text-gray-400">No action needed</span>
-              </td>
-            </tr>
-            <tr v-if="!filteredIncomingRequests.length">
-              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">{{ incomingRequests.length ? 'No requests match the current filters.' : 'No incoming requests.' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
     </div>
 
     <RequestItemModal :open="requestOpen" :categories="categories" @close="requestOpen = false" @saved="onRequestSaved" />
@@ -211,9 +104,11 @@
     <ConfirmDialog
       :open="cancelTarget !== null"
       title="Cancel this request?"
-      :message="['waiting for transfer approval', 'waiting for custodian approval'].includes(cancelTarget?.status) && cancelTarget?.target_user?.role?.role_name === 'End User'
-        ? `Withdraw your transfer of ${cancelTarget?.requested_item_name ?? cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The custodian will no longer process it and your assignment is restored.`
-        : `Withdraw your request for ${cancelTarget?.requested_item_name ?? cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The custodian will no longer see it in the approval queue.`"
+      :message="cancelTarget?.status === 'waiting for custodian approval' && cancelTarget?.target_user?.role?.role_name === 'Property Custodian'
+        ? `Cancel your return request for ${cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The custodian will no longer process this return.`
+        : ['waiting for transfer approval', 'waiting for custodian approval'].includes(cancelTarget?.status) && cancelTarget?.target_user?.role?.role_name === 'End User'
+          ? `Withdraw your transfer of ${cancelTarget?.requested_item_name ?? cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The custodian will no longer process it and your assignment is restored.`
+          : `Withdraw your request for ${cancelTarget?.requested_item_name ?? cancelTarget?.item?.item_name ?? 'this item'} (${cancelTarget?.quantity ?? ''}). The custodian will no longer see it in the approval queue.`"
       :busy="cancelling"
       confirm-label="Yes, Cancel Request"
       @cancel="cancelTarget = null"
@@ -276,16 +171,6 @@ function requestMatches(request) {
 const filteredMyRequests = computed(() => myRequests.value.filter(requestMatches));
 const filteredIncomingRequests = computed(() => incomingRequests.value.filter(requestMatches));
 
-const exportRequestsHref = computed(() => {
-  const params = new URLSearchParams({
-    tab: activeTab.value === 'incoming' ? 'incoming' : 'my',
-    status: filterStatus.value,
-    search: filterSearch.value.trim(),
-  });
-
-  return `/end-user/requests/export-pdf?${params.toString()}`;
-});
-
 const pendingStatuses = ['waiting for approval', 'waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'];
 
 function senderName(request) {
@@ -321,7 +206,7 @@ async function load(options = {}) {
       pendingIncoming.value = data.pendingIncomingCount ?? 0;
 
       if (firstLoading.value && pendingIncoming.value > 0) {
-        activeTab.value = 'incoming';
+        // incoming requests tab removed
       }
     },
     onStart: () => {
@@ -365,9 +250,12 @@ async function cancelRequest() {
 
   cancelling.value = true;
   try {
-    if (
+    const targetRole = cancelTarget.value.target_user?.role?.role_name;
+    if (cancelTarget.value.status === 'waiting for custodian approval' && targetRole === 'Property Custodian') {
+      await api.post(`/end-user/inventory/${cancelTarget.value.item_id}/cancel-return`);
+    } else if (
       ['waiting for transfer approval', 'waiting for custodian approval'].includes(cancelTarget.value.status)
-      && cancelTarget.value.target_user?.role?.role_name === 'End User'
+      && targetRole === 'End User'
     ) {
       await api.post(`/end-user/transfer/${cancelTarget.value.id}/cancel`);
     } else {
@@ -377,9 +265,7 @@ async function cancelRequest() {
     forgetPageCache();
     await load();
   } catch (requestError) {
-    if (requestError?.response?.status === 422) {
-      toast.error('Error', requestError?.response?.data?.message ?? 'Could not cancel the request.');
-    }
+    toast.error('Error', requestError?.response?.data?.message ?? 'Could not cancel the request.');
   } finally {
     cancelling.value = false;
   }

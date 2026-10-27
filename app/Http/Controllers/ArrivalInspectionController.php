@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\ArrivalInspection;
+use App\Models\User;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -297,5 +300,35 @@ class ArrivalInspectionController extends Controller
     private function authorizeOwnership(Request $request, ArrivalInspection $inspection): void
     {
         abort_unless((int) $inspection->created_by === (int) $request->user()->id, 404);
+    }
+
+    public function updateProfile(Request $request)
+    {
+        $user = User::findOrFail(Auth::id());
+
+        $validated = $request->validate([
+            'username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')->ignore($user->id)],
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'first_name' => ['nullable', 'string', 'max:255'],
+            'last_name' => ['nullable', 'string', 'max:255'],
+            'building' => ['nullable', 'string', 'max:255'],
+            'room' => ['nullable', 'string', 'max:255'],
+            'password' => ['nullable', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user->username = $validated['username'];
+        $user->email = $validated['email'];
+        $user->first_name = $validated['first_name'] ?? null;
+        $user->last_name = $validated['last_name'] ?? '';
+        $user->building = $validated['building'] ?? null;
+        $user->room = $validated['room'] ?? null;
+
+        if (!empty($validated['password'])) {
+            $user->password = Hash::make($validated['password']);
+        }
+
+        $user->save();
+
+        return redirect()->route('inspector.profile')->with('success', 'Profile updated successfully.');
     }
 }

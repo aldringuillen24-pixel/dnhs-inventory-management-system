@@ -18,84 +18,12 @@
       </button>
     </div>
 
-    <section class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-      <div class="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h2 class="text-sm font-semibold text-gray-900 dark:text-white">My Incident Reports</h2>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Track reports you submitted and their current status.</p>
-        </div>
-        <span class="text-xs text-gray-500 dark:text-gray-400">{{ incidentReports.length }} report{{ incidentReports.length === 1 ? '' : 's' }}</span>
-      </div>
-      <div v-if="loading" class="compact-skeleton h-10" />
-      <p v-else-if="incidentReports.length === 0" class="rounded-md bg-gray-50 px-3 py-4 text-xs text-gray-500 dark:bg-white/5 dark:text-gray-400">
-        You have not submitted any incident reports.
-      </p>
-      <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
-        <li v-for="report in incidentReports" :key="report.id" class="flex flex-wrap items-start justify-between gap-3 py-3 first:pt-1">
-          <div class="min-w-0 space-y-1">
-            <p class="text-xs font-semibold text-gray-900 dark:text-white">
-              {{ report.item_name }} <span class="font-normal capitalize text-gray-500">· {{ report.type.replaceAll('_', ' ') }}</span>
-            </p>
-            <p class="text-xs text-gray-600 dark:text-gray-300">{{ report.quantity }} affected · {{ report.details }}</p>
-            <p class="text-[11px] text-gray-500 dark:text-gray-400">Submitted {{ formatDate(report.submitted_at) }}</p>
-            <a
-              v-for="file in report.evidence ?? []"
-              :key="file.id"
-              :href="file.download_url"
-              class="inline-flex text-[11px] font-semibold text-brand-700 underline dark:text-brand-300"
-            >
-              Download {{ file.filename }}
-            </a>
-            <div v-if="report.status === 'awaiting_reporter'" class="mt-2 flex w-full flex-wrap gap-2">
-              <textarea
-                v-model="incidentResponseDrafts[report.id]"
-                rows="2"
-                maxlength="2000"
-                aria-label="Response to custodian information request"
-                placeholder="Provide the requested information…"
-                class="min-w-64 flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-              />
-              <button
-                type="button"
-                class="self-end rounded-md bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-                :disabled="incidentResponseId === report.id || String(incidentResponseDrafts[report.id] ?? '').trim().length < 3"
-                @click="respondToIncidentInformation(report)"
-              >
-                Send Response
-              </button>
-            </div>
-            <ol v-if="report.timeline?.length" class="mt-2 max-h-40 w-full space-y-2 overflow-y-auto border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
-              <li v-for="event in report.timeline" :key="event.id ?? `${event.created_at}-${event.event_type}`">
-                <p>
-                  {{ formatIncidentDate(event.created_at) }} · {{ event.actor || 'System' }} ·
-                  {{ incidentEventLabel(event) }}
-                </p>
-                <p v-if="event.details" class="whitespace-pre-wrap">{{ event.details }}</p>
-                <p v-if="incidentRelatedRecords(event).length" class="text-[10px] text-gray-400 dark:text-gray-500">
-                  Related:
-                  <span v-for="(reference, index) in incidentRelatedRecords(event)" :key="`${reference.label}-${reference.id}`">
-                    <span v-if="index"> · </span>{{ reference.label }} #{{ reference.id }}
-                  </span>
-                </p>
-                <a
-                  v-for="file in incidentEvidenceForEvent(report, event)"
-                  :key="`${event.created_at}-${file.id}`"
-                  :href="file.download_url"
-                  class="mr-2 font-semibold text-brand-700 underline dark:text-brand-300"
-                >
-                  {{ file.filename }}
-                </a>
-              </li>
-            </ol>
-          </div>
-          <span class="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold capitalize text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-            {{ report.status.replaceAll('_', ' ') }}
-          </span>
-        </li>
-      </ul>
-    </section>
+    <!-- Two-column layout: Left = assigned table (~3/4), Right = incident reports (remaining ~1/4) -->
+    <div class="flex flex-col gap-5 lg:flex-row lg:items-start">
 
-    <div v-if="!error" class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <!-- ── LEFT COLUMN: Assigned Items Table (3/4 on lg screens) ── -->
+      <div class="min-w-0 flex-1 lg:w-3/4">
+        <div v-if="!error" class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="relative w-full sm:max-w-xs">
           <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -211,17 +139,6 @@
                       @click="openReportIssue(row)"
                     >
                       <LucideIcon :icon="TriangleAlert" class="h-4 w-4" />
-                    </button>
-                    <button
-                      v-if="isPendingReturn(row)"
-                      type="button"
-                      :disabled="workingId === rowKey(row)"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-error-200 text-error-700 transition-colors hover:bg-error-50 disabled:opacity-50 dark:border-error-800 dark:text-error-400 dark:hover:bg-error-500/10"
-                      :aria-label="`Cancel pending return for ${row.item_name}`"
-                      title="Cancel Return"
-                      @click="cancelReturn(row)"
-                    >
-                      <LucideIcon :icon="X" class="h-4 w-4" />
                     </button>
                   </div>
                 </td>
@@ -379,17 +296,6 @@
                         >
                           <LucideIcon :icon="TriangleAlert" class="h-4 w-4" />
                         </button>
-                        <button
-                          v-if="isPendingReturn(entry)"
-                          type="button"
-                          :disabled="workingId === rowKey(entry)"
-                          class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-error-200 text-error-700 transition-colors hover:bg-error-50 disabled:opacity-50 dark:border-error-800 dark:text-error-400 dark:hover:bg-error-500/10"
-                          :aria-label="`Cancel pending return for ${entry.item_name}`"
-                          title="Cancel Return"
-                          @click="cancelReturn(entry)"
-                        >
-                          <LucideIcon :icon="X" class="h-4 w-4" />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -422,6 +328,184 @@
         </table>
       </div>
     </div>
+      </div>
+
+      <!-- ── RIGHT COLUMN: Incident Reports (remaining space on lg screens) ── -->
+      <aside class="w-full lg:w-1/4 lg:shrink-0">
+        <section class="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <!-- Section Header -->
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800">
+            <div class="flex items-center gap-2">
+              <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-500/10">
+                <LucideIcon :icon="TriangleAlert" class="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <h2 class="text-xs font-semibold text-gray-900 dark:text-white">Incident Reports</h2>
+                <p class="text-[10px] text-gray-500 dark:text-gray-400">Track submitted reports</p>
+              </div>
+            </div>
+            <span
+              v-if="!loading"
+              class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
+            >
+              {{ incidentReports.length }}
+            </span>
+          </div>
+
+          <!-- Filters -->
+          <div v-if="!loading && incidentReports.length > 0" class="flex flex-col gap-2 border-b border-gray-100 px-4 py-2.5 dark:border-gray-800">
+            <div class="relative w-full">
+              <svg class="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+              </svg>
+              <input
+                v-model="incidentSearch"
+                type="search"
+                placeholder="Search reports…"
+                class="w-full rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-[11px] text-gray-800 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 [&::-webkit-search-cancel-button]:hidden"
+              />
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <select
+                v-model="incidentStatusFilter"
+                class="flex-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              >
+                <option value="">All Statuses</option>
+                <option v-for="s in incidentStatusOptions" :key="s" :value="s">{{ s.replaceAll('_', ' ') }}</option>
+              </select>
+              <span class="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">{{ filteredIncidentReports.length }} of {{ incidentReports.length }}</span>
+            </div>
+          </div>
+
+          <div class="p-3">
+            <!-- Skeleton -->
+            <div v-if="loading" class="space-y-3">
+              <div v-for="n in 2" :key="n" class="space-y-2.5 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="compact-skeleton h-3 w-1/2" />
+                  <div class="compact-skeleton h-4 w-16 rounded-full" />
+                </div>
+                <div class="compact-skeleton h-2.5 w-3/4" />
+                <div class="compact-skeleton h-2 w-1/3" />
+              </div>
+            </div>
+
+            <!-- Empty State -->
+            <div v-else-if="incidentReports.length === 0" class="flex flex-col items-center justify-center rounded-xl bg-gray-50 py-8 text-center dark:bg-white/[0.02]">
+              <div class="mb-2 flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+                <LucideIcon :icon="FileText" class="h-4 w-4 text-gray-400" />
+              </div>
+              <p class="text-xs font-medium text-gray-600 dark:text-gray-300">No incident reports</p>
+              <p class="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">None submitted yet.</p>
+            </div>
+
+            <!-- No filter match -->
+            <div v-else-if="filteredIncidentReports.length === 0" class="rounded-xl bg-gray-50 py-6 text-center dark:bg-white/[0.02]">
+              <p class="text-[11px] text-gray-500 dark:text-gray-400">No matching reports.</p>
+            </div>
+
+            <!-- Report Cards Stack -->
+            <ul v-else class="max-h-[17.5rem] space-y-2.5 overflow-y-auto pr-1">
+              <li
+                v-for="report in filteredIncidentReports"
+                :key="report.id"
+                class="group flex min-w-0 flex-col rounded-xl border bg-white transition-all duration-200 hover:shadow-sm dark:bg-gray-800/60"
+                :class="incidentCardBorderClass(report)"
+              >
+                <!-- Card Header -->
+                <div class="flex items-start justify-between gap-2 p-3 pb-2">
+                  <div class="flex min-w-0 items-start gap-2">
+                    <div class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg" :class="incidentTypeIconBg(report)">
+                      <LucideIcon :icon="incidentTypeIcon(report)" class="h-3 w-3" :class="incidentTypeIconColor(report)" />
+                    </div>
+                    <div class="min-w-0">
+                      <p class="truncate text-xs font-semibold text-gray-900 dark:text-white" :title="report.item_name">{{ report.item_name }}</p>
+                      <p class="text-[11px] capitalize text-gray-500 dark:text-gray-400">{{ report.type.replaceAll('_', ' ') }}</p>
+                    </div>
+                  </div>
+                  <!-- Status Badge -->
+                  <span
+                    class="shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize"
+                    :class="incidentStatusClass(report.status)"
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full" :class="incidentStatusDotClass(report.status)" />
+                    {{ report.status.replaceAll('_', ' ') }}
+                  </span>
+                </div>
+
+                <!-- Card Body -->
+                <div class="space-y-1 border-t border-gray-100 px-3 py-2 text-[11px] dark:border-gray-700/60">
+                  <p class="text-gray-600 dark:text-gray-300">
+                    <span class="font-medium text-gray-900 dark:text-white">{{ report.quantity }}</span> affected · {{ report.details }}
+                  </p>
+                  <p v-if="report.repair_return_destination" class="text-[11px] text-gray-500 dark:text-gray-400">
+                    After repair: {{ report.repair_return_destination === 'assigned_user' ? 'return to me' : 'return to custodian' }}
+                  </p>
+                  <p class="text-[11px] text-gray-400 dark:text-gray-500">Submitted {{ formatDate(report.submitted_at) }}</p>
+                </div>
+
+                <!-- Evidence downloads -->
+                <div v-if="report.evidence?.length" class="flex flex-wrap gap-1 border-t border-gray-100 px-3 py-1.5 dark:border-gray-700/60">
+                  <a
+                    v-for="file in report.evidence"
+                    :key="file.id"
+                    :href="file.download_url"
+                    class="inline-flex items-center gap-1 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20"
+                  >
+                    <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    {{ file.filename }}
+                  </a>
+                </div>
+
+                <!-- Awaiting Reporter Banner -->
+                <div v-if="report.status === 'awaiting_reporter'" class="border-t border-purple-100 bg-purple-50 p-2.5 dark:border-purple-900/30 dark:bg-purple-500/10">
+                  <div class="mb-1.5 flex items-center gap-1">
+                    <LucideIcon :icon="MessageSquare" class="h-3 w-3 text-purple-600 dark:text-purple-400" />
+                    <p class="text-[11px] font-semibold text-purple-800 dark:text-purple-300">Custodian requested info</p>
+                  </div>
+                  <div class="flex flex-col gap-1.5">
+                    <textarea
+                      v-model="incidentResponseDrafts[report.id]"
+                      rows="2"
+                      maxlength="2000"
+                      aria-label="Response to custodian information request"
+                      placeholder="Provide info…"
+                      class="w-full rounded border border-purple-200 bg-white p-1.5 text-[11px] text-gray-800 focus:border-purple-400 focus:outline-none dark:border-purple-800 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    <button
+                      type="button"
+                      class="self-end inline-flex items-center gap-1 rounded bg-purple-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
+                      :disabled="incidentResponseId === report.id || String(incidentResponseDrafts[report.id] ?? '').trim().length < 3"
+                      @click="respondToIncidentInformation(report)"
+                    >
+                      <LucideIcon v-if="incidentResponseId === report.id" :icon="Loader2" class="h-2.5 w-2.5 animate-spin" />
+                      <LucideIcon v-else :icon="Send" class="h-2.5 w-2.5" />
+                      Send
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Timeline Button (opens modal) -->
+                <div v-if="report.timeline?.length" class="border-t border-gray-100 dark:border-gray-700/60">
+                  <button
+                    type="button"
+                    class="flex w-full items-center justify-between px-3 py-2 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white"
+                    @click="openTimelineModal(report)"
+                  >
+                    <span class="flex items-center gap-1.5">
+                      <LucideIcon :icon="Clock" class="h-3.5 w-3.5 text-gray-400" />
+                      View Timeline
+                      <span class="rounded-full bg-gray-100 px-1.5 py-0.2 text-[10px] font-semibold text-gray-600 dark:bg-white/10 dark:text-gray-300">{{ report.timeline.length }}</span>
+                    </span>
+                    <LucideIcon :icon="ChevronRight" class="h-3.5 w-3.5 text-gray-400" />
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </aside>
+    </div><!-- end two-column layout -->
 
     <TransferModal :open="transferRow !== null" :row="transferRow" :end-users="endUsers" @close="transferRow = null" @saved="onTransferSaved" />
 
@@ -485,12 +569,35 @@
             v-model="reportType"
             class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
-            <option value="damaged">Damaged</option>
-            <option value="needs_repair">Needs Repair</option>
+            <option v-if="!reportTarget.is_consumable" value="damaged">Damaged</option>
+            <option v-if="reportTarget.maintenance_eligible" value="needs_repair">Needs Repair</option>
             <option value="lost">Lost</option>
             <option value="stolen">Stolen</option>
           </select>
         </div>
+        <fieldset v-if="['damaged', 'needs_repair'].includes(reportType)" class="space-y-2">
+          <legend class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+            After repair, return the item to
+          </legend>
+          <label class="flex cursor-pointer items-start gap-2 rounded-md border border-gray-200 p-2 text-xs text-gray-700 dark:border-gray-700 dark:text-gray-300">
+            <input
+              v-model="repairReturnDestination"
+              type="radio"
+              value="custodian_available"
+              class="mt-0.5 h-3.5 w-3.5 border-gray-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span>Custodian as available inventory</span>
+          </label>
+          <label class="flex cursor-pointer items-start gap-2 rounded-md border border-gray-200 p-2 text-xs text-gray-700 dark:border-gray-700 dark:text-gray-300">
+            <input
+              v-model="repairReturnDestination"
+              type="radio"
+              value="assigned_user"
+              class="mt-0.5 h-3.5 w-3.5 border-gray-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span>Return to me as assigned</span>
+          </label>
+        </fieldset>
         <div class="space-y-1.5">
           <label for="report-quantity" class="block text-xs font-semibold text-gray-700 dark:text-gray-300">
             Quantity affected (max {{ reportQuantityCap() }})
@@ -552,12 +659,99 @@
         </div>
       </template>
     </Modal>
+
+    <!-- ── Timeline Modal ── -->
+    <Modal
+      :open="timelineModalReport !== null"
+      :title="timelineModalReport ? `${timelineModalReport.item_name} · Timeline` : 'Timeline'"
+      :subtitle="timelineModalReport ? `${timelineModalReport.timeline?.length ?? 0} events` : ''"
+      max-width="max-w-lg"
+      :scrollable="true"
+      @close="timelineModalReport = null"
+    >
+      <div v-if="timelineModalReport" class="space-y-1">
+        <!-- Report meta -->
+        <div class="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-white/[0.03]">
+          <div class="flex items-center gap-1.5">
+            <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md" :class="incidentTypeIconBg(timelineModalReport)">
+              <LucideIcon :icon="incidentTypeIcon(timelineModalReport)" class="h-3 w-3" :class="incidentTypeIconColor(timelineModalReport)" />
+            </div>
+            <span class="text-xs font-semibold capitalize text-gray-700 dark:text-gray-200">{{ timelineModalReport.type.replaceAll('_', ' ') }}</span>
+          </div>
+          <span
+            class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize"
+            :class="incidentStatusClass(timelineModalReport.status)"
+          >
+            <span class="h-1.5 w-1.5 rounded-full" :class="incidentStatusDotClass(timelineModalReport.status)" />
+            {{ timelineModalReport.status.replaceAll('_', ' ') }}
+          </span>
+          <span class="ml-auto text-[11px] text-gray-400 dark:text-gray-500">{{ timelineModalReport.quantity }} affected</span>
+        </div>
+
+        <!-- Stepper -->
+        <ol class="relative space-y-0 border-l-2 border-gray-100 pl-5 dark:border-gray-700">
+          <li
+            v-for="event in timelineModalReport.timeline"
+            :key="event.id ?? `${event.created_at}-${event.event_type}`"
+            class="relative pb-5 last:pb-0"
+          >
+            <!-- Dot -->
+            <span
+              class="absolute -left-[1.4rem] flex h-5 w-5 items-center justify-center rounded-full border-2 border-white shadow-sm dark:border-gray-900"
+              :class="incidentEventDotClass(event)"
+            >
+              <LucideIcon :icon="incidentEventIcon(event)" class="h-2.5 w-2.5 text-white" />
+            </span>
+
+            <!-- Event card -->
+            <div class="rounded-lg border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800/60">
+              <div class="flex flex-wrap items-start justify-between gap-1">
+                <span class="text-xs font-semibold text-gray-800 dark:text-gray-100">{{ incidentEventLabel(event) }}</span>
+                <span class="whitespace-nowrap text-[11px] text-gray-400 dark:text-gray-500">{{ formatIncidentDate(event.created_at) }}</span>
+              </div>
+              <p class="mt-0.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">{{ event.actor || 'System' }}</p>
+              <p v-if="event.details" class="mt-1.5 whitespace-pre-wrap text-xs text-gray-600 dark:text-gray-300">{{ event.details }}</p>
+              <!-- Evidence -->
+              <div v-if="incidentEvidenceForEvent(timelineModalReport, event).length" class="mt-2 flex flex-wrap gap-1.5">
+                <a
+                  v-for="file in incidentEvidenceForEvent(timelineModalReport, event)"
+                  :key="`${event.created_at}-${file.id}`"
+                  :href="file.download_url"
+                  class="inline-flex items-center gap-1 rounded-md bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-300"
+                >
+                  <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  {{ file.filename }}
+                </a>
+              </div>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </Modal>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { ArrowLeftRight, ChevronDown, ChevronUp, TriangleAlert, Undo2, X } from 'lucide';
+import {
+  ArrowLeftRight,
+  CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Clock,
+  FileText,
+  Loader2,
+  MessageSquare,
+  RefreshCw,
+  Search,
+  Send,
+  TriangleAlert,
+  Undo2,
+  Wrench,
+  XCircle,
+  Zap,
+} from 'lucide';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { useToastStore } from '../../stores/toast';
@@ -581,6 +775,132 @@ const incidentResponseDrafts = ref({});
 const incidentResponseId = ref(null);
 const filterSearch = ref('');
 const filterStatus = ref('');
+
+// Incident reports filtering & timeline modal
+const incidentSearch = ref('');
+const incidentStatusFilter = ref('');
+const timelineModalReport = ref(null);
+
+function openTimelineModal(report) {
+  timelineModalReport.value = report;
+}
+
+const incidentStatusOptions = computed(() =>
+  [...new Set(incidentReports.value.map((r) => r.status).filter(Boolean))].sort(),
+);
+
+const filteredIncidentReports = computed(() => {
+  const q = incidentSearch.value.toLowerCase().trim();
+  const s = incidentStatusFilter.value;
+  return incidentReports.value.filter((r) => {
+    if (s && r.status !== s) return false;
+    if (!q) return true;
+    return [r.item_name, r.type, r.details, r.status]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(q));
+  });
+});
+
+// Incident card border accent by status
+function incidentCardBorderClass(report) {
+  const s = String(report.status ?? '').toLowerCase();
+  if (s === 'awaiting_reporter') return 'border-purple-300 dark:border-purple-700';
+  if (s === 'declined') return 'border-rose-200 dark:border-rose-800';
+  if (s === 'resolved') return 'border-emerald-200 dark:border-emerald-800';
+  if (s === 'processing repair' || s === 'processing_repair') return 'border-amber-200 dark:border-amber-800';
+  if (s === 'under review' || s === 'under_review') return 'border-blue-200 dark:border-blue-800';
+  return 'border-gray-200 dark:border-gray-700';
+}
+
+// Incident type icon, background and color
+function incidentTypeIcon(report) {
+  const t = String(report.type ?? '').toLowerCase();
+  if (t === 'damaged') return TriangleAlert;
+  if (t === 'needs_repair' || t === 'needs repair') return Wrench;
+  if (t === 'stolen') return XCircle;
+  if (t === 'lost') return Search;
+  return FileText;
+}
+
+function incidentTypeIconBg(report) {
+  const t = String(report.type ?? '').toLowerCase();
+  if (t === 'damaged') return 'bg-rose-50 dark:bg-rose-500/10';
+  if (t === 'needs_repair' || t === 'needs repair') return 'bg-amber-50 dark:bg-amber-500/10';
+  if (t === 'stolen') return 'bg-red-50 dark:bg-red-500/10';
+  if (t === 'lost') return 'bg-orange-50 dark:bg-orange-500/10';
+  return 'bg-gray-100 dark:bg-gray-700';
+}
+
+function incidentTypeIconColor(report) {
+  const t = String(report.type ?? '').toLowerCase();
+  if (t === 'damaged') return 'text-rose-500 dark:text-rose-400';
+  if (t === 'needs_repair' || t === 'needs repair') return 'text-amber-500 dark:text-amber-400';
+  if (t === 'stolen') return 'text-red-500 dark:text-red-400';
+  if (t === 'lost') return 'text-orange-500 dark:text-orange-400';
+  return 'text-gray-400';
+}
+
+// Incident status badge color
+function incidentStatusClass(status) {
+  const s = String(status ?? '').toLowerCase();
+  if (s === 'under_review' || s === 'under review') return 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300';
+  if (s === 'processing_repair' || s === 'processing repair') return 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300';
+  if (s === 'resolved') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300';
+  if (s === 'declined') return 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300';
+  if (s === 'awaiting_reporter' || s === 'awaiting reporter') return 'bg-purple-100 text-purple-800 dark:bg-purple-500/20 dark:text-purple-300';
+  if (s === 'under_investigation' || s === 'under investigation') return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/20 dark:text-indigo-300';
+  return 'bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-300';
+}
+
+function incidentStatusDotClass(status) {
+  const s = String(status ?? '').toLowerCase();
+  if (s === 'under_review' || s === 'under review') return 'bg-blue-500';
+  if (s === 'processing_repair' || s === 'processing repair') return 'bg-amber-500 animate-pulse';
+  if (s === 'resolved') return 'bg-emerald-500';
+  if (s === 'declined') return 'bg-rose-500';
+  if (s === 'awaiting_reporter' || s === 'awaiting reporter') return 'bg-purple-500 animate-pulse';
+  if (s === 'under_investigation' || s === 'under investigation') return 'bg-indigo-500';
+  return 'bg-gray-400';
+}
+
+// Timeline event icon and dot color
+function incidentEventIcon(event) {
+  const et = String(event.event_type ?? '').toLowerCase();
+  if (et === 'report_submitted') return FileText;
+  if (et === 'reporter_response_received') return MessageSquare;
+  if (et === 'physical_inspection_recorded') return Search;
+  if (et === 'incident_handover_confirmed') return CheckCircle;
+  if (et === 'incident_repair_started') return Wrench;
+  if (et === 'incident_repairability_reassessed') return RefreshCw;
+  if (et === 'investigation_action_recorded') return Zap;
+  if (et === 'status_changed') {
+    const ts = String(event.to_status ?? '').toLowerCase();
+    if (ts === 'declined') return XCircle;
+    if (ts === 'resolved') return CheckCircle;
+    if (ts === 'awaiting_reporter') return MessageSquare;
+    return RefreshCw;
+  }
+  return Clock;
+}
+
+function incidentEventDotClass(event) {
+  const et = String(event.event_type ?? '').toLowerCase();
+  if (et === 'report_submitted') return 'bg-gray-400';
+  if (et === 'reporter_response_received') return 'bg-indigo-500';
+  if (et === 'physical_inspection_recorded') return 'bg-purple-500';
+  if (et === 'incident_handover_confirmed') return 'bg-emerald-500';
+  if (et === 'incident_repair_started') return 'bg-amber-500';
+  if (et === 'incident_repairability_reassessed') return 'bg-orange-500';
+  if (et === 'status_changed') {
+    const ts = String(event.to_status ?? '').toLowerCase();
+    if (ts === 'declined') return 'bg-rose-500';
+    if (ts === 'resolved') return 'bg-emerald-500';
+    if (ts === 'awaiting_reporter') return 'bg-purple-500';
+    if (ts === 'under_investigation') return 'bg-indigo-500';
+    return 'bg-blue-500';
+  }
+  return 'bg-gray-400';
+}
 
 const statusOptions = computed(() => [...new Set(
   rows.value.map((row) => row.status).filter(Boolean),
@@ -616,6 +936,7 @@ const reportType = ref('damaged');
 const reportQuantity = ref(1);
 const reportNotes = ref('');
 const reportEvidence = ref(null);
+const repairReturnDestination = ref('custodian_available');
 
 const TRANSFERABLE = ['approved', 'accepted'];
 
@@ -624,7 +945,7 @@ function statusOf(row) {
 }
 
 function rowKey(row) {
-  return `${row.type}|${row.item_id ?? row.item_name}`;
+  return `${row.type}|${row.request?.id ?? row.item_id ?? row.item_name}`;
 }
 
 function requestItemId(row) {
@@ -632,7 +953,9 @@ function requestItemId(row) {
 }
 
 function canTransfer(row) {
-  return Boolean(row.request?.id) && TRANSFERABLE.includes(statusOf(row));
+  return !row.has_open_report
+    && Boolean(row.request?.id)
+    && TRANSFERABLE.includes(statusOf(row));
 }
 
 function isPendingReturn(row) {
@@ -640,7 +963,8 @@ function isPendingReturn(row) {
 }
 
 function canRequestReturn(row) {
-  return ['approved', 'accepted', 'waiting for return approval'].includes(statusOf(row))
+  return !row.has_open_report
+    && ['approved', 'accepted', 'waiting for return approval'].includes(statusOf(row))
     && !isPendingReturn(row)
     && requestItemId(row) !== null;
 }
@@ -651,10 +975,11 @@ function canReportIssue(row) {
 
 function openReportIssue(row) {
   reportTarget.value = row;
-  reportType.value = 'damaged';
+  reportType.value = row?.is_consumable ? 'lost' : 'damaged';
   reportQuantity.value = Math.max(1, Number(row?.quantity) || 1);
   reportNotes.value = '';
   reportEvidence.value = null;
+  repairReturnDestination.value = 'custodian_available';
 }
 
 function reportQuantityCap() {
@@ -674,6 +999,9 @@ async function confirmReportIssue() {
     formData.append('type', reportType.value);
     formData.append('quantity', String(reportQuantity.value));
     formData.append('notes', reportNotes.value.trim());
+    if (['damaged', 'needs_repair'].includes(reportType.value)) {
+      formData.append('repair_return_destination', repairReturnDestination.value);
+    }
     if (reportEvidence.value) {
       formData.append('evidence', reportEvidence.value);
     }
@@ -683,7 +1011,12 @@ async function confirmReportIssue() {
     await load();
   } catch (requestError) {
     if (requestError?.response?.status === 422) {
-      toast.error('Error', requestError?.response?.data?.message ?? 'Could not report the issue.');
+      const errors = requestError?.response?.data?.errors;
+      const validationMessage = errors ? Object.values(errors).flat()[0] : null;
+      toast.error(
+        'Error',
+        requestError?.response?.data?.message ?? validationMessage ?? 'Could not report the issue.',
+      );
     } else {
       toast.error('Could not submit report', requestError?.response?.data?.message ?? 'Check your connection and try again.');
     }
@@ -756,26 +1089,20 @@ function incidentEventLabel(event) {
 function incidentRelatedRecords(event) {
   const metadata = event.metadata ?? {};
   const references = [
-    ['inventory_id', 'Inventory'],
-    ['source_inventory_id', 'Inventory'],
-    ['processing_inventory_id', 'Processing inventory'],
-    ['assignment_transaction_id', 'Assignment transaction'],
-    ['assignment_request_id', 'Assignment request'],
-    ['assignment_return_id', 'Assignment return'],
-    ['maintenance_record_id', 'Repair record'],
-    ['disposal_movement_id', 'Disposal movement'],
-    ['stock_movement_id', 'Stock movement'],
+    ['inventory_id', 'The inventory item involved in this report.'],
+    ['source_inventory_id', 'The original inventory item reported by you.'],
+    ['processing_inventory_id', 'The separate item record used to track the affected units during repair or disposal.'],
+    ['assignment_transaction_id', 'The record of when this item was assigned to you.'],
+    ['assignment_request_id', 'The request associated with this item assignment.'],
+    ['assignment_return_id', 'The record confirming this item was returned to the custodian.'],
+    ['maintenance_record_id', 'The repair work record associated with this report.'],
+    ['disposal_movement_id', 'The record of the affected item being disposed of.'],
+    ['stock_movement_id', 'The record of the inventory quantity change related to this report.'],
   ];
-  const seen = new Set();
 
-  return references.flatMap(([key, label]) => {
-    const id = Number(metadata[key]);
-    if (!Number.isInteger(id) || id < 1 || seen.has(`${label}-${id}`)) {
-      return [];
-    }
-    seen.add(`${label}-${id}`);
-    return [{ label, id }];
-  });
+  return references
+    .filter(([key]) => Number.isInteger(Number(metadata[key])) && Number(metadata[key]) > 0)
+    .map(([key, description]) => ({ key, description }));
 }
 
 function incidentEvidenceForEvent(report, event) {
@@ -928,26 +1255,6 @@ async function requestReturn(row) {
   } catch (requestError) {
     if (requestError?.response?.status === 422) {
       toast.error('Error', requestError?.response?.data?.message ?? 'Could not request the return.');
-    }
-  } finally {
-    workingId.value = null;
-  }
-}
-
-async function cancelReturn(row) {
-  const itemId = requestItemId(row);
-  if (!itemId) {
-    return;
-  }
-  workingId.value = rowKey(row);
-
-  try {
-    await api.post(`/end-user/inventory/${itemId}/cancel-return`);
-    forgetPageCache();
-    await load();
-  } catch (requestError) {
-    if (requestError?.response?.status === 422) {
-      toast.error('Error', requestError?.response?.data?.message ?? 'Could not cancel the return.');
     }
   } finally {
     workingId.value = null;

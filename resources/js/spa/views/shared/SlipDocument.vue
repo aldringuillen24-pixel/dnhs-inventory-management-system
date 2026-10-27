@@ -145,13 +145,13 @@
           type="button"
           class="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
           :disabled="primaryLoading"
-          @click="$emit('back')"
+          @click="$emit('back', slipFields)"
         >
           ← Back
         </button>
         <button
           type="button"
-          class="rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-md hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+          class="rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-1.5 text-sm font-semibold text-white shadow-md hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="primaryLoading || primaryDisabled || previewLoading"
           @click="$emit('primary', slipFields)"
         >
@@ -179,6 +179,7 @@ const props = defineProps({
   primaryDisabled: { type: Boolean, default: false },
   recipientName: { type: String, default: '' },
   custodianName: { type: String, default: '' },
+  initialFields: { type: Object, default: () => ({}) },
   draftMode: { type: Boolean, default: true },
   primaryLabel: { type: String, default: 'Save Draft' },
 });
@@ -222,7 +223,7 @@ const previewDateFields = [
 const purposeFields = computed(() => props.purposes.length > 0 ? props.purposes : releasePurposes);
 
 function buildInitialFields() {
-  const fields = {
+  const defaults = {
     recipient_name: props.recipientName || '',
     department_unit: '',
     designation: '',
@@ -241,9 +242,16 @@ function buildInitialFields() {
     approved_by_date: '',
   };
   for (const line of props.lines) {
-    fields.conditions[line.item_id] = '';
+    defaults.conditions[line.item_id] = '';
   }
-  return fields;
+  return {
+    ...defaults,
+    ...props.initialFields,
+    conditions: {
+      ...defaults.conditions,
+      ...(props.initialFields?.conditions ?? {}),
+    },
+  };
 }
 
 function schedulePreview() {

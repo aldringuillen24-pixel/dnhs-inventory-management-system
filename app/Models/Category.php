@@ -38,4 +38,9 @@ class Category extends Model
     {
         return $this->hasMany(Inventory::class, 'category_id', 'category_id');
     }
+
+    public function isConsumable(): bool
+    {
+        return strcasecmp(trim((string) $this->category_name), 'Consumables') === 0;
+    }
 }

@@ -80,8 +80,6 @@ class IncidentReporterNotificationService
                 'reporter_id' => $reporter->id,
                 'exception' => $exception,
             ]);
-
-            throw $exception;
         }
     }
 

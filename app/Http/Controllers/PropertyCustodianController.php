@@ -1895,6 +1895,53 @@ class PropertyCustodianController extends Controller
         return $pdf->stream('ITB-' . now()->format('Y-m-d') . '.pdf');
     }
 
+    public function generateRcpiPpePdf(Request $request)
+    {
+        $validated = $request->validate([
+            'inventory_type' => ['required', 'string', 'max:255'],
+            'report_date' => ['required', 'date'],
+            'fund_cluster' => ['nullable', 'string', 'max:255'],
+            'accountable_person' => ['nullable', 'string', 'max:255'],
+            'accountability_date' => ['nullable', 'date'],
+            'recommending_name' => ['nullable', 'string', 'max:255'],
+            'recommending_title' => ['nullable', 'string', 'max:255'],
+            'approving_name' => ['nullable', 'string', 'max:255'],
+            'approving_title' => ['nullable', 'string', 'max:255'],
+            'verifying_title' => ['nullable', 'string', 'max:255'],
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.article' => ['required', 'string', 'max:255'],
+            'items.*.description' => ['nullable', 'string', 'max:1000'],
+            'items.*.stock_number' => ['nullable', 'string', 'max:255'],
+            'items.*.unit' => ['nullable', 'string', 'max:100'],
+            'items.*.unit_value' => ['required', 'numeric', 'min:0'],
+            'items.*.book_quantity' => ['required', 'integer', 'min:0'],
+            'items.*.counted_quantity' => ['required', 'integer', 'min:0'],
+            'items.*.condition' => ['nullable', 'string', 'max:255'],
+            'items.*.whereabouts' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $items = collect($validated['items'])
+            ->map(function (array $item): array {
+                $difference = (int) $item['counted_quantity'] - (int) $item['book_quantity'];
+
+                return [
+                    ...$item,
+                    'variance_quantity' => abs($difference),
+                    'variance_value' => abs($difference) * (float) $item['unit_value'],
+                    'variance_type' => $difference < 0 ? 'Shortage' : ($difference > 0 ? 'Overage' : ''),
+                ];
+            })
+            ->all();
+
+        $pdf = Pdf::loadView('pdfs.rcpi-ppe', [
+            ...$validated,
+            'items' => $items,
+        ]);
+        $pdf->setPaper('a4', 'landscape');
+
+        return $pdf->stream('RCPI-PPE_DRAFT_' . now()->format('Y-m-d_His') . '.pdf');
+    }
+
     public function generateIirupPdf(Request $request)
     {
         $validated = $request->validate([
@@ -2216,7 +2263,8 @@ class PropertyCustodianController extends Controller
                 'user:id,first_name,last_name,username',
                 'targetUser:id,first_name,last_name,username',
                 'fulfillmentRequests:id,item_id,parent_request_id,quantity,status',
-                'fulfillmentRequests.item:item_id,inventory_item_no,item_name',
+                'fulfillmentRequests.item:item_id,inventory_item_no,item_name,quantity,category_id,status,unit,unit_cost,serial_number',
+                'fulfillmentRequests.item.category:category_id,category_name,requires_serial_number',
             ])
             ->where('status', 'draft')
             ->whereNull('parent_request_id')
@@ -2360,6 +2408,110 @@ class PropertyCustodianController extends Controller
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Request approved successfully. Item has been assigned.');
     }
 
+    public function draftRequest(Request $request, int $id)
+    {
+        $assignmentRequest = AssignmentRequest::query()->findOrFail($id);
+        $validated = $request->validate([
+            'inventory_ids' => [
+                Rule::requiredIf(fn (): bool => (bool) $assignmentRequest->requested_item_name && ! $assignmentRequest->item_id),
+                'nullable',
+                'array',
+                'min:1',
+                'max:100',
+            ],
+            'inventory_ids.*' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
+            ...$this->draftSlipFieldRules(),
+        ]);
+
+        $result = DB::transaction(function () use ($request, $id, $validated): AssignmentRequest|string {
+            $parent = AssignmentRequest::query()->lockForUpdate()->findOrFail($id);
+            if (! in_array($parent->status, ['waiting for approval', AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT], true)) {
+                return 'processed';
+            }
+            abort_unless((int) $parent->target_user_id === (int) $request->user()->id, 403);
+
+            $requesterId = (int) $parent->user_id;
+            $inventoryIds = $parent->item_id
+                ? [(int) $parent->item_id]
+                : array_map('intval', $validated['inventory_ids'] ?? []);
+            $lines = $this->draftPropertyReleaseSlipLines($parent, $inventoryIds);
+            $items = Inventory::query()
+                ->whereIn('item_id', array_column($lines, 'item_id'))
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('item_id');
+
+            foreach ($lines as $line) {
+                $item = $items->get((int) $line['item_id']);
+                $held = (int) AssignmentRequest::query()
+                    ->whereIn('status', ['waiting for approval', 'draft'])
+                    ->where('item_id', $line['item_id'])
+                    ->where('id', '!=', $parent->id)
+                    ->sum('quantity');
+
+                if (! $item || (int) $line['qty'] > max(0, (int) $item->quantity - $held)) {
+                    return 'insufficient';
+                }
+            }
+
+            $recipient = User::query()->with('role')->findOrFail($requesterId);
+            abort_unless($recipient->status === 'active' && $recipient->role?->role_name === 'End User', 422, 'The requester is no longer an active End User.');
+
+            $firstItem = $items->get((int) $lines[0]['item_id']);
+            $fields = $validated['slip_fields'] ?? [];
+            $parent->update([
+                'user_id' => (int) $request->user()->id,
+                'target_user_id' => $requesterId,
+                'item_id' => null,
+                'requested_item_name' => $parent->requested_item_name ?? $firstItem->item_name,
+                'requested_category_id' => $parent->requested_category_id ?? $firstItem->category_id,
+                'requested_unit' => $parent->requested_unit ?? $firstItem->unit,
+                'building' => $recipient->building ?? $parent->building ?? $firstItem->building,
+                'room' => $recipient->room ?? $parent->room ?? $firstItem->room,
+                'status' => 'draft',
+                'requested_at' => now(),
+                'expected_return_date' => $fields['expected_return_date'] ?? null,
+                'release_slip_fields' => $fields,
+            ]);
+
+            foreach ($lines as $line) {
+                AssignmentRequest::create([
+                    'user_id' => (int) $request->user()->id,
+                    'target_user_id' => $requesterId,
+                    'item_id' => (int) $line['item_id'],
+                    'building' => $parent->building,
+                    'room' => $parent->room,
+                    'parent_request_id' => $parent->id,
+                    'quantity' => (int) $line['qty'],
+                    'status' => 'draft',
+                    'requested_at' => $parent->requested_at,
+                    'expected_return_date' => $parent->expected_return_date,
+                    'release_slip_fields' => [
+                        'conditions' => [
+                            $line['item_id'] => $fields['conditions'][$line['item_id']] ?? null,
+                        ],
+                    ],
+                ]);
+            }
+
+            return $parent->fresh();
+        });
+
+        if (is_string($result)) {
+            $message = $result === 'insufficient'
+                ? 'One or more selected inventory records no longer have enough free stock for this draft.'
+                : 'This request has already been processed.';
+
+            return response()->json(['message' => $message], $result === 'insufficient' ? 422 : 409);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Request saved as a draft. Print the slip, collect the required sign-off, then allocate from Drafts.',
+            'draft_id' => (int) $result->id,
+        ]);
+    }
+
     /**
      * Print-and-hold: persist the Assign modal's selection as a `draft`
      * parent plus one `draft` child per inventory row. Nothing is deducted
@@ -2377,6 +2529,7 @@ class PropertyCustodianController extends Controller
             'user_id' => ['required', 'exists:users,id'],
             'quantity' => ['required', 'integer', 'min:1'],
             'transaction_date' => ['nullable', 'date'],
+            ...$this->draftSlipFieldRules(),
             'is_temporary' => ['sometimes', 'boolean'],
             'expected_return_date' => [
                 Rule::requiredIf(fn () => $request->boolean('is_temporary')),
@@ -2416,7 +2569,7 @@ class PropertyCustodianController extends Controller
             (int) $endUser->id,
             (int) $validated['quantity'],
             $validated['transaction_date'] ?? null,
-            $validated['expected_return_date'] ?? null,
+            $validated['expected_return_date'] ?? ($validated['slip_fields']['expected_return_date'] ?? null),
         );
 
         if (is_string($draft)) {
@@ -2431,6 +2584,10 @@ class PropertyCustodianController extends Controller
             }
 
             return redirect()->back()->with('error', $message)->withInput();
+        }
+
+        if (isset($validated['slip_fields'])) {
+            $draft->update(['release_slip_fields' => $validated['slip_fields']]);
         }
 
         $draft->loadMissing('fulfillmentRequests:id,item_id,parent_request_id');
@@ -2473,6 +2630,7 @@ class PropertyCustodianController extends Controller
                     }
                 },
             ],
+            ...$this->draftSlipFieldRules(),
             'items' => ['required', 'array', 'min:1', 'max:100'],
             'items.*.item_id' => ['required', 'exists:inventory,item_id'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
@@ -2493,7 +2651,7 @@ class PropertyCustodianController extends Controller
             (int) $request->user()->id,
             (int) $endUser->id,
             $validated['transaction_date'] ?? null,
-            $validated['expected_return_date'] ?? null,
+            $validated['expected_return_date'] ?? ($validated['slip_fields']['expected_return_date'] ?? null),
         );
 
         if (is_array($result)) {
@@ -2501,6 +2659,9 @@ class PropertyCustodianController extends Controller
         }
 
         $draft = $result;
+        if (isset($validated['slip_fields'])) {
+            $draft->update(['release_slip_fields' => $validated['slip_fields']]);
+        }
         $draft->loadMissing('fulfillmentRequests:id,item_id,parent_request_id');
 
         if ($request->expectsJson()) {
@@ -2513,6 +2674,78 @@ class PropertyCustodianController extends Controller
         }
 
         return redirect()->route('propertyCustodian.transactions')->with('success', 'Draft saved. Print the slip, then allocate once the signed slip is collected.');
+    }
+
+    public function updateDraft(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'transaction_date' => ['required', 'date'],
+            'expected_return_date' => ['nullable', 'date', 'after_or_equal:transaction_date'],
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.item_id' => ['required', 'integer', 'distinct', 'exists:inventory,item_id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            ...$this->draftSlipFieldRules(true),
+        ]);
+
+        $result = $this->inventoryOperations->updateDraft(
+            $id,
+            (int) $validated['user_id'],
+            array_values($validated['items']),
+            $validated['transaction_date'],
+            $validated['expected_return_date'] ?? null,
+            $validated['slip_fields'],
+        );
+
+        if (is_array($result)) {
+            return $this->assignmentLineErrors($request, $result['errors'], count($validated['items']));
+        }
+
+        if (is_string($result)) {
+            $message = match ($result) {
+                'invalid_recipient' => 'Select an active End User as the recipient.',
+                default => 'This draft is no longer available to edit.',
+            };
+
+            return response()->json(['message' => $message], $result === 'invalid_recipient' ? 422 : 409);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Draft updated. Inventory is still held and has not been allocated.',
+            'draft_id' => $result->id,
+        ]);
+    }
+
+    private function draftSlipFieldRules(bool $required = false): array
+    {
+        $presence = $required ? 'required' : 'nullable';
+
+        return [
+            'slip_fields' => [$presence, 'array'],
+            'slip_fields.recipient_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.department_unit' => ['nullable', 'string', 'max:150'],
+            'slip_fields.designation' => ['nullable', 'string', 'max:150'],
+            'slip_fields.purpose' => ['nullable', 'string', Rule::in([
+                'Official Use (Off-site)',
+                'Transfer / Relocation',
+                'Repair / Maintenance',
+                'Disposal',
+            ])],
+            'slip_fields.conditions' => ['nullable', 'array'],
+            'slip_fields.conditions.*' => ['nullable', 'string', 'max:100'],
+            'slip_fields.expected_return_date' => ['nullable', 'date'],
+            'slip_fields.actual_return_date' => ['nullable', 'date'],
+            'slip_fields.released_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.released_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.released_by_date' => ['nullable', 'date'],
+            'slip_fields.received_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.received_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.received_by_date' => ['nullable', 'date'],
+            'slip_fields.approved_by_signature' => ['nullable', 'string', 'max:150'],
+            'slip_fields.approved_by_name' => ['nullable', 'string', 'max:150'],
+            'slip_fields.approved_by_date' => ['nullable', 'date'],
+        ];
     }
 
     /**
@@ -2555,7 +2788,7 @@ class PropertyCustodianController extends Controller
         ]);
 
         $inventoryIds = $validated['inventory_ids'];
-        $slipFields = $validated['slip_fields'] ?? [];
+        $slipFields = $validated['slip_fields'] ?? $assignmentRequest->release_slip_fields ?? [];
 
         $items = Inventory::query()
             ->with('category')
@@ -2733,9 +2966,11 @@ class PropertyCustodianController extends Controller
                 'custodianName' => trim($custodian->first_name.' '.$custodian->last_name) ?: $custodian->username,
                 'lines' => $lines,
                 'total' => collect($lines)->sum('amount'),
-                'expectedReturnDate' => null,
+                'expectedReturnDate' => $assignmentRequest->expected_return_date
+                    ? Carbon::parse($assignmentRequest->expected_return_date)->toDateString()
+                    : null,
                 'actualReturnDate' => null,
-                'slipFields' => [],
+                'slipFields' => $assignmentRequest->release_slip_fields ?? [],
             ];
         }
 
@@ -2807,7 +3042,32 @@ class PropertyCustodianController extends Controller
 
     private function draftPropertyReleaseSlipLines(AssignmentRequest $assignmentRequest, array $inventoryIds): array
     {
-        if (! $assignmentRequest->requested_item_name) {
+        if ($assignmentRequest->status === 'draft') {
+            $assignmentRequest->loadMissing('fulfillmentRequests.item');
+            $fulfillments = $assignmentRequest->fulfillmentRequests;
+
+            abort_if($fulfillments->isEmpty(), 409, 'No inventory lines are available for this draft.');
+
+            return $fulfillments
+                ->map(function (AssignmentRequest $fulfillment): array {
+                    $item = $fulfillment->item;
+                    abort_unless($item && (int) $fulfillment->quantity > 0, 409, 'Draft inventory details are unavailable.');
+
+                    $unitCost = (float) ($item->unit_cost ?? 0);
+
+                    return [
+                        'item_id' => $item->item_id,
+                        'item_no' => $item->inventory_item_no ?? (string) $item->item_id,
+                        'description' => trim($item->item_name.($item->serial_number ? ' (SN: '.$item->serial_number.')' : '')),
+                        'qty' => (int) $fulfillment->quantity,
+                        'unit_cost' => $unitCost,
+                        'amount' => $unitCost * (int) $fulfillment->quantity,
+                    ];
+                })
+                ->all();
+        }
+
+        if ($assignmentRequest->item_id) {
             $item = Inventory::query()->with('category')->findOrFail($assignmentRequest->item_id);
             abort_unless(
                 $item->status === 'available' && (int) $item->quantity >= (int) $assignmentRequest->quantity,
@@ -4342,6 +4602,7 @@ class PropertyCustodianController extends Controller
         $selectedItemIds = isset($validated['inventory_ids'])
             ? array_map('intval', $validated['inventory_ids'])
             : [(int) $itemId];
+        $returnToUserIds = [];
 
         if (isset($validated['inventory_ids']) && ! in_array((int) $itemId, $selectedItemIds, true)) {
             return redirect()->back()->with('error', 'The selected inventory records do not match the requested action.');
@@ -4349,16 +4610,21 @@ class PropertyCustodianController extends Controller
 
         foreach ($selectedItemIds as $selectedItemId) {
             $incident = $incidentProcessing->linkedReportForProcessingInventory($selectedItemId);
-            if ($incident && blank($validated['repair_notes'] ?? null)) {
-                $incidentProcessing->recordBlockedAction(
-                    $incident,
-                    (int) $request->user()->id,
-                    'Repair completion requires a recorded repair result.',
-                    'repair_completion',
-                );
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'repair_notes' => 'Record the repair result before completing this incident repair.',
-                ]);
+            if ($incident) {
+                if ($incident->repair_return_destination === 'assigned_user') {
+                    $returnToUserIds[$selectedItemId] = (int) $incident->reported_by;
+                }
+                if (blank($validated['repair_notes'] ?? null)) {
+                    $incidentProcessing->recordBlockedAction(
+                        $incident,
+                        (int) $request->user()->id,
+                        'Repair completion requires a recorded repair result.',
+                        'repair_completion',
+                    );
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'repair_notes' => 'Record the repair result before completing this incident repair.',
+                    ]);
+                }
             }
         }
 
@@ -4372,6 +4638,7 @@ class PropertyCustodianController extends Controller
             $request,
             $incidentProcessing,
             $incidentLifecycle,
+            $returnToUserIds,
         ): ?string {
             if (isset($validated['inventory_ids'])) {
                 $operationError = $this->inventoryOperations->markItemsRepaired(
@@ -4379,6 +4646,7 @@ class PropertyCustodianController extends Controller
                     (int) $request->user()->id,
                     $validated['repair_notes'] ?? null,
                     isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
+                    $returnToUserIds,
                 );
             } else {
                 $operationError = $this->inventoryOperations->markRepaired(
@@ -4386,6 +4654,7 @@ class PropertyCustodianController extends Controller
                     (int) $request->user()->id,
                     $validated['repair_notes'] ?? null,
                     isset($validated['maintenance_cost']) ? (float) $validated['maintenance_cost'] : null,
+                    $returnToUserIds[(int) $itemId] ?? null,
                 );
             }
 
@@ -4734,6 +5003,14 @@ class PropertyCustodianController extends Controller
     public function reviewIncidentReport(Request $request, $id, IncidentLifecycleService $incidentLifecycle)
     {
         $record = MaintenanceRecord::query()->findOrFail($id);
+
+        if ($record->isIncidentReport() && $record->incident_status === 'under_review') {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Incident is already accepted for custodian review.',
+            ]);
+        }
+
         $incidentLifecycle->transition(
             $record,
             'under_review',
@@ -4803,6 +5080,11 @@ class PropertyCustodianController extends Controller
                 $this->inventoryOperations,
             );
             $inspection = $incidentProcessing->latestInspection($record);
+            if (! $inspection) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'inspection' => 'Record a complete physical inspection before confirming handover.',
+                ]);
+            }
             $repairability = $inspection?->metadata['repairability'] ?? null;
             $message = 'Handover recorded. Only the reported quantity has been isolated.';
 
@@ -4832,11 +5114,25 @@ class PropertyCustodianController extends Controller
                     ],
                 );
                 $message = 'Affected units are now ready for the existing disposal process.';
+            } else {
+                $error = $this->startIncidentRepairProcessing(
+                    $record,
+                    $inspection,
+                    (int) $handover['inventory']->item_id,
+                    (int) $request->user()->id,
+                    $inspection->details ?? $record->issue_description ?? 'Incident repair',
+                    $incidentLifecycle,
+                );
+                if ($error !== null) {
+                    throw \Illuminate\Validation\ValidationException::withMessages(['repair' => $error]);
+                }
+
+                $message = 'Affected units have been handed over and are now under repair.';
             }
 
             return [
                 'message' => $message,
-                'incident_status' => $repairability === 'not_repairable' ? 'processing_disposal' : 'under_review',
+                'incident_status' => $repairability === 'not_repairable' ? 'processing_disposal' : 'processing_repair',
                 'processing_inventory_id' => (int) $handover['inventory']->item_id,
             ];
             });
@@ -4891,60 +5187,14 @@ class PropertyCustodianController extends Controller
 
         $processingInventoryId = (int) ($handover->metadata['processing_inventory_id'] ?? 0);
         $issue = $validated['notes'] ?? $inspection->details;
-        $error = DB::transaction(function () use (
+        $error = $this->startIncidentRepairProcessing(
             $record,
             $inspection,
-            $request,
-            $incidentLifecycle,
             $processingInventoryId,
+            (int) $request->user()->id,
             $issue,
-        ): ?string {
-            $error = $this->inventoryOperations->sendToMaintenance(
-                $processingInventoryId,
-                (int) $request->user()->id,
-                $record->issue_description ?? 'Incident repair',
-                $issue,
-            );
-            if ($error !== null) {
-                return $error;
-            }
-
-            $repairRecord = MaintenanceRecord::query()
-                ->where('inventory_id', $processingInventoryId)
-                ->whereNull('diagnosis')
-                ->where('reported_by', $request->user()->id)
-                ->latest('id')
-                ->firstOrFail();
-
-            MaintenanceRecordEvent::create([
-                'maintenance_record_id' => $record->id,
-                'actor_id' => $request->user()->id,
-                'event_type' => 'incident_repair_started',
-                'from_status' => 'under_review',
-                'to_status' => 'processing_repair',
-                'details' => $issue,
-                'metadata' => [
-                    'processing_inventory_id' => $processingInventoryId,
-                    'maintenance_record_id' => (int) $repairRecord->id,
-                ],
-            ]);
-
-            $incidentLifecycle->transition(
-                $record,
-                'processing_repair',
-                (int) $request->user()->id,
-                'Repair started after physical inspection and handover.',
-                [
-                    'inspection_findings' => $inspection->details,
-                    'repairability' => 'repairable',
-                    'handover_confirmed' => true,
-                    'processing_inventory_id' => $processingInventoryId,
-                    'maintenance_record_id' => (int) $repairRecord->id,
-                ],
-            );
-
-            return null;
-        });
+            $incidentLifecycle,
+        );
         if ($error !== null) {
             $incidentProcessing->recordBlockedAction(
                 $record,
@@ -4959,6 +5209,70 @@ class PropertyCustodianController extends Controller
             'status' => 'success',
             'message' => 'Repair started for the isolated affected units.',
         ]);
+    }
+
+    private function startIncidentRepairProcessing(
+        MaintenanceRecord $record,
+        MaintenanceRecordEvent $inspection,
+        int $processingInventoryId,
+        int $actorId,
+        string $issue,
+        IncidentLifecycleService $incidentLifecycle,
+    ): ?string {
+        return DB::transaction(function () use (
+            $record,
+            $inspection,
+            $processingInventoryId,
+            $actorId,
+            $issue,
+            $incidentLifecycle,
+        ): ?string {
+            $error = $this->inventoryOperations->sendToMaintenance(
+                $processingInventoryId,
+                $actorId,
+                $record->issue_description ?? 'Incident repair',
+                $issue,
+            );
+            if ($error !== null) {
+                return $error;
+            }
+
+            $repairRecord = MaintenanceRecord::query()
+                ->where('inventory_id', $processingInventoryId)
+                ->whereNull('diagnosis')
+                ->where('reported_by', $actorId)
+                ->latest('id')
+                ->firstOrFail();
+
+            MaintenanceRecordEvent::create([
+                'maintenance_record_id' => $record->id,
+                'actor_id' => $actorId,
+                'event_type' => 'incident_repair_started',
+                'from_status' => 'under_review',
+                'to_status' => 'processing_repair',
+                'details' => $issue,
+                'metadata' => [
+                    'processing_inventory_id' => $processingInventoryId,
+                    'maintenance_record_id' => (int) $repairRecord->id,
+                ],
+            ]);
+
+            $incidentLifecycle->transition(
+                $record,
+                'processing_repair',
+                $actorId,
+                'Repair started after physical inspection and handover.',
+                [
+                    'inspection_findings' => $inspection->details,
+                    'repairability' => 'repairable',
+                    'handover_confirmed' => true,
+                    'processing_inventory_id' => $processingInventoryId,
+                    'maintenance_record_id' => (int) $repairRecord->id,
+                ],
+            );
+
+            return null;
+        });
     }
 
     public function confirmIncidentRepairNotViable(

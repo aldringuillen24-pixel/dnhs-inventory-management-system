@@ -236,6 +236,7 @@ class IncidentProcessingService
                 'processing_inventory_id' => $inventoryId,
                 'maintenance_record_id' => data_get($repairEvent?->metadata, 'maintenance_record_id'),
                 'maintenance_cost' => $maintenanceCost,
+                'repair_return_destination' => $record->repair_return_destination ?? 'custodian_available',
             ],
         );
     }

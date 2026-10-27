@@ -7,39 +7,38 @@
       : selectedCategory
         ? `Items in ${selectedCategory.category_name}`
         : 'Submit an item requisition to the property custodian'"
-    max-width="max-w-2xl"
-    compact
+    max-width="max-w-4xl"
     fixed-body
     @close="$emit('close')"
   >
     <form id="request-item-form" class="compact-modal-body flex-1" @submit.prevent="submit">
       <!-- STEP 1: CATEGORY -->
-      <div v-if="step === 'category'" class="min-h-0 flex-1 overflow-y-auto">
-        <div v-if="!categories.length" class="py-6 text-center text-xs text-gray-500 dark:text-gray-400">
+      <div v-if="step === 'category'" class="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div v-if="!categories.length" class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
           No categories have been set up yet.
         </div>
 
-        <!-- Four per row: the first four across, then the next four below. -->
-        <ul v-else class="grid grid-cols-4 gap-1.5">
+        <!-- 3 per row on small, 4 per row on md/lg: larger cards with spacious padding and clear hierarchy -->
+        <ul v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
           <li v-for="category in categories" :key="category.category_id">
             <button
               type="button"
               :title="category.category_name"
-              class="flex h-full w-full flex-col items-start gap-1 rounded-md border border-gray-200 px-2 py-2 text-left transition-colors hover:border-brand-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-white/5"
+              class="group flex h-full w-full flex-col justify-between rounded-xl border border-gray-200/90 bg-white p-3.5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-400 hover:shadow-md dark:border-gray-700/80 dark:bg-gray-800/80 dark:hover:border-brand-500 dark:hover:bg-gray-800"
               @click="chooseCategory(category)"
             >
-              <span class="block w-full truncate text-xs font-semibold leading-tight text-gray-800 dark:text-gray-100">
-                {{ category.category_name }}
-              </span>
-              <span class="block w-full truncate text-[11px] leading-tight text-gray-500 dark:text-gray-400">
-                <!-- A category with nothing catalogued is still selectable:
-                     the end user can still name what they need. -->
-                {{ category.items.length
-                  ? `${category.items.length} item${category.items.length === 1 ? '' : 's'}`
-                  : 'Nothing catalogued' }}
-              </span>
+              <div class="mb-3 space-y-1">
+                <span class="block text-sm font-semibold text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-400">
+                  {{ category.category_name }}
+                </span>
+                <span class="block text-xs text-gray-500 dark:text-gray-400">
+                  {{ category.items.length
+                    ? `${category.items.length} item${category.items.length === 1 ? '' : 's'}`
+                    : 'Nothing catalogued' }}
+                </span>
+              </div>
               <span
-                class="mt-auto w-full rounded-md px-1.5 py-0.5 text-center text-[10px] font-bold leading-tight"
+                class="w-full rounded-md px-2 py-1 text-center text-[11px] font-semibold tracking-wide"
                 :class="category.available_item_count > 0
                   ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
                   : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'"
@@ -53,89 +52,169 @@
 
       <!-- STEP 2: ITEM -->
       <template v-else>
-        <!-- Out-of-stock notice. Shown when the chosen category has nothing
-             available, so the end user understands why this is not a normal
-             requisition before they type anything. -->
-        <div
-          v-if="isCategoryEmpty"
-          class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200"
-        >
-          <p class="font-semibold">
-            <template v-if="isCategoryUncatalogued">
-              Nothing in {{ selectedCategory?.category_name }} has been catalogued yet.
-            </template>
-            <template v-else>
-              No items in {{ selectedCategory?.category_name }} are currently in stock.
-            </template>
-          </p>
-          <p class="mt-1">You can still submit a request. It will be recorded and used to plan procurement.</p>
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-y-auto" :class="isCategoryEmpty ? 'mt-3' : ''">
-          <!-- Nothing catalogued in this category: there is no name to pick, so
-               the end user types what they need. It is recorded verbatim against
-               the category and never matched to inventory. -->
-          <template v-if="isCategoryUncatalogued">
-            <label class="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-300" for="request-free-text">Item needed</label>
-            <input
-              id="request-free-text"
-              v-model="freeTextName"
-              type="text"
-              required
-              maxlength="255"
-              placeholder="Name the item you need"
-              class="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-            />
-          </template>
-
-          <template v-else>
-            <label class="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-300" for="request-item-type">Item</label>
-            <select
-              id="request-item-type"
-              v-model="selectedItemKey"
-              required
-              class="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+        <div class="space-y-4">
+          <!-- Category Context Ribbon -->
+          <div class="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50/80 p-3 dark:border-gray-800 dark:bg-gray-800/40">
+            <div class="flex items-center gap-2.5">
+              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
+                <LucideIcon :icon="Layers" class="h-4 w-4" />
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Selected Category</p>
+                <p class="text-sm font-bold text-gray-900 dark:text-white">{{ selectedCategory?.category_name }}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+              @click="step = 'category'"
             >
-              <option value="">Select an item</option>
-              <option v-for="item in selectedCategory?.items ?? []" :key="itemKey(item)" :value="itemKey(item)">
-                {{ item.item_name }} · {{ item.unit }} · {{ itemLabel(item) }}
-              </option>
-            </select>
-          </template>
-          <FieldError :errors="errors" field="item_name" />
-
-          <div class="mt-3">
-            <label class="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-300" for="request-quantity">Quantity</label>
-            <input
-              id="request-quantity"
-              v-model.number="quantity"
-              type="number"
-              min="1"
-              :max="selectedFree || undefined"
-              required
-              placeholder="Enter quantity"
-              class="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-            />
-            <FieldError :errors="errors" field="quantity" />
-            <p v-if="chosenItem() && Number(chosenItem().pending_quantity ?? 0) > 0" class="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-              {{ selectedFree }} free of {{ chosenItem().available_quantity }} ({{ chosenItem().pending_quantity }} awaiting approval).
-            </p>
+              <LucideIcon :icon="ArrowLeft" class="h-3.5 w-3.5" />
+              Change Category
+            </button>
           </div>
 
-          <div class="mt-3">
-            <label class="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-300" for="request-notes">
-              Purpose or notes
-              <span v-if="isCategoryEmpty" class="font-normal text-amber-600 dark:text-amber-400">(pre-filled — edit if needed)</span>
-              <span v-else class="font-normal text-gray-400">(optional)</span>
-            </label>
-            <textarea
-              id="request-notes"
-              v-model="notes"
-              rows="2"
-              maxlength="1000"
-              class="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-            />
-            <FieldError :errors="errors" field="notes" />
+          <!-- Out-of-stock notice -->
+          <div
+            v-if="isCategoryEmpty"
+            class="flex items-start gap-2.5 rounded-lg border border-amber-200/80 bg-amber-50/90 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            <LucideIcon :icon="AlertTriangle" class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div>
+              <p class="font-semibold">
+                <template v-if="isCategoryUncatalogued">
+                  Nothing in {{ selectedCategory?.category_name }} has been catalogued yet.
+                </template>
+                <template v-else>
+                  No items in {{ selectedCategory?.category_name }} are currently in stock.
+                </template>
+              </p>
+              <p class="mt-0.5 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                You can still submit a request. It will be recorded and forwarded to the custodian for procurement planning.
+              </p>
+            </div>
+          </div>
+
+          <!-- Form Fields Container -->
+          <div class="space-y-4 rounded-xl border border-gray-200/80 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <!-- Item Field -->
+            <div>
+              <template v-if="isCategoryUncatalogued">
+                <label class="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="request-free-text">
+                  Item Needed <span class="text-rose-500">*</span>
+                </label>
+                <input
+                  id="request-free-text"
+                  v-model="freeTextName"
+                  type="text"
+                  required
+                  maxlength="255"
+                  placeholder="e.g. HDMI Cable, Wireless Mouse, Projector Remote"
+                  class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 shadow-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                />
+              </template>
+
+              <template v-else>
+                <label class="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="request-item-type">
+                  Select Item <span class="text-rose-500">*</span>
+                </label>
+                <select
+                  id="request-item-type"
+                  v-model="selectedItemKey"
+                  required
+                  class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 shadow-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                >
+                  <option value="">Choose an item from this category…</option>
+                  <option v-for="item in selectedCategory?.items ?? []" :key="itemKey(item)" :value="itemKey(item)">
+                    {{ item.item_name }} ({{ item.unit }}) — {{ itemLabel(item) }}
+                  </option>
+                </select>
+              </template>
+              <FieldError :errors="errors" field="item_name" />
+            </div>
+
+            <!-- Item Stock Card Preview (when item is selected) -->
+            <div
+              v-if="chosenItem()"
+              class="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50/70 p-3 text-xs dark:border-gray-800 dark:bg-gray-800/40"
+            >
+              <div class="space-y-0.5">
+                <span class="font-medium text-gray-700 dark:text-gray-300">{{ chosenItem().item_name }}</span>
+                <p class="text-[11px] text-gray-400">Unit: {{ chosenItem().unit }}</p>
+              </div>
+              <div class="text-right">
+                <span
+                  class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                  :class="selectedFree > 0 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'"
+                >
+                  {{ selectedFree > 0 ? `${selectedFree} available` : '0 available' }}
+                </span>
+                <p v-if="chosenItem() && Number(chosenItem().pending_quantity ?? 0) > 0" class="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                  ({{ chosenItem().pending_quantity }} pending approvals)
+                </p>
+              </div>
+            </div>
+
+            <!-- Quantity Field with Quick Stepper -->
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="request-quantity">
+                Quantity <span class="text-rose-500">*</span>
+              </label>
+              <div class="flex items-center gap-2">
+                <div class="relative w-40">
+                  <input
+                    id="request-quantity"
+                    v-model.number="quantity"
+                    type="number"
+                    min="1"
+                    :max="selectedFree || undefined"
+                    required
+                    placeholder="1"
+                    class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-800 shadow-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                  />
+                </div>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                    :disabled="quantity <= 1"
+                    @click="quantity = Math.max(1, quantity - 1)"
+                  >
+                    -
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                    :disabled="selectedFree > 0 && quantity >= selectedFree"
+                    @click="quantity++"
+                  >
+                    +
+                  </button>
+                  <span v-if="chosenItem()" class="ml-2 text-xs text-gray-500 dark:text-gray-400">
+                    {{ chosenItem().unit }}{{ quantity > 1 ? 's' : '' }}
+                  </span>
+                </div>
+              </div>
+              <FieldError :errors="errors" field="quantity" />
+            </div>
+
+            <!-- Notes Field -->
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="request-notes">
+                Purpose or Notes
+                <span v-if="isCategoryEmpty" class="font-normal text-amber-600 dark:text-amber-400">(pre-filled for procurement)</span>
+                <span v-else class="font-normal text-gray-400">(optional)</span>
+              </label>
+              <textarea
+                id="request-notes"
+                v-model="notes"
+                rows="3"
+                maxlength="1000"
+                placeholder="State the purpose, classroom/office location, or specific requirements…"
+                class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 shadow-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+              />
+              <FieldError :errors="errors" field="notes" />
+            </div>
           </div>
         </div>
       </template>
@@ -176,9 +255,11 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { AlertTriangle, ArrowLeft, Layers } from 'lucide';
 import api from '../../lib/axios';
 import Modal from '../../components/ui/dialogs/Modal.vue';
 import FieldError from '../../components/ui/feedback/FieldError.vue';
+import LucideIcon from '../../components/ui/data-display/LucideIcon.vue';
 
 const props = defineProps({
     open: { type: Boolean, default: false },
