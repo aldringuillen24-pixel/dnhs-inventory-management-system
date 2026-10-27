@@ -262,19 +262,6 @@ body:has(.custodian-theme) {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
 }
 
-.inventory-scroll-locked {
-  position: fixed;
-  inset: 0;
-  height: 100dvh;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.inventory-scroll-locked > div {
-  height: 100%;
-  min-height: 0;
-}
-
 .inventory-page-layout > * {
   display: flex;
   gap: 1rem;

@@ -5,12 +5,6 @@
       <div>
         <div class="flex items-center gap-2.5">
           <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Inventory Management</h1>
-          <span
-            v-if="metrics.total !== undefined"
-            class="rounded-md bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-          >
-            {{ format(metrics.total) }}
-          </span>
         </div>
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Stock records grouped by item, category, unit, and condition.</p>
       </div>
@@ -109,7 +103,7 @@
 
     <template v-else>
       <!-- Main Inventory Panel -->
-      <div class="custodian-panel relative flex max-h-[calc(100vh-7rem)] min-h-[32rem] flex-col overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="custodian-panel flex min-h-[32rem] flex-col overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <!-- Interactive Workspace Tabs -->
         <div class="relative shrink-0 border-b border-gray-200/80 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-gray-900/50 sm:hidden">
           <button
@@ -331,7 +325,7 @@
         <InventoryTableSkeleton v-if="loading" class="hidden min-w-0 flex-1 xl:block" />
 
         <!-- Compact item cards for phones and tablets -->
-        <div v-else class="min-h-0 min-w-0 flex-1 space-y-1.5 overflow-y-auto p-2.5 xl:hidden min-[480px]:space-y-2 min-[480px]:p-3">
+        <div v-else class="min-w-0 max-h-[34rem] space-y-1.5 overflow-y-auto p-2.5 xl:hidden min-[480px]:space-y-2 min-[480px]:p-3">
           <article
             v-for="row in filteredRows"
             :key="groupKey(row)"
@@ -384,14 +378,14 @@
         </div>
 
         <!-- Table -->
-        <div v-if="!loading" class="hidden min-h-0 min-w-0 flex-1 overflow-auto custom-scrollbar xl:block" role="region" aria-label="Inventory table, scroll horizontally to view all columns" tabindex="0">
+        <div v-if="!loading" class="hidden min-w-0 max-h-[34rem] overflow-auto custom-scrollbar xl:block" role="region" aria-label="Inventory table, scroll horizontally to view all columns" tabindex="0">
           <p class="sticky left-0 z-10 border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400 sm:hidden">
             Scroll horizontally to view all columns
           </p>
           <table class="w-full min-w-[64rem] text-left text-xs">
             <thead class="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800">
               <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400">
-                <th class="w-10 px-4 py-3.5">
+                <th class="w-10 px-4 py-2.5">
                   <input
                     v-if="filteredRows.length"
                     v-model="allChecked"
@@ -400,15 +394,15 @@
                     class="h-4 w-4 rounded-md border-gray-300 text-emerald-600 focus:ring-emerald-500 dark:border-gray-700 dark:bg-gray-800"
                   />
                 </th>
-                <th class="px-4 py-3.5">Item & ICS</th>
-                <th class="px-4 py-3.5">Category</th>
-                <th class="px-4 py-3.5 text-right">Quantity</th>
-                <th v-if="workspace === 'assigned'" class="px-4 py-3.5">Assignee</th>
-                <th class="px-4 py-3.5 text-right">Unit Cost</th>
-                <th class="px-4 py-3.5 text-right">Total Cost</th>
-                <th v-if="workspace === 'disposed'" class="px-4 py-3.5">Reason</th>
-                <th v-else class="px-4 py-3.5">Condition / Status</th>
-                <th v-if="workspace !== 'all'" class="px-4 py-3.5 text-right">Actions</th>
+                <th class="px-4 py-2.5">Item & ICS</th>
+                <th class="px-4 py-2.5">Category</th>
+                <th class="px-4 py-2.5 text-right">Quantity</th>
+                <th v-if="workspace === 'assigned'" class="px-4 py-2.5">Assignee</th>
+                <th class="px-4 py-2.5 text-right">Unit Cost</th>
+                <th class="px-4 py-2.5 text-right">Total Cost</th>
+                <th v-if="workspace === 'disposed'" class="px-4 py-2.5">Reason</th>
+                <th v-else class="px-4 py-2.5">Condition / Status</th>
+                <th v-if="workspace !== 'all'" class="px-4 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-white/5">
@@ -418,7 +412,7 @@
                   :class="{ 'bg-emerald-50/40 dark:bg-emerald-950/20': recordGroup?.item_id === row.item_id }"
                 >
                   <!-- Checkbox -->
-                  <td class="px-4 py-3.5">
+                  <td class="px-4 py-2.5">
                     <input
                       :checked="isGroupSelected(row)"
                       type="checkbox"
@@ -429,11 +423,11 @@
                   </td>
 
                   <!-- Item Name + ICS -->
-                  <td class="px-4 py-3.5">
+                  <td class="px-4 py-2.5">
                     <div class="flex items-center gap-3">
                       <!-- Item Icon Badge -->
                       <div
-                        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
                         role="img"
                         :aria-label="`${row.item_name} icon`"
                         v-html="itemIconMarkup(row)"
@@ -448,7 +442,7 @@
                         >
                           {{ row.item_name }}
                         </button>
-                        <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                           <span
                             v-if="row.ics_no"
                             class="rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
@@ -461,7 +455,7 @@
                             Acquired {{ formatDate(row.date_acquired) }}
                           </span>
                         </div>
-                        <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px]">
                           <button
                             v-if="lifespanRemainingFraction(row) !== null"
                             type="button"
@@ -493,12 +487,7 @@
                             :key="meta.key"
                             class="flex flex-wrap items-center gap-1.5"
                           >
-                          <span
-                            v-if="meta.count > 1"
-                            class="rounded-md bg-gray-100 px-1.5 py-0.5 font-semibold text-gray-600 dark:bg-white/5 dark:text-gray-300"
-                          >
-                            {{ meta.count }} units
-                          </span>
+
                           <span
                             v-if="meta.invNo"
                             class="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-gray-700 dark:bg-white/5 dark:text-gray-300"
@@ -518,14 +507,14 @@
                   </td>
 
                   <!-- Category -->
-                  <td class="px-4 py-3.5">
+                  <td class="px-4 py-2.5">
                     <span class="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 dark:bg-white/5 dark:text-gray-300">
                       {{ row.category?.category_name ?? 'Uncategorized' }}
                     </span>
                   </td>
 
                   <!-- Quantity -->
-                  <td class="px-4 py-3.5 text-right font-bold text-gray-900 dark:text-white">
+                  <td class="px-4 py-2.5 text-right font-bold text-gray-900 dark:text-white">
                     <template v-if="hasIssuedOut(row) && workspace !== 'available' && workspace !== 'all'">
                       <span v-if="workspace !== 'assigned'">Assigned: </span>{{ format(assignedOutQty(row)) }}
                       <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
@@ -547,22 +536,22 @@
                   </td>
 
                   <!-- Assignee -->
-                  <td v-if="workspace === 'assigned'" class="px-4 py-3.5 text-xs font-medium text-gray-700 dark:text-gray-300">
+                  <td v-if="workspace === 'assigned'" class="px-4 py-2.5 text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ rowAssignees(row) || '—' }}
                   </td>
 
                   <!-- Unit Cost -->
-                  <td class="px-4 py-3.5 text-right font-medium text-gray-600 dark:text-gray-300">
+                  <td class="px-4 py-2.5 text-right font-medium text-gray-600 dark:text-gray-300">
                     ₱{{ money(row.unit_cost) }}
                   </td>
 
                   <!-- Total Cost -->
-                  <td class="px-4 py-3.5 text-right font-semibold text-gray-900 dark:text-white">
+                  <td class="px-4 py-2.5 text-right font-semibold text-gray-900 dark:text-white">
                     ₱{{ money(row.total_cost) }}
                   </td>
 
                   <!-- Status (disposed workspace shows the disposal reason instead) -->
-                  <td class="px-4 py-3.5">
+                  <td class="px-4 py-2.5">
                     <div v-if="workspace === 'disposed'" class="max-w-64">
                       <p v-if="disposalReason(row)" class="truncate text-xs text-gray-700 dark:text-gray-300" :title="disposalReason(row)">
                         {{ disposalReason(row) }}
@@ -577,7 +566,7 @@
                   </td>
 
                   <!-- Actions: display-only under All Inventory -->
-                  <td v-if="workspace !== 'all'" class="px-4 py-3.5 text-right">
+                  <td v-if="workspace !== 'all'" class="px-4 py-2.5 text-right">
                     <div class="inline-flex items-center gap-1.5">
                       <!-- Details Toggle -->
                       <button

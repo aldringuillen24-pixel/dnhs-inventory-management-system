@@ -2,7 +2,7 @@
   <div
     ref="measureContainer"
     aria-hidden="true"
-    style="position: absolute; left: -10000px; top: 0; visibility: hidden; pointer-events: none;"
+    style="position: fixed; left: -10000px; top: 0; visibility: hidden; pointer-events: none;"
   >
     <article class="itb-measure-page flex flex-col bg-white p-6 text-[14px] leading-relaxed text-black" style="width: 210mm; height: 297mm; box-sizing: border-box; font-family: Calibri, Arial, sans-serif;">
       <header data-itb-header-first class="mb-4 text-center">

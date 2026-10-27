@@ -24,10 +24,7 @@
   <div
     v-else
     class="min-h-screen bg-gray-50 font-outfit dark:bg-gray-900"
-    :class="[
-      { 'custodian-theme': auth.role === 'Property Custodian' },
-      { 'inventory-scroll-locked': $route.name === 'custodian-inventory' },
-    ]"
+    :class="{ 'custodian-theme': auth.role === 'Property Custodian' }"
   >
     <Toasts />
     <div class="min-h-screen xl:flex">
@@ -42,9 +39,7 @@
         <AppHeader />
         <div
           class="mx-auto max-w-(--breakpoint-2xl) p-4 md:p-6 xl:pb-6"
-          :class="$route.name === 'custodian-inventory'
-            ? 'inventory-page-layout flex h-[calc(100dvh-4.125rem)] min-h-0 flex-col pb-4 md:pb-6 xl:h-[calc(100dvh-3.5rem)]'
-            : 'pb-24 md:pb-24'"
+          :class="'pb-24 md:pb-24'"
         >
           <RouterView />
         </div>
