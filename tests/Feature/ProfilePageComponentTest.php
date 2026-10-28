@@ -3,6 +3,7 @@
 use App\Models\User;
 use App\Models\Role;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 
 uses(RefreshDatabase::class);
 
@@ -68,4 +69,36 @@ test('an authenticated inspector is directed to the SPA profile and can update i
         ->first_name->toBe('Updated')
         ->username->toBe('updated-inspector')
         ->email->toBe('updated-inspector@example.com');
+});
+
+test('changing password does not require or modify profile information', function () {
+    $role = Role::create(['role_name' => 'End User']);
+    $user = User::factory()->create([
+        'role_id' => $role->role_id,
+        'first_name' => 'End',
+        'last_name' => 'User',
+        'username' => 'password-only-user',
+        'email' => 'password-only@example.com',
+        'building' => 'Main Building',
+        'room' => 'Room 12',
+        'password' => 'original-password',
+    ]);
+
+    $this->actingAs($user)
+        ->patchJson(route('api.profile.password'), [
+            'password' => 'updated-password-123',
+            'password_confirmation' => 'updated-password-123',
+        ])
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $updatedUser = $user->fresh();
+    expect($updatedUser)
+        ->first_name->toBe('End')
+        ->last_name->toBe('User')
+        ->username->toBe('password-only-user')
+        ->email->toBe('password-only@example.com')
+        ->building->toBe('Main Building')
+        ->room->toBe('Room 12')
+        ->and(Hash::check('updated-password-123', $updatedUser->password))->toBeTrue();
 });

@@ -107,6 +107,22 @@ class UserController extends Controller
         return redirect()->route('admin.profile')->with('success', 'Profile updated successfully.');
     }
 
+    public function updateOwnPassword(Request $request)
+    {
+        $validatedData = $request->validate([
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $request->user()->forceFill([
+            'password' => $validatedData['password'],
+        ])->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Password updated successfully.',
+        ]);
+    }
+
     public function store(Request $request)
     {
         $validatedData = $request->validate([

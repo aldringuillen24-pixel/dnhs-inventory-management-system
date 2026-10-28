@@ -129,6 +129,43 @@ class IncidentLifecycleService
         });
     }
 
+    public function cancelByReporter(MaintenanceRecord $record, int $reporterId): MaintenanceRecord
+    {
+        return DB::transaction(function () use ($record, $reporterId): MaintenanceRecord {
+            $record = MaintenanceRecord::query()->lockForUpdate()->findOrFail($record->getKey());
+
+            if (
+                ! $record->isIncidentReport()
+                || (int) $record->reported_by !== $reporterId
+            ) {
+                abort(404);
+            }
+
+            if ($record->incident_status !== 'reported') {
+                throw ValidationException::withMessages([
+                    'report' => 'Only reports waiting for custodian review can be cancelled.',
+                ]);
+            }
+
+            $record->forceFill([
+                'incident_status' => 'cancelled',
+                'status' => 'cancelled',
+                'completed_at' => now(),
+            ])->save();
+
+            MaintenanceRecordEvent::create([
+                'maintenance_record_id' => $record->id,
+                'actor_id' => $reporterId,
+                'event_type' => 'report_cancelled',
+                'from_status' => 'reported',
+                'to_status' => 'cancelled',
+                'details' => 'Blotter report cancelled by the reporter.',
+            ]);
+
+            return $record->fresh();
+        });
+    }
+
     public function currentAssignedQuantity(int $inventoryId, int $reporterId, ?int $transactionId = null): int
     {
         if ($transactionId !== null) {

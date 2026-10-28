@@ -138,13 +138,14 @@
               </div>
 
               <div class="max-h-[34rem] overflow-auto rounded-md border border-gray-200/70 dark:border-gray-800">
-                <table class="w-full min-w-[64rem] text-left text-xs">
+                <table class="w-full min-w-[70rem] text-left text-xs">
                   <thead class="sticky top-0 z-10">
                     <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400">
                       <th class="px-4 py-3.5">Requester</th>
                       <th class="px-4 py-3.5">Item Requested</th>
                       <th class="px-4 py-3.5">Category</th>
                       <th class="px-4 py-3.5 text-center">Qty</th>
+                      <th class="px-4 py-3.5">Priority</th>
                       <th class="px-4 py-3.5">Stock Health</th>
                       <th class="px-4 py-3.5">Requested On</th>
                       <th class="px-4 py-3.5 text-center">Actions</th>
@@ -185,6 +186,20 @@
                       <!-- Qty -->
                       <td class="px-4 py-3.5 text-center font-bold text-gray-900 dark:text-white">
                         {{ request.quantity }}
+                      </td>
+
+                      <!-- Request priority -->
+                      <td class="px-4 py-3.5">
+                        <span
+                          class="inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold"
+                          :class="request.priority === 'urgent'
+                            ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300'
+                            : request.priority === 'needed_soon'
+                              ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+                              : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'"
+                        >
+                          {{ request.priority === 'urgent' ? 'Urgent' : request.priority === 'needed_soon' ? 'Needed soon' : 'Normal' }}
+                        </span>
                       </td>
 
                       <!-- Stock Availability -->
@@ -250,7 +265,7 @@
                     </tr>
 
                     <tr v-if="!filteredIncoming.length">
-                      <td colspan="7" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
+                      <td colspan="8" class="px-4 py-8 text-center text-xs text-gray-500 dark:text-gray-400">
                         {{ requestsSearch.trim() ? `No results for '${requestsSearch.trim()}'.` : 'No incoming requests waiting for approval.' }}
                       </td>
                     </tr>

@@ -42,6 +42,7 @@ class AssignmentRequest extends Model
         'source_assignment_id',
         'quantity',
         'status',
+        'priority',
         'notes',
         'cancellation_reason',
         'requested_at',

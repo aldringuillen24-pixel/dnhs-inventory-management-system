@@ -22,6 +22,22 @@
         </div>
 
         <div>
+          <span class="text-xs text-gray-500 dark:text-gray-400">Priority</span>
+          <div class="mt-1">
+            <span
+              class="inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold"
+              :class="request.priority === 'urgent'
+                ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300'
+                : request.priority === 'needed_soon'
+                  ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+                  : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'"
+            >
+              {{ request.priority === 'urgent' ? 'Urgent' : request.priority === 'needed_soon' ? 'Needed soon' : 'Normal' }}
+            </span>
+          </div>
+        </div>
+
+        <div>
           <span class="text-xs text-gray-500 dark:text-gray-400">Item Requested</span>
           <div class="font-semibold text-gray-900 dark:text-white mt-0.5">{{ itemName }}</div>
           <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">

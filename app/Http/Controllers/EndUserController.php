@@ -147,6 +147,8 @@ class EndUserController extends Controller
         $user = User::findOrFail(Auth::id());
 
         $validated = $request->validate([
+            'first_name' => ['required', 'string', 'max:255'],
+            'last_name' => ['nullable', 'string', 'max:255'],
             'username' => ['required', 'string', 'max:255', Rule::unique('users', 'username')->ignore($user->id)],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'building' => ['nullable', 'string', 'max:255'],
@@ -154,6 +156,8 @@ class EndUserController extends Controller
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
         ]);
 
+        $user->first_name = $validated['first_name'];
+        $user->last_name = $validated['last_name'] ?? '';
         $user->username = $validated['username'];
         $user->email = $validated['email'];
         $user->building = $validated['building'] ?? null;
@@ -183,26 +187,23 @@ class EndUserController extends Controller
         // category with nothing available would offer the end user no name to
         // ask for and no way to record the demand at all.
         //
-        // Availability is looked up per type rather than summed over this
-        // query, because this query is deliberately NOT filtered to available
-        // rows — that is the whole point of it.
+        // Stock is aggregated across categories: categories describe where an
+        // item was inventoried, not whether it can fulfill a request.
         $availableByType = Inventory::query()
             ->where('status', 'available')
             ->where('quantity', '>', 0)
-            ->select('item_name', 'category_id', 'unit')
+            ->select('item_name', 'unit')
             ->selectRaw('SUM(quantity) as available_quantity')
-            ->groupBy('item_name', 'category_id', 'unit')
+            ->groupBy('item_name', 'unit')
             ->get()
-            ->mapWithKeys(fn (Inventory $item): array => [
-                self::itemTypeKey($item->item_name, $item->category_id, $item->unit) => (int) $item->available_quantity,
-            ]);
+            ->values();
 
         // Pending holds per type: requests sitting in `waiting for approval`
         // promise units the stock rows still show as available (deduction
-        // happens at approval). Loaded once and matched in PHP with the same
-        // normalisation the availability check uses.
+        // happens at approval). Loaded once and matched across categories
+        // with the same normalisation the availability check uses.
         $pendingRequests = AssignmentRequest::query()
-            ->where('status', 'waiting for approval')
+            ->whereIn('status', ['waiting for approval', 'draft'])
             ->whereNotNull('requested_item_name')
             ->get(['requested_item_name', 'requested_category_id', 'requested_unit', 'quantity']);
 
@@ -221,16 +222,17 @@ class EndUserController extends Controller
                     ->orderBy('item_name')
                     ->orderBy('unit')
                     ->get()
-                    // Grouped by name + category + unit, so same-named items in
-                    // different categories or units remain distinct things.
+                    // Catalogues stay grouped by category for selection, but
+                    // category does not constrain fulfillment.
                     ->map(function (Inventory $item) use ($availableByType, $pendingRequests, $category): array {
-                        $available = (int) $availableByType->get(
-                            self::itemTypeKey($item->item_name, $item->category_id, $item->unit),
-                            0
-                        );
+                        $available = (int) $availableByType
+                            ->filter(fn (Inventory $stock): bool => RequestableItemMatcher::nameMatches(
+                                (string) $item->item_name,
+                                (string) $stock->item_name,
+                            ) && RequestableItemMatcher::unitMatches($item->unit, $stock->unit))
+                            ->sum('available_quantity');
                         $pending = (int) $pendingRequests
-                            ->filter(fn ($request): bool => (int) $request->requested_category_id === (int) $item->category_id
-                                && RequestableItemMatcher::nameMatches((string) $item->item_name, (string) $request->requested_item_name)
+                            ->filter(fn ($request): bool => RequestableItemMatcher::nameMatches((string) $item->item_name, (string) $request->requested_item_name)
                                 && RequestableItemMatcher::unitMatches((string) $request->requested_unit, $item->unit))
                             ->sum('quantity');
 
@@ -290,7 +292,15 @@ class EndUserController extends Controller
                 'fulfillmentRequests.item:item_id,item_name,inventory_item_no',
                 'fulfillmentRequests.transaction',
             ])
-            ->where('user_id', $userId)
+            ->where(function ($query) use ($userId): void {
+                $query->where('user_id', $userId)
+                    ->orWhere(function ($query) use ($userId): void {
+                        $query->where('target_user_id', $userId)
+                            ->whereNull('parent_request_id')
+                            ->whereNotNull('requested_item_name')
+                            ->whereIn('status', ['draft', 'approved']);
+                    });
+            })
             ->orderBy('requested_at', 'desc');
     }
 
@@ -370,19 +380,6 @@ class EndUserController extends Controller
         return $pdf->download('my-requests_' . now()->format('Y-m-d_His') . '.pdf');
     }
 
-    /**
-     * Stable key for a requestable item type.
-     *
-     * An item name alone is not an identity: the same name can exist under two
-     * categories or two units, and those are different requestable things.
-     *
-     * @see storeRequest()
-     */
-    private static function itemTypeKey(string $itemName, mixed $categoryId, mixed $unit): string
-    {
-        return $itemName.'|'.(int) $categoryId.'|'.$unit;
-    }
-
     public function requestHistory()
     {
         $user = Auth::user();
@@ -409,9 +406,10 @@ class EndUserController extends Controller
     {
         $validated = $request->validate([
             'item_name' => ['required', 'string', 'max:255'],
-            'category_id' => ['required', 'exists:categories,category_id'],
+            'category_id' => ['nullable', 'exists:categories,category_id'],
             'unit' => ['required', 'string', 'max:255'],
             'quantity' => ['required', 'integer', 'min:1'],
+            'priority' => ['nullable', 'in:normal,needed_soon,urgent'],
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
@@ -422,12 +420,12 @@ class EndUserController extends Controller
         // 19 chairs are sitting on the shelf.
         $availableQuantity = RequestableItemMatcher::availableQuantity(
             $validated['item_name'],
-            (int) $validated['category_id'],
+            isset($validated['category_id']) ? (int) $validated['category_id'] : null,
             $validated['unit'],
         );
         $pendingQuantity = RequestableItemMatcher::pendingQuantity(
             $validated['item_name'],
-            (int) $validated['category_id'],
+            isset($validated['category_id']) ? (int) $validated['category_id'] : null,
             $validated['unit'],
         );
         $freeQuantity = max(0, $availableQuantity - $pendingQuantity);
@@ -456,12 +454,13 @@ class EndUserController extends Controller
 
         $assignmentRequest = AssignmentRequest::create([
             'requested_item_name' => $validated['item_name'],
-            'requested_category_id' => $validated['category_id'],
+            'requested_category_id' => $validated['category_id'] ?? null,
             'requested_unit' => $validated['unit'],
             'user_id' => Auth::id(),
             'target_user_id' => $custodian->id,
             'quantity' => $validated['quantity'],
             'status' => $status,
+            'priority' => $validated['priority'] ?? 'normal',
             'notes' => $validated['notes'] ?? null,
             'requested_at' => now(),
         ]);
@@ -576,6 +575,21 @@ class EndUserController extends Controller
             'status' => 'success',
             'incident_status' => $record->incident_status,
             'message' => 'Your response was added to the report history.',
+        ]);
+    }
+
+    public function cancelIncidentReport(Request $request, $id, IncidentLifecycleService $incidentLifecycle)
+    {
+        $record = MaintenanceRecord::query()
+            ->whereKey($id)
+            ->where('reported_by', $request->user()->id)
+            ->firstOrFail();
+        $record = $incidentLifecycle->cancelByReporter($record, (int) $request->user()->id);
+
+        return response()->json([
+            'status' => 'success',
+            'incident_status' => $record->incident_status,
+            'message' => 'Blotter report cancelled.',
         ]);
     }
 

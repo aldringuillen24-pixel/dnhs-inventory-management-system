@@ -153,8 +153,47 @@ test('end user request stores with property custodian target', function () {
         'target_user_id' => $this->propertyCustodian->id,
         'quantity' => 2,
         'status' => 'waiting for approval',
+        'priority' => 'normal',
         'notes' => 'For classroom lessons',
     ]);
+});
+
+test('end user request stores selected priority for the custodian', function () {
+    $category = Category::create([
+        'category_name' => 'Priority Request Supplies',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $category->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'Urgent Request Item',
+        'quantity' => 3,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.requests.store'), [
+            'item_name' => 'Urgent Request Item',
+            'category_id' => $category->category_id,
+            'unit' => 'piece',
+            'quantity' => 1,
+            'priority' => 'urgent',
+        ])
+        ->assertRedirect(route('endUser.my-requests'))
+        ->assertSessionHas('success', 'Request submitted to property custodian.');
+
+    $this->assertDatabaseHas('requests', [
+        'requested_item_name' => 'Urgent Request Item',
+        'priority' => 'urgent',
+        'user_id' => $this->endUser->id,
+    ]);
+
+    $this->actingAs($this->propertyCustodian)
+        ->getJson(route('api.custodian.transactions'))
+        ->assertOk()
+        ->assertJsonPath('incomingRequests.0.priority', 'urgent');
 });
 
 test('end user onboarding saves the account building and room', function () {
@@ -1665,7 +1704,7 @@ test('assignment approval uses the selected serial-numbered inventory record', f
         ->and(StockMovement::sole()->inventory_id)->toBe($selectedAsset->item_id);
 });
 
-test('end user request cannot use same-name stock from another category or unit', function () {
+test('end user request does not use same-name stock with a different unit', function () {
     $selectedCategory = Category::create([
         'category_name' => 'Learning Resources',
         'requires_serial_number' => false,
@@ -1705,6 +1744,99 @@ test('end user request cannot use same-name stock from another category or unit'
 
     $this->assertDatabaseMissing('requests', [
         'requested_item_name' => $selectedItem->item_name,
+        'user_id' => $this->endUser->id,
+    ]);
+});
+
+test('end user request can be allocated from a matching item in another category', function () {
+    $requestedCategory = Category::create([
+        'category_name' => 'Cross-Category Request Destination',
+        'requires_serial_number' => true,
+    ]);
+    $stockedCategory = Category::create([
+        'category_name' => 'Cross-Category Request Stock',
+        'requires_serial_number' => false,
+    ]);
+    $inventory = Inventory::create([
+        'category_id' => $stockedCategory->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'HDMI Cable',
+        'quantity' => 3,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.requests.store'), [
+            'item_name' => 'HDMI Cable',
+            'category_id' => $requestedCategory->category_id,
+            'unit' => 'piece',
+            'quantity' => 2,
+        ])
+        ->assertRedirect(route('endUser.my-requests'))
+        ->assertSessionHas('success', 'Request submitted to property custodian.');
+
+    $request = AssignmentRequest::where('requested_item_name', 'HDMI Cable')->sole();
+
+    $catalogue = $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.requests'))
+        ->assertOk()
+        ->json('categories');
+    $catalogueItem = collect($catalogue)
+        ->firstWhere('category_id', $stockedCategory->category_id)['items'][0];
+    expect($catalogueItem)->toMatchArray([
+        'item_name' => 'HDMI Cable',
+        'available_quantity' => 3,
+        'pending_quantity' => 2,
+        'free_quantity' => 1,
+    ]);
+
+    expect(\App\Support\RequestableItemMatcher::availableQuantity('HDMI Cable', $requestedCategory->category_id, 'piece'))
+        ->toBe(3)
+        ->and(\App\Support\RequestableItemMatcher::candidates('HDMI Cable', $requestedCategory->category_id, 'piece')
+            ->pluck('item_id')->all())
+        ->toBe([$inventory->item_id]);
+
+    $this->actingAs($this->propertyCustodian);
+    $this->post(route('propertyCustodian.requests.approve', $request->id), [
+        'inventory_ids' => [$inventory->item_id],
+    ])->assertRedirect(route('propertyCustodian.transactions'));
+
+    expect($request->fresh()->status)->toBe('approved')
+        ->and($inventory->fresh()->quantity)->toBe(1)
+        ->and((int) $inventory->fresh()->category_id)->toBe((int) $stockedCategory->category_id)
+        ->and(Transaction::sole()->item_id)->toBe($inventory->item_id);
+});
+
+test('end user can submit a request without a category', function () {
+    $stockedCategory = Category::create([
+        'category_name' => 'Uncategorized Request Stock Source',
+        'requires_serial_number' => false,
+    ]);
+    Inventory::create([
+        'category_id' => $stockedCategory->category_id,
+        'unit' => 'piece',
+        'user_id' => $this->propertyCustodian->id,
+        'item_name' => 'HDMI Cable',
+        'quantity' => 3,
+        'status' => 'available',
+        'date_acquired' => '2026-08-10',
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.requests.store'), [
+            'item_name' => 'HDMI Cable',
+            'unit' => 'units',
+            'quantity' => 1,
+        ])
+        ->assertRedirect(route('endUser.my-requests'))
+        ->assertSessionHas('success', 'Request submitted to property custodian.');
+
+    $this->assertDatabaseHas('requests', [
+        'requested_item_name' => 'HDMI Cable',
+        'requested_category_id' => null,
+        'status' => 'waiting for approval',
         'user_id' => $this->endUser->id,
     ]);
 });

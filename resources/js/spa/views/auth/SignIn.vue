@@ -98,6 +98,11 @@
               </button>
             </form>
 
+            <p class="mt-6 text-center text-sm text-slate-500">
+              Don't have an account?
+              <RouterLink to="/register" class="font-medium text-[#173f3b] hover:underline">Register</RouterLink>
+            </p>
+
             <p class="mt-8 text-center text-[11px] leading-5 text-slate-400">
               Republic of the Philippines · Department of Education<br />
               Dian-ay National High School · Need access help? Contact your system administrator.

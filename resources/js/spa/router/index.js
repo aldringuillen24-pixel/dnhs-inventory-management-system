@@ -3,6 +3,7 @@ import { useAuthStore } from '../stores/auth';
 import { useNavBadgeStore } from '../stores/navBadge';
 import RoleLanding from '../views/RoleLanding.vue';
 import SignIn from '../views/auth/SignIn.vue';
+import Register from '../views/auth/Register.vue';
 import Onboarding from '../views/auth/Onboarding.vue';
 import ResetPassword from '../views/auth/ResetPassword.vue';
 import WorkspacePlaceholder from '../views/WorkspacePlaceholder.vue';
@@ -16,6 +17,7 @@ const router = createRouter({
     routes: [
         { path: '/', name: 'landing', component: RoleLanding, meta: { title: 'Loading' } },
         { path: '/signin', name: 'signin', component: SignIn, meta: { guest: true, title: 'Sign In' } },
+        { path: '/register', name: 'register', component: Register, meta: { guest: true, title: 'Register' } },
         { path: '/onboarding', name: 'onboarding', component: Onboarding, meta: { onboarding: true, title: 'Complete Your Account Setup' } },
         { path: '/forgot-password', name: 'forgot-password', component: ResetPassword, meta: { guest: true, title: 'Reset Password' } },
         {

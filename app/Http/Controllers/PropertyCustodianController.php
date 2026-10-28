@@ -1071,16 +1071,14 @@ class PropertyCustodianController extends Controller
 
         $activeAssignments = $activeAssignmentsQuery->get()->groupBy('item_id');
 
-        // Pending holds for the Available/All tabs: requests in
-        // `waiting for approval` promise units the stock rows still show as
-        // available (deduction happens at approval). Unallocated `draft`
-        // children hold rows the same way. Loaded once; matched per
-        // group below with the same normalisation the request flow uses.
-        // Draft parents carry only the requested triple (see
-        // pendingQuantity); draft children carry only item_id, so the two
-        // pools never count the same units twice.
+        // Waiting requests hold a requestable item type; prepared drafts hold
+        // exact inventory through their children. Keep those pools separate:
+        // counting a draft parent by name as well as its children would double
+        // the pending quantity.
         $holdItemTypeRequests = AssignmentRequest::query()
-            ->whereIn('status', ['waiting for approval', 'draft'])
+            ->where('status', 'waiting for approval')
+            ->whereNull('item_id')
+            ->whereNull('parent_request_id')
             ->whereNotNull('requested_item_name')
             ->get(['requested_item_name', 'requested_category_id', 'requested_unit', 'quantity']);
         $holdByItemId = AssignmentRequest::query()
@@ -1179,8 +1177,7 @@ class PropertyCustodianController extends Controller
                 // record holds match this group's source rows exactly.
                 if (($inventoryItem->status ?? '') === 'available') {
                     $typeHold = (int) $holdItemTypeRequests
-                        ->filter(fn (AssignmentRequest $request): bool => (int) $request->requested_category_id === (int) $inventoryItem->category_id
-                            && RequestableItemMatcher::nameMatches((string) $inventoryItem->item_name, (string) $request->requested_item_name)
+                        ->filter(fn (AssignmentRequest $request): bool => RequestableItemMatcher::nameMatches((string) $inventoryItem->item_name, (string) $request->requested_item_name)
                             && RequestableItemMatcher::unitMatches((string) $request->requested_unit, $inventoryItem->unit))
                         ->sum('quantity');
                     $recordHold = (int) $matchedSourceItems->sum(fn (Inventory $source): int => (int) ($holdByItemId[$source->item_id] ?? 0));
@@ -3093,9 +3090,6 @@ class PropertyCustodianController extends Controller
                 ->keyBy('item_id');
             abort_unless($itemsById->count() === count($inventoryIds), 422, 'Selected inventory could not be found.');
 
-            $category = Category::find($assignmentRequest->requested_category_id);
-            abort_unless($category, 422, 'The requested category could not be found.');
-
             $items = collect($inventoryIds)
                 ->map(fn ($itemId) => $itemsById->get((int) $itemId))
                 ->values();
@@ -3111,7 +3105,8 @@ class PropertyCustodianController extends Controller
                     422,
                     'Selected inventory is unavailable or does not match the request.',
                 );
-                if ($category->requires_serial_number) {
+                abort_unless($item->category, 422, 'Selected inventory category could not be found.');
+                if ($item->category->requires_serial_number) {
                     abort_unless((int) $item->quantity === 1 && $item->serial_number, 422, 'Selected inventory does not meet serial-number requirements.');
                 }
             }
@@ -3121,9 +3116,6 @@ class PropertyCustodianController extends Controller
                 422,
                 'Selected inventory does not cover the requested quantity.',
             );
-            if ($category->requires_serial_number) {
-                abort_unless(count($inventoryIds) === (int) $assignmentRequest->quantity, 422, 'Select one serialised unit for each requested unit.');
-            }
         }
 
         $remaining = (int) $assignmentRequest->quantity;

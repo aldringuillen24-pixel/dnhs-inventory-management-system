@@ -22,9 +22,31 @@
     </div>
 
     <div v-else class="compact-panel">
+      <div class="relative z-0 flex gap-1.5 overflow-x-auto border-b border-gray-200/80 bg-gray-50/50 p-2 dark:border-gray-800 dark:bg-gray-900/50">
+        <button
+          type="button"
+          class="relative z-10 inline-flex min-h-[2rem] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
+          :class="requestView === 'active'
+            ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+            : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
+          @click="requestView = 'active'"
+        >
+          Active
+        </button>
+        <button
+          type="button"
+          class="relative z-10 inline-flex min-h-[2rem] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
+          :class="requestView === 'history'
+            ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+            : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
+          @click="requestView = 'history'"
+        >
+          History
+        </button>
+      </div>
       <div class="flex flex-wrap items-center gap-2 border-b border-gray-200/80 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-gray-900/50">
         <div class="relative w-full sm:max-w-xs">
-          <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <input
@@ -32,13 +54,13 @@
             type="search"
             placeholder="Search item, category…"
             aria-label="Filter requests"
-            class="w-full rounded-md border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:py-2 min-[480px]:text-sm [&::-webkit-search-cancel-button]:hidden"
+            class="h-[30px] w-full rounded-md border border-gray-200 bg-white py-0 pl-8 pr-3 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 [&::-webkit-search-cancel-button]:hidden"
           />
         </div>
         <select
           v-model="filterStatus"
           aria-label="Filter requests by status"
-          class="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:py-2 min-[480px]:text-sm"
+          class="h-[30px] rounded-md border border-gray-200 bg-white px-2.5 py-0 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         >
           <option value="">All Statuses</option>
           <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
@@ -69,16 +91,34 @@
           </tbody>
           <tbody v-else>
             <tr v-for="request in filteredMyRequests" :key="request.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
-              <td class="px-4 py-3.5">
+              <td class="px-4 py-2">
                 <div class="font-semibold text-gray-900 dark:text-white">{{ request.requested_item_name ?? request.item?.item_name ?? 'Unknown item' }}</div>
-                <span v-if="request.item?.inventory_item_no" class="text-xs text-gray-500 dark:text-gray-400">{{ request.item.inventory_item_no }}</span>
-                <span v-else-if="request.requested_category" class="text-xs text-gray-500 dark:text-gray-400">{{ request.requested_category.category_name }}</span>
+                <span v-if="request.item?.inventory_item_no" class="text-[11px] text-gray-500 dark:text-gray-400">{{ request.item.inventory_item_no }}</span>
+                <span v-else-if="request.requested_category" class="text-[11px] text-gray-500 dark:text-gray-400">{{ request.requested_category.category_name }}</span>
+                <span
+                  class="ml-1 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold"
+                  :class="request.priority === 'urgent'
+                    ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300'
+                    : request.priority === 'needed_soon'
+                      ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+                      : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'"
+                >
+                  {{ request.priority === 'urgent' ? 'Urgent' : request.priority === 'needed_soon' ? 'Needed soon' : 'Normal' }}
+                </span>
               </td>
-              <td class="px-4 py-3.5 font-bold text-gray-900 dark:text-white">{{ request.quantity }}</td>
-              <td class="px-4 py-3.5 text-md text-gray-500 dark:text-gray-400">{{ formatDate(request.requested_at) }}</td>
-              <td class="px-4 py-3.5"><StatusBadge :status="request.status" /></td>
-              <td class="px-4 py-3.5 text-md text-gray-500 dark:text-gray-400">{{ request.status === 'cancelled' ? request.cancellation_reason || '—' : request.notes || '—' }}</td>
-              <td class="px-4 py-3.5 text-center">
+              <td class="px-4 py-2 font-bold text-gray-900 dark:text-white">{{ request.quantity }}</td>
+              <td class="px-4 py-2 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(request.requested_at) }}</td>
+              <td class="px-4 py-2">
+                <span
+                  v-if="request.status === 'draft'"
+                  class="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                >
+                  Item is ready — visit your custodian
+                </span>
+                <StatusBadge v-else :status="request.status" compact />
+              </td>
+              <td class="px-4 py-2 text-xs text-gray-500 dark:text-gray-400">{{ request.status === 'cancelled' ? request.cancellation_reason || '—' : request.notes || '—' }}</td>
+              <td class="px-4 py-2 text-center">
                 <button
                   v-if="['waiting for approval', 'waiting for procurement', 'waiting for transfer approval'].includes(request.status) || (request.status === 'waiting for custodian approval' && ['End User', 'Property Custodian'].includes(request.target_user?.role?.role_name))"
                   type="button"
@@ -92,7 +132,7 @@
               </td>
             </tr>
             <tr v-if="!filteredMyRequests.length">
-              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">{{ myRequests.length ? 'No requests match the current filters.' : 'No requests yet. Use “Request Item” to start one.' }}</td>
+              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">{{ myRequests.length ? 'No requests match the current filters.' : (requestView === 'active' ? 'No active requests.' : 'No history yet.') }}</td>
             </tr>
           </tbody>
         </table>
@@ -129,6 +169,7 @@ import RequestItemModal from './RequestItemModal.vue';
 const toast = useToastStore();
 
 const activeTab = ref('my-requests');
+const requestView = ref('active');
 const loading = ref(true);
 const firstLoading = ref(true);
 const error = ref('');
@@ -168,7 +209,18 @@ function requestMatches(request) {
   ].filter(Boolean).some((value) => String(value).toLowerCase().includes(query));
 }
 
-const filteredMyRequests = computed(() => myRequests.value.filter(requestMatches));
+const activeStatuses = ['waiting for approval', 'waiting for procurement', 'waiting for transfer approval', 'waiting for custodian approval', 'transfer draft', 'draft'];
+const historyStatuses = ['cancelled', 'approved', 'fulfilled', 'rejected', 'declined'];
+const requestPillStyle = computed(() => {
+  const left = requestView.value === 'active' ? '0.5rem' : '50%';
+  return { left, width: 'calc(50% - 0.5rem)' };
+});
+
+const filteredMyRequests = computed(() => myRequests.value.filter((request) => {
+  if (requestView.value === 'active' && !activeStatuses.includes(request.status)) return false;
+  if (requestView.value === 'history' && !historyStatuses.includes(request.status)) return false;
+  return requestMatches(request);
+}));
 const filteredIncomingRequests = computed(() => incomingRequests.value.filter(requestMatches));
 
 const pendingStatuses = ['waiting for approval', 'waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'];

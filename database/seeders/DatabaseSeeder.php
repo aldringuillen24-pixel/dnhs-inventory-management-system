@@ -15,7 +15,6 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             CategorySeeder::class,
             AdminUserSeeder::class,
-            InventorySeeder::class,
         ]);
     }
 }

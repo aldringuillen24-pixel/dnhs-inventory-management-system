@@ -18,15 +18,52 @@
       </button>
     </div>
 
-    <!-- Two-column layout: Left = assigned table (~3/4), Right = incident reports (remaining ~1/4) -->
-    <div class="flex flex-col gap-5 lg:flex-row lg:items-start">
+    <div v-if="!error" class="overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="relative z-0 flex gap-1.5 overflow-x-auto border-b border-gray-200/80 bg-gray-50/50 p-2 dark:border-gray-800 dark:bg-gray-900/50" role="tablist" aria-label="Assigned items and blotter reports">
+        <button
+          id="assigned-items-tab"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'assigned'"
+          aria-controls="assigned-items-panel"
+          class="relative z-10 inline-flex min-h-[2rem] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
+          :class="activeTab === 'assigned'
+            ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+            : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
+          @click="activeTab = 'assigned'"
+        >
+          Assigned Items
+          <span class="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-white/10 dark:text-gray-300">{{ rows.length }}</span>
+        </button>
+        <button
+          id="blotter-reports-tab"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'blotter'"
+          aria-controls="blotter-reports-panel"
+          class="relative z-10 inline-flex min-h-[2rem] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
+          :class="activeTab === 'blotter'
+            ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+            : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
+          @click="activeTab = 'blotter'"
+        >
+          Blooter Report
+          <span class="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-white/10 dark:text-gray-300">{{ incidentReports.length }}</span>
+        </button>
+      </div>
 
       <!-- ── LEFT COLUMN: Assigned Items Table (3/4 on lg screens) ── -->
-      <div class="min-w-0 flex-1 lg:w-3/4">
-        <div v-if="!error" class="rounded-md border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-      <div class="mb-3 flex flex-wrap items-center gap-2">
+      <div
+        v-show="activeTab === 'assigned'"
+        id="assigned-items-panel"
+        role="tabpanel"
+        aria-labelledby="assigned-items-tab"
+        class="min-w-0 w-full p-3 sm:p-4"
+      >
+        <div v-if="!error">
+      <div class="mb-2 flex flex-wrap items-center gap-1.5">
         <div class="relative w-full sm:max-w-xs">
-          <svg class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <input
@@ -34,22 +71,22 @@
             type="search"
             placeholder="Search item…"
             aria-label="Filter assigned items"
-            class="w-full rounded-md border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:py-2 min-[480px]:text-sm [&::-webkit-search-cancel-button]:hidden"
+            class="h-[30px] w-full rounded-md border border-gray-200 bg-white py-0 pl-8 pr-3 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 [&::-webkit-search-cancel-button]:hidden"
           />
         </div>
         <select
           v-model="filterStatus"
           aria-label="Filter assigned items by status"
-          class="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 min-[480px]:py-2 min-[480px]:text-sm"
+          class="h-[30px] rounded-md border border-gray-200 bg-white px-2.5 py-0 text-xs text-gray-800 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
         >
           <option value="">All Statuses</option>
           <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
         </select>
         <a
           :href="exportAssignedHref"
-          class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5 min-[480px]:py-2 min-[480px]:text-sm"
+          class="inline-flex h-[30px] items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-0 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-white/5"
         >
-          <svg class="h-4 w-4 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
           </svg>
           Export PDF
@@ -81,19 +118,19 @@
             <template v-for="group in groupedRows" :key="group.key">
             <template v-if="group.count === 1" v-for="(row, index) in group.entries" :key="`${row.type}-${row.item_id ?? row.item_name}-${index}`">
               <tr class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
-                <td class="px-4 py-3.5">
+                <td class="px-3 py-2">
                   <span
-                    class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
+                    class="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium"
                     :class="row.type === 'Assigned' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'"
                   >
                     {{ row.type }}
                   </span>
                 </td>
-                <td class="px-4 py-3.5 font-semibold text-gray-900 dark:text-white">{{ row.item_name }}</td>
-                <td class="px-4 py-3.5">{{ row.quantity }}</td>
-                <td class="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(row.date) }}</td>
-                <td class="px-4 py-3.5"><StatusBadge :status="row.status" /></td>
-                <td class="px-4 py-3.5">
+                <td class="px-3 py-2 font-semibold text-gray-900 dark:text-white">{{ row.item_name }}</td>
+                <td class="px-3 py-2">{{ row.quantity }}</td>
+                <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(row.date) }}</td>
+                <td class="px-3 py-2"><StatusBadge :status="row.status" compact /></td>
+                <td class="px-3 py-2">
                   <div class="flex items-center justify-center gap-1.5">
                     <button
                       type="button"
@@ -164,15 +201,15 @@
             </template>
             <template v-else>
               <tr class="bg-gray-50/60 hover:bg-gray-50 dark:bg-white/[0.03] dark:hover:bg-white/[0.05]">
-                <td class="px-4 py-3.5">
+                <td class="px-3 py-2">
                   <span
-                    class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
+                    class="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium"
                     :class="group.first.type === 'Assigned' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'"
                   >
                     {{ group.first.type }}
                   </span>
                 </td>
-                <td class="px-4 py-3.5">
+                <td class="px-3 py-2">
                   <button
                     type="button"
                     class="flex items-center gap-1.5 text-left font-semibold text-gray-900 dark:text-white"
@@ -196,10 +233,10 @@
                     </span>
                   </button>
                 </td>
-                <td class="px-4 py-3.5 font-bold" :title="`Sum of ${group.count} records`">{{ group.totalQuantity }}</td>
-                <td class="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(group.first.date) }}</td>
-                <td class="px-4 py-3.5"><StatusBadge :status="group.first.status" /></td>
-                <td class="px-4 py-3.5">
+                <td class="px-3 py-2 font-bold" :title="`Sum of ${group.count} records`">{{ group.totalQuantity }}</td>
+                <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(group.first.date) }}</td>
+                <td class="px-3 py-2"><StatusBadge :status="group.first.status" compact /></td>
+                <td class="px-3 py-2">
                   <div class="flex items-center justify-center gap-1.5">
                     <button
                       v-if="firstTransferable(group)"
@@ -242,14 +279,14 @@
               <template v-if="isGroupExpanded(group.key)">
                 <template v-for="(entry, entryIndex) in group.entries" :key="groupEntryKey(group, entryIndex)">
                   <tr class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
-                    <td class="px-4 py-3.5 pl-8">
+                    <td class="px-3 py-2 pl-6">
                       <span class="text-[11px] font-medium text-gray-500 dark:text-gray-400">Record {{ entryIndex + 1 }} of {{ group.count }}</span>
                     </td>
-                    <td class="px-4 py-3.5 font-semibold text-gray-900 dark:text-white">{{ entry.item_name }}</td>
-                    <td class="px-4 py-3.5">{{ entry.quantity }}</td>
-                    <td class="px-4 py-3.5 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(entry.date) }}</td>
-                    <td class="px-4 py-3.5"><StatusBadge :status="entry.status" /></td>
-                    <td class="px-4 py-3.5">
+                    <td class="px-3 py-2 font-semibold text-gray-900 dark:text-white">{{ entry.item_name }}</td>
+                    <td class="px-3 py-2">{{ entry.quantity }}</td>
+                    <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(entry.date) }}</td>
+                    <td class="px-3 py-2"><StatusBadge :status="entry.status" compact /></td>
+                    <td class="px-3 py-2">
                       <div class="flex items-center justify-center gap-1.5">
                         <button
                           type="button"
@@ -330,54 +367,40 @@
     </div>
       </div>
 
-      <!-- ── RIGHT COLUMN: Incident Reports (remaining space on lg screens) ── -->
-      <aside class="w-full lg:w-1/4 lg:shrink-0">
-        <section class="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <!-- Section Header -->
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800">
-            <div class="flex items-center gap-2">
-              <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-500/10">
-                <LucideIcon :icon="TriangleAlert" class="h-4 w-4 text-amber-600 dark:text-amber-400" />
-              </div>
-              <div>
-                <h2 class="text-xs font-semibold text-gray-900 dark:text-white">Incident Reports</h2>
-                <p class="text-[10px] text-gray-500 dark:text-gray-400">Track submitted reports</p>
-              </div>
-            </div>
-            <span
-              v-if="!loading"
-              class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
-            >
-              {{ incidentReports.length }}
-            </span>
-          </div>
-
+      <div
+        v-show="activeTab === 'blotter'"
+        id="blotter-reports-panel"
+        role="tabpanel"
+        aria-labelledby="blotter-reports-tab"
+        class="w-full p-2 sm:p-3"
+      >
+        <section>
           <!-- Filters -->
-          <div v-if="!loading && incidentReports.length > 0" class="flex flex-col gap-2 border-b border-gray-100 px-4 py-2.5 dark:border-gray-800">
-            <div class="relative w-full">
-              <svg class="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <div v-if="!loading && incidentReports.length > 0" class="flex items-center gap-2 px-3 py-2">
+            <div class="relative min-w-0 basis-2/5">
+              <svg class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
               </svg>
               <input
                 v-model="incidentSearch"
                 type="search"
                 placeholder="Search reports…"
-                class="w-full rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-[11px] text-gray-800 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 [&::-webkit-search-cancel-button]:hidden"
+                class="h-[30px] w-full rounded-md border border-gray-200 bg-gray-50 py-0 pl-8 pr-3 text-[11px] text-gray-800 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 [&::-webkit-search-cancel-button]:hidden"
               />
             </div>
-            <div class="flex items-center justify-between gap-2">
+            <div class="flex min-w-0 basis-2/5 items-center gap-2">
               <select
                 v-model="incidentStatusFilter"
-                class="flex-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                class="h-[30px] min-w-0 flex-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-0 text-[11px] text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
               >
                 <option value="">All Statuses</option>
                 <option v-for="s in incidentStatusOptions" :key="s" :value="s">{{ s.replaceAll('_', ' ') }}</option>
               </select>
-              <span class="shrink-0 text-[10px] text-gray-400 dark:text-gray-500">{{ filteredIncidentReports.length }} of {{ incidentReports.length }}</span>
+              <span class="shrink-0 text-[9px] text-gray-400 dark:text-gray-500">{{ filteredIncidentReports.length }} of {{ incidentReports.length }}</span>
             </div>
           </div>
 
-          <div class="p-3">
+          <div class="p-2">
             <!-- Skeleton -->
             <div v-if="loading" class="space-y-3">
               <div v-for="n in 2" :key="n" class="space-y-2.5 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
@@ -405,7 +428,7 @@
             </div>
 
             <!-- Report Cards Stack -->
-            <ul v-else class="max-h-[17.5rem] space-y-2.5 overflow-y-auto pr-1">
+            <ul v-else class="grid max-h-[17.5rem] max-w-3xl grid-cols-1 content-start gap-2.5 overflow-y-auto pr-1 md:grid-cols-2">
               <li
                 v-for="report in filteredIncidentReports"
                 :key="report.id"
@@ -413,7 +436,7 @@
                 :class="incidentCardBorderClass(report)"
               >
                 <!-- Card Header -->
-                <div class="flex items-start justify-between gap-2 p-3 pb-2">
+                <div class="flex items-start justify-between gap-2 p-2.5 pb-1.5">
                   <div class="flex min-w-0 items-start gap-2">
                     <div class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg" :class="incidentTypeIconBg(report)">
                       <LucideIcon :icon="incidentTypeIcon(report)" class="h-3 w-3" :class="incidentTypeIconColor(report)" />
@@ -434,7 +457,7 @@
                 </div>
 
                 <!-- Card Body -->
-                <div class="space-y-1 border-t border-gray-100 px-3 py-2 text-[11px] dark:border-gray-700/60">
+                <div class="space-y-1 border-t border-gray-100 px-2.5 py-1.5 text-[11px] dark:border-gray-700/60">
                   <p class="text-gray-600 dark:text-gray-300">
                     <span class="font-medium text-gray-900 dark:text-white">{{ report.quantity }}</span> affected · {{ report.details }}
                   </p>
@@ -445,7 +468,7 @@
                 </div>
 
                 <!-- Evidence downloads -->
-                <div v-if="report.evidence?.length" class="flex flex-wrap gap-1 border-t border-gray-100 px-3 py-1.5 dark:border-gray-700/60">
+                <div v-if="report.evidence?.length" class="flex flex-wrap gap-1 border-t border-gray-100 px-2.5 py-1 dark:border-gray-700/60">
                   <a
                     v-for="file in report.evidence"
                     :key="file.id"
@@ -458,8 +481,8 @@
                 </div>
 
                 <!-- Awaiting Reporter Banner -->
-                <div v-if="report.status === 'awaiting_reporter'" class="border-t border-purple-100 bg-purple-50 p-2.5 dark:border-purple-900/30 dark:bg-purple-500/10">
-                  <div class="mb-1.5 flex items-center gap-1">
+                <div v-if="report.status === 'awaiting_reporter'" class="border-t border-purple-100 bg-purple-50 p-2 dark:border-purple-900/30 dark:bg-purple-500/10">
+                  <div class="mb-1 flex items-center gap-1">
                     <LucideIcon :icon="MessageSquare" class="h-3 w-3 text-purple-600 dark:text-purple-400" />
                     <p class="text-[11px] font-semibold text-purple-800 dark:text-purple-300">Custodian requested info</p>
                   </div>
@@ -489,7 +512,7 @@
                 <div v-if="report.timeline?.length" class="border-t border-gray-100 dark:border-gray-700/60">
                   <button
                     type="button"
-                    class="flex w-full items-center justify-between px-3 py-2 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white"
+                    class="flex w-full items-center justify-between px-2.5 py-1.5 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white"
                     @click="openTimelineModal(report)"
                   >
                     <span class="flex items-center gap-1.5">
@@ -500,12 +523,25 @@
                     <LucideIcon :icon="ChevronRight" class="h-3.5 w-3.5 text-gray-400" />
                   </button>
                 </div>
+
+                <div v-if="report.status === 'reported'" class="border-t border-gray-100 px-2.5 py-1.5 dark:border-gray-700/60">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2 py-1 text-[10px] font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                    :disabled="incidentCancelId === report.id"
+                    @click="incidentCancelTarget = report"
+                  >
+                    <LucideIcon v-if="incidentCancelId === report.id" :icon="Loader2" class="h-3 w-3 animate-spin" />
+                    <LucideIcon v-else :icon="XCircle" class="h-3 w-3" />
+                    Cancel Blotter
+                  </button>
+                </div>
               </li>
             </ul>
           </div>
         </section>
-      </aside>
-    </div><!-- end two-column layout -->
+      </div>
+    </div>
 
     <TransferModal :open="transferRow !== null" :row="transferRow" :end-users="endUsers" @close="transferRow = null" @saved="onTransferSaved" />
 
@@ -660,6 +696,40 @@
       </template>
     </Modal>
 
+    <Modal
+      :open="incidentCancelTarget !== null"
+      title="Cancel Blotter Report"
+      max-width="max-w-md"
+      @close="incidentCancelTarget = null"
+    >
+      <p v-if="incidentCancelTarget" class="rounded-md bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:bg-white/5 dark:text-gray-300">
+        Cancel the blotter report for
+        <span class="font-semibold text-gray-900 dark:text-white">{{ incidentCancelTarget.item_name }}</span>?
+        This can only be done before the custodian starts reviewing it.
+      </p>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+            :disabled="incidentCancelId !== null"
+            @click="incidentCancelTarget = null"
+          >
+            Keep Report
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="incidentCancelId !== null"
+            @click="cancelIncidentReport"
+          >
+            <LucideIcon v-if="incidentCancelId !== null" :icon="Loader2" class="h-3 w-3 animate-spin" />
+            Cancel Blotter
+          </button>
+        </div>
+      </template>
+    </Modal>
+
     <!-- ── Timeline Modal ── -->
     <Modal
       :open="timelineModalReport !== null"
@@ -691,7 +761,7 @@
         <!-- Stepper -->
         <ol class="relative space-y-0 border-l-2 border-gray-100 pl-5 dark:border-gray-700">
           <li
-            v-for="event in timelineModalReport.timeline"
+            v-for="event in timelineEvents"
             :key="event.id ?? `${event.created_at}-${event.event_type}`"
             class="relative pb-5 last:pb-0"
           >
@@ -765,6 +835,7 @@ const toast = useToastStore();
 const loading = ref(true);
 const error = ref('');
 const workingId = ref(null);
+const activeTab = ref('assigned');
 const transferRow = ref(null);
 const expanded = ref(new Set());
 
@@ -773,6 +844,8 @@ const endUsers = ref([]);
 const incidentReports = ref([]);
 const incidentResponseDrafts = ref({});
 const incidentResponseId = ref(null);
+const incidentCancelTarget = ref(null);
+const incidentCancelId = ref(null);
 const filterSearch = ref('');
 const filterStatus = ref('');
 
@@ -784,6 +857,15 @@ const timelineModalReport = ref(null);
 function openTimelineModal(report) {
   timelineModalReport.value = report;
 }
+
+const timelineEvents = computed(() =>
+  [...(timelineModalReport.value?.timeline ?? [])].sort((a, b) => {
+    const timeDifference = Date.parse(b.created_at ?? '') - Date.parse(a.created_at ?? '');
+    return Number.isNaN(timeDifference) || timeDifference === 0
+      ? Number(b.id ?? 0) - Number(a.id ?? 0)
+      : timeDifference;
+  }),
+);
 
 const incidentStatusOptions = computed(() =>
   [...new Set(incidentReports.value.map((r) => r.status).filter(Boolean))].sort(),
@@ -805,7 +887,7 @@ const filteredIncidentReports = computed(() => {
 function incidentCardBorderClass(report) {
   const s = String(report.status ?? '').toLowerCase();
   if (s === 'awaiting_reporter') return 'border-purple-300 dark:border-purple-700';
-  if (s === 'declined') return 'border-rose-200 dark:border-rose-800';
+  if (s === 'declined' || s === 'cancelled') return 'border-rose-200 dark:border-rose-800';
   if (s === 'resolved') return 'border-emerald-200 dark:border-emerald-800';
   if (s === 'processing repair' || s === 'processing_repair') return 'border-amber-200 dark:border-amber-800';
   if (s === 'under review' || s === 'under_review') return 'border-blue-200 dark:border-blue-800';
@@ -846,7 +928,7 @@ function incidentStatusClass(status) {
   if (s === 'under_review' || s === 'under review') return 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300';
   if (s === 'processing_repair' || s === 'processing repair') return 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300';
   if (s === 'resolved') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300';
-  if (s === 'declined') return 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300';
+  if (s === 'declined' || s === 'cancelled') return 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300';
   if (s === 'awaiting_reporter' || s === 'awaiting reporter') return 'bg-purple-100 text-purple-800 dark:bg-purple-500/20 dark:text-purple-300';
   if (s === 'under_investigation' || s === 'under investigation') return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/20 dark:text-indigo-300';
   return 'bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-300';
@@ -857,7 +939,7 @@ function incidentStatusDotClass(status) {
   if (s === 'under_review' || s === 'under review') return 'bg-blue-500';
   if (s === 'processing_repair' || s === 'processing repair') return 'bg-amber-500 animate-pulse';
   if (s === 'resolved') return 'bg-emerald-500';
-  if (s === 'declined') return 'bg-rose-500';
+  if (s === 'declined' || s === 'cancelled') return 'bg-rose-500';
   if (s === 'awaiting_reporter' || s === 'awaiting reporter') return 'bg-purple-500 animate-pulse';
   if (s === 'under_investigation' || s === 'under investigation') return 'bg-indigo-500';
   return 'bg-gray-400';
@@ -867,6 +949,7 @@ function incidentStatusDotClass(status) {
 function incidentEventIcon(event) {
   const et = String(event.event_type ?? '').toLowerCase();
   if (et === 'report_submitted') return FileText;
+  if (et === 'report_cancelled') return XCircle;
   if (et === 'reporter_response_received') return MessageSquare;
   if (et === 'physical_inspection_recorded') return Search;
   if (et === 'incident_handover_confirmed') return CheckCircle;
@@ -886,6 +969,7 @@ function incidentEventIcon(event) {
 function incidentEventDotClass(event) {
   const et = String(event.event_type ?? '').toLowerCase();
   if (et === 'report_submitted') return 'bg-gray-400';
+  if (et === 'report_cancelled') return 'bg-rose-500';
   if (et === 'reporter_response_received') return 'bg-indigo-500';
   if (et === 'physical_inspection_recorded') return 'bg-purple-500';
   if (et === 'incident_handover_confirmed') return 'bg-emerald-500';
@@ -1033,7 +1117,11 @@ async function respondToIncidentInformation(report) {
   incidentResponseId.value = report.id;
 
   try {
-    await api.post(`/end-user/incident-reports/${report.id}/information-response`, { details });
+    await api.post(
+      `/end-user/incident-reports/${report.id}/information-response`,
+      { details },
+      { skipToast: true },
+    );
     incidentResponseDrafts.value[report.id] = '';
     toast.success('Response sent', 'Your response was added to the incident timeline.');
     forgetPageCache();
@@ -1045,6 +1133,31 @@ async function respondToIncidentInformation(report) {
     );
   } finally {
     incidentResponseId.value = null;
+  }
+}
+
+async function cancelIncidentReport() {
+  const report = incidentCancelTarget.value;
+  if (!report || incidentCancelId.value !== null) {
+    return;
+  }
+
+  incidentCancelId.value = report.id;
+  try {
+    await api.post(`/end-user/incident-reports/${report.id}/cancel`);
+    incidentCancelTarget.value = null;
+    toast.success('Blotter cancelled', 'The report was cancelled.');
+    forgetPageCache();
+    await load();
+  } catch (requestError) {
+    const errors = requestError?.response?.data?.errors;
+    const validationMessage = errors ? Object.values(errors).flat()[0] : null;
+    toast.error(
+      'Could not cancel blotter',
+      validationMessage ?? requestError?.response?.data?.message ?? 'Refresh the report and try again.',
+    );
+  } finally {
+    incidentCancelId.value = null;
   }
 }
 
@@ -1066,6 +1179,7 @@ function formatIncidentDate(value) {
 
 function incidentEventLabel(event) {
   if (event.event_type === 'report_submitted') return 'Report submitted';
+  if (event.event_type === 'report_cancelled') return 'Blotter report cancelled';
   if (event.event_type === 'reporter_response_received') return 'Information response received';
   if (event.event_type === 'status_changed' && event.to_status === 'awaiting_reporter') return 'Information requested';
   if (event.event_type === 'physical_inspection_recorded') return 'Physical inspection recorded';

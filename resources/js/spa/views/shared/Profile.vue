@@ -9,9 +9,11 @@
     :needs-password-confirmation="needsPasswordConfirmation"
     :form="form"
     :errors="errors"
-    :working="working"
+    :profile-working="profileWorking"
+    :password-working="passwordWorking"
     @update-field="updateField"
-    @save="save"
+    @save-profile="saveProfile"
+    @save-password="savePassword"
   />
 </template>
 
@@ -24,7 +26,8 @@ import ProfilePanel from '../../components/ui/data-display/ProfilePanel.vue';
 
 const auth = useAuthStore();
 const toast = useToastStore();
-const working = ref(false);
+const profileWorking = ref(false);
+const passwordWorking = ref(false);
 const errors = ref({});
 const form = reactive({ first_name: '', last_name: '', username: '', email: '', building: '', room: '', password: '', password_confirmation: '' });
 
@@ -46,7 +49,7 @@ const profileEndpoint = computed(() => {
 });
 
 const needsUsername = computed(() => ['Administrator', 'Property Custodian', 'End User', 'Inspector'].includes(auth.role));
-const needsNameFields = computed(() => ['Administrator', 'Property Custodian', 'School Head', 'Inspector'].includes(auth.role));
+const needsNameFields = computed(() => ['Administrator', 'Property Custodian', 'School Head', 'Inspector', 'End User'].includes(auth.role));
 const needsPasswordConfirmation = true;
 
 function syncFromUser() {
@@ -68,9 +71,9 @@ function updateField(field, value) {
 
 watch(() => auth.user, syncFromUser, { immediate: true });
 
-async function save() {
+async function saveProfile() {
   if (!profileEndpoint.value) return;
-  working.value = true;
+  profileWorking.value = true;
   errors.value = {};
   try {
     const payload = { email: form.email, building: form.building, room: form.room };
@@ -79,24 +82,39 @@ async function save() {
       payload.first_name = form.first_name;
       payload.last_name = form.last_name || '';
     }
-    if (form.password) {
-      payload.password = form.password;
-      if (needsPasswordConfirmation) payload.password_confirmation = form.password_confirmation;
-    }
     await api.patch(profileEndpoint.value, payload, { skipToast: true });
     await auth.refresh();
     syncFromUser();
     toast.success('Profile updated', 'Your profile information has been saved.');
   } catch (requestError) {
     errors.value = requestError?.response?.data?.errors ?? {};
-    // This request opts out of the interceptor's toasts, so the view owns every
-    // outcome. Field errors render inline against the inputs; anything else
-    // (including a 422 with no field detail, and server failures) needs a toast.
     if (!Object.keys(errors.value).length) {
       toast.error('Error', requestError?.response?.data?.message ?? 'Could not update the profile.');
     }
   } finally {
-    working.value = false;
+    profileWorking.value = false;
+  }
+}
+
+async function savePassword() {
+  if (!profileEndpoint.value) return;
+  if (!form.password) return;
+  passwordWorking.value = true;
+  errors.value = {};
+  try {
+    const payload = { password: form.password };
+    if (needsPasswordConfirmation) payload.password_confirmation = form.password_confirmation;
+    await api.patch('/profile/password', payload, { skipToast: true });
+    form.password = '';
+    form.password_confirmation = '';
+    toast.success('Password updated', 'Your password has been changed.');
+  } catch (requestError) {
+    errors.value = requestError?.response?.data?.errors ?? {};
+    if (!Object.keys(errors.value).length) {
+      toast.error('Error', requestError?.response?.data?.message ?? 'Could not update the password.');
+    }
+  } finally {
+    passwordWorking.value = false;
   }
 }
 </script>

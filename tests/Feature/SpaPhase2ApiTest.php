@@ -327,9 +327,21 @@ test('profile update through the api respects role validation', function () {
     expect($this->custodian->fresh()->first_name)->toBe('Updated');
 
     $this->actingAs($this->endUser)->patchJson(route('api.end-user.profile.update'), [
+        'first_name' => 'Updated End User',
+        'last_name' => 'Name',
         'username' => 'phase2-end-user',
-        'email' => 'not-an-email',
-    ])->assertUnprocessable()->assertJsonValidationErrors(['email']);
+        'email' => 'phase2-end-user@example.com',
+    ])->assertOk()->assertJsonPath('status', 'success');
+
+    expect($this->endUser->fresh()->first_name)->toBe('Updated End User')
+        ->and($this->endUser->fresh()->last_name)->toBe('Name');
+
+    $this->actingAs($this->endUser)->patchJson(route('api.end-user.profile.update'), [
+        'first_name' => '',
+        'last_name' => 'Name',
+        'username' => 'phase2-end-user',
+        'email' => 'phase2-end-user@example.com',
+    ])->assertUnprocessable()->assertJsonValidationErrors(['first_name']);
 });
 
 test('ai assistant endpoints require auth and stay role scoped', function () {

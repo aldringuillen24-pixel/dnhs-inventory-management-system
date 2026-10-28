@@ -19,26 +19,26 @@
         </div>
 
         <!-- 3 per row on small, 4 per row on md/lg: larger cards with spacious padding and clear hierarchy -->
-        <ul v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        <ul v-else class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
           <li v-for="category in categories" :key="category.category_id">
             <button
               type="button"
               :title="category.category_name"
-              class="group flex h-full w-full flex-col justify-between rounded-xl border border-gray-200/90 bg-white p-3.5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-400 hover:shadow-md dark:border-gray-700/80 dark:bg-gray-800/80 dark:hover:border-brand-500 dark:hover:bg-gray-800"
+              class="group flex h-full w-full flex-col justify-between rounded-xl border border-gray-200/90 bg-white p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-400 hover:shadow-md dark:border-gray-700/80 dark:bg-gray-800/80 dark:hover:border-brand-500 dark:hover:bg-gray-800"
               @click="chooseCategory(category)"
             >
-              <div class="mb-3 space-y-1">
-                <span class="block text-sm font-semibold text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-400">
+              <div class="mb-2 space-y-1">
+                <span class="block text-[13px] font-semibold text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-400">
                   {{ category.category_name }}
                 </span>
-                <span class="block text-xs text-gray-500 dark:text-gray-400">
+                <span class="block text-[11px] text-gray-500 dark:text-gray-400">
                   {{ category.items.length
                     ? `${category.items.length} item${category.items.length === 1 ? '' : 's'}`
                     : 'Nothing catalogued' }}
                 </span>
               </div>
               <span
-                class="w-full rounded-md px-2 py-1 text-center text-[11px] font-semibold tracking-wide"
+                class="w-full rounded-md px-2 py-0.5 text-center text-[10px] font-semibold tracking-wide"
                 :class="category.available_item_count > 0
                   ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
                   : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'"
@@ -82,7 +82,7 @@
             <LucideIcon :icon="AlertTriangle" class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <div>
               <p class="font-semibold">
-                <template v-if="isCategoryUncatalogued">
+                <template v-if="isFreeText">
                   Nothing in {{ selectedCategory?.category_name }} has been catalogued yet.
                 </template>
                 <template v-else>
@@ -97,9 +97,20 @@
 
           <!-- Form Fields Container -->
           <div class="space-y-4 rounded-xl border border-gray-200/80 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <div v-if="!isCategoryUncatalogued && !requestUnlisted" class="flex justify-end">
+              <button type="button" class="text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400" @click="requestUnlisted = true; selectedItemKey = ''; notes.value = `No ${selectedCategory?.category_name} items are currently in stock. Requesting these so they can be included in the next procurement cycle.`">
+                Need an item not listed? Request it
+              </button>
+            </div>
+            <div v-if="requestUnlisted" class="flex justify-end">
+              <button type="button" class="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400" @click="requestUnlisted = false; freeTextName = ''; notes.value = (selectedCategory?.available_item_count ?? 0) > 0 ? '' : `No ${selectedCategory?.category_name} items are currently in stock. Requesting these so they can be included in the next procurement cycle.`">
+                Back to item list
+              </button>
+            </div>
+
             <!-- Item Field -->
             <div>
-              <template v-if="isCategoryUncatalogued">
+              <template v-if="isFreeText">
                 <label class="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="request-free-text">
                   Item Needed <span class="text-rose-500">*</span>
                 </label>
@@ -198,6 +209,22 @@
               <FieldError :errors="errors" field="quantity" />
             </div>
 
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="request-priority">
+                Priority
+              </label>
+              <select
+                id="request-priority"
+                v-model="priority"
+                class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 shadow-sm transition-colors focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+              >
+                <option value="normal">Normal</option>
+                <option value="needed_soon">Needed soon</option>
+                <option value="urgent">Urgent</option>
+              </select>
+              <FieldError :errors="errors" field="priority" />
+            </div>
+
             <!-- Notes Field -->
             <div>
               <label class="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300" for="request-notes">
@@ -275,7 +302,9 @@ const step = ref('category');
 const selectedCategory = ref(null);
 const selectedItemKey = ref('');
 const freeTextName = ref('');
+const requestUnlisted = ref(false);
 const quantity = ref(1);
+const priority = ref('normal');
 const notes = ref('');
 const busy = ref(false);
 const errors = ref({});
@@ -288,7 +317,9 @@ watch(
             selectedCategory.value = null;
             selectedItemKey.value = '';
             freeTextName.value = '';
+            requestUnlisted.value = false;
             quantity.value = 1;
+            priority.value = 'normal';
             notes.value = '';
             errors.value = {};
             busy.value = false;
@@ -303,8 +334,9 @@ const isCategoryEmpty = computed(() => (selectedCategory.value?.available_item_c
 // True when the category has no item types at all, so there is no name to pick
 // and the end user has to type what they need.
 const isCategoryUncatalogued = computed(() => (selectedCategory.value?.items?.length ?? 0) === 0);
+const isFreeText = computed(() => isCategoryUncatalogued.value || requestUnlisted.value);
 
-const submitLabel = computed(() => (isCategoryEmpty.value ? 'Submit Request for Procurement' : 'Submit Request'));
+const submitLabel = computed(() => (isFreeText.value ? 'Submit Request for Procurement' : 'Submit Request'));
 
 // Name + category + unit, because a name alone is not an identity — the same
 // name can exist under two categories or two units.
@@ -339,13 +371,15 @@ function chooseCategory(category) {
     selectedCategory.value = category;
     selectedItemKey.value = '';
     freeTextName.value = '';
+    requestUnlisted.value = false;
     quantity.value = 1;
+    priority.value = 'normal';
     errors.value = {};
     // Pre-fill the reason only when there is nothing to allocate, so the note
     // explains the situation the end user is actually reporting. The custodian
     // reads this text, so it is written for them. It is a convenience, not an
     // instruction the system parses.
-    notes.value = category.available_item_count > 0
+    notes.value = (category.available_item_count > 0 && !requestUnlisted.value)
         ? ''
         : `No ${category.category_name} items are currently in stock. Requesting these so they can be included in the next procurement cycle.`;
     step.value = 'item';
@@ -357,12 +391,12 @@ async function submit() {
 
     // An uncatalogued category has nothing to pick, so the typed name is the
     // item. It goes through the same endpoint and lands as unmet demand.
-    if (isCategoryUncatalogued.value && !freeTextName.value.trim()) {
+    if (isFreeText.value && !freeTextName.value.trim()) {
         errors.value = { item_name: ['Name the item you need.'] };
         return;
     }
 
-    if (!isCategoryUncatalogued.value && !item) {
+    if (!isFreeText.value && !item) {
         errors.value = { item_name: ['Select an item.'] };
         return;
     }
@@ -381,11 +415,13 @@ async function submit() {
             // placeholder the forecast reader uses for a missing unit.
             unit: item ? item.unit : 'units',
             quantity: Number(quantity.value),
+            priority: priority.value,
             notes: notes.value || null,
         });
         emit('saved');
     } catch (requestError) {
         errors.value = requestError?.response?.data?.errors ?? {};
+        console.error('Request failed:', requestError?.response?.data);
     } finally {
         busy.value = false;
     }

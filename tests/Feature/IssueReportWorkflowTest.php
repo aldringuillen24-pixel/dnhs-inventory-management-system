@@ -751,6 +751,77 @@ test('reporter sees only their incident reports and current lifecycle status', f
         ->assertJsonCount(0, 'incidentReports');
 });
 
+test('reporter can cancel a blotter report before custodian review', function () {
+    $item = makeIssuedItem($this, 'Cancellable Blotter Chair', 1);
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), [
+            'type' => 'damaged',
+            'quantity' => 1,
+            'notes' => 'A leg is cracked.',
+        ]);
+    $report = \App\Models\MaintenanceRecord::firstOrFail();
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.incident-reports.cancel', $report->id))
+        ->assertOk()
+        ->assertJsonPath('incident_status', 'cancelled');
+
+    $this->assertDatabaseHas('maintenance_records', [
+        'id' => $report->id,
+        'reported_by' => $this->endUser->id,
+        'status' => 'cancelled',
+        'incident_status' => 'cancelled',
+    ]);
+    $this->assertDatabaseHas('maintenance_record_events', [
+        'maintenance_record_id' => $report->id,
+        'actor_id' => $this->endUser->id,
+        'event_type' => 'report_cancelled',
+        'from_status' => 'reported',
+        'to_status' => 'cancelled',
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.assigned-items'))
+        ->assertOk()
+        ->assertJsonPath('incidentReports.0.status', 'cancelled')
+        ->assertJsonPath('incidentReports.0.timeline.1.event_type', 'report_cancelled');
+});
+
+test('reporter cannot cancel another user report or a report already under review', function () {
+    $item = makeIssuedItem($this, 'Protected Blotter Chair', 1);
+    $this->actingAs($this->endUser)
+        ->post(route('endUser.inventory.report', $item->item_id), [
+            'type' => 'damaged',
+            'quantity' => 1,
+            'notes' => 'A leg is cracked.',
+        ]);
+    $report = \App\Models\MaintenanceRecord::firstOrFail();
+
+    $otherUser = User::create([
+        'role_id' => Role::where('role_name', 'End User')->firstOrFail()->role_id,
+        'first_name' => 'Other',
+        'last_name' => 'Reporter',
+        'username' => 'issue-cancel-other',
+        'email' => 'issue-cancel-other@example.com',
+        'password' => 'password',
+        'status' => 'active',
+    ]);
+    $this->actingAs($otherUser)
+        ->postJson(route('api.end-user.incident-reports.cancel', $report->id))
+        ->assertNotFound();
+
+    $report->forceFill([
+        'incident_status' => 'under_review',
+        'status' => 'in_progress',
+    ])->save();
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.incident-reports.cancel', $report->id))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('report');
+
+    expect($report->fresh()->incident_status)->toBe('under_review');
+});
+
 test('reporter and custodian can download evidence but other users cannot', function () {
     Storage::fake('local');
     $item = makeIssuedItem($this, 'Evidence Access Chair', 1);

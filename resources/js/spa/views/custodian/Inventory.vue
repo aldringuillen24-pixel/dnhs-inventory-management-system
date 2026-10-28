@@ -412,7 +412,7 @@
                   :class="{ 'bg-emerald-50/40 dark:bg-emerald-950/20': recordGroup?.item_id === row.item_id }"
                 >
                   <!-- Checkbox -->
-                  <td class="px-4 py-2.5">
+                  <td class="px-3 py-1.5">
                     <input
                       :checked="isGroupSelected(row)"
                       type="checkbox"
@@ -423,11 +423,11 @@
                   </td>
 
                   <!-- Item Name + ICS -->
-                  <td class="px-4 py-2.5">
-                    <div class="flex items-center gap-3">
+                  <td class="px-3 py-1.5">
+                    <div class="flex items-center gap-2.5">
                       <!-- Item Icon Badge -->
                       <div
-                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
                         role="img"
                         :aria-label="`${row.item_name} icon`"
                         v-html="itemIconMarkup(row)"
@@ -442,7 +442,7 @@
                         >
                           {{ row.item_name }}
                         </button>
-                        <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <div class="flex flex-wrap items-center gap-x-2 gap-y-0 text-xs">
                           <span
                             v-if="row.ics_no"
                             class="rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
@@ -455,7 +455,7 @@
                             Acquired {{ formatDate(row.date_acquired) }}
                           </span>
                         </div>
-                        <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
                           <button
                             v-if="lifespanRemainingFraction(row) !== null"
                             type="button"
@@ -507,14 +507,14 @@
                   </td>
 
                   <!-- Category -->
-                  <td class="px-4 py-2.5">
-                    <span class="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 dark:bg-white/5 dark:text-gray-300">
+                  <td class="px-3 py-1.5">
+                    <span class="inline-flex items-center gap-1.5 rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-white/5 dark:text-gray-300">
                       {{ row.category?.category_name ?? 'Uncategorized' }}
                     </span>
                   </td>
 
                   <!-- Quantity -->
-                  <td class="px-4 py-2.5 text-right font-bold text-gray-900 dark:text-white">
+                  <td class="px-3 py-1.5 text-right font-bold text-gray-900 dark:text-white">
                     <template v-if="hasIssuedOut(row) && workspace !== 'available' && workspace !== 'all'">
                       <span v-if="workspace !== 'assigned'">Assigned: </span>{{ format(assignedOutQty(row)) }}
                       <span class="text-xs font-normal text-gray-500 dark:text-gray-400 ml-0.5">{{ row.unit }}</span>
@@ -536,22 +536,22 @@
                   </td>
 
                   <!-- Assignee -->
-                  <td v-if="workspace === 'assigned'" class="px-4 py-2.5 text-xs font-medium text-gray-700 dark:text-gray-300">
+                  <td v-if="workspace === 'assigned'" class="px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300">
                     {{ rowAssignees(row) || '—' }}
                   </td>
 
                   <!-- Unit Cost -->
-                  <td class="px-4 py-2.5 text-right font-medium text-gray-600 dark:text-gray-300">
+                  <td class="px-3 py-1.5 text-right font-medium text-gray-600 dark:text-gray-300">
                     ₱{{ money(row.unit_cost) }}
                   </td>
 
                   <!-- Total Cost -->
-                  <td class="px-4 py-2.5 text-right font-semibold text-gray-900 dark:text-white">
+                  <td class="px-3 py-1.5 text-right font-semibold text-gray-900 dark:text-white">
                     ₱{{ money(row.total_cost) }}
                   </td>
 
                   <!-- Status (disposed workspace shows the disposal reason instead) -->
-                  <td class="px-4 py-2.5">
+                  <td class="px-3 py-1.5">
                     <div v-if="workspace === 'disposed'" class="max-w-64">
                       <p v-if="disposalReason(row)" class="truncate text-xs text-gray-700 dark:text-gray-300" :title="disposalReason(row)">
                         {{ disposalReason(row) }}
@@ -566,7 +566,7 @@
                   </td>
 
                   <!-- Actions: display-only under All Inventory -->
-                  <td v-if="workspace !== 'all'" class="px-4 py-2.5 text-right">
+                  <td v-if="workspace !== 'all'" class="px-3 py-1.5 text-right">
                     <div class="inline-flex items-center gap-1.5">
                       <!-- Details Toggle -->
                       <button
@@ -699,7 +699,7 @@
           <div class="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 p-3 dark:border-gray-800">
             <div>
               <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
-                {{ workspace === 'investigations' ? 'Lost / Stolen Investigations' : 'Incident Reports' }}
+                {{ workspace === 'investigations' ? 'Lost / Stolen Investigations' : 'Blooter Report' }}
               </h2>
               <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                 {{ displayedIncidentQueue.length }} {{ workspace === 'investigations' ? 'active investigation' : 'open report' }}{{ displayedIncidentQueue.length === 1 ? '' : 's' }}
@@ -725,10 +725,10 @@
               </svg>
             </div>
             <p class="text-sm font-semibold text-gray-800 dark:text-white">
-              {{ workspace === 'investigations' ? 'No active investigations' : 'No incident reports found' }}
+              {{ workspace === 'investigations' ? 'No active investigations' : 'No blooter reports found' }}
             </p>
             <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-              {{ workspace === 'investigations' ? 'Active Lost or Stolen investigations will appear here.' : 'Submitted incident reports will appear here.' }}
+              {{ workspace === 'investigations' ? 'Active Lost or Stolen investigations will appear here.' : 'Submitted blooter reports will appear here.' }}
             </p>
           </div>
           <div v-else-if="displayedIncidentQueue.length > 0" class="grid min-h-0 flex-1 grid-cols-1 content-start gap-3 overflow-y-auto p-3 md:grid-cols-2 xl:grid-cols-4">
@@ -992,7 +992,7 @@
                     :class="incidentDetailsReport.timeline.length >= 3 ? 'max-h-48 overflow-y-auto pr-2' : ''"
                   >
                     <li
-                      v-for="(event, index) in incidentDetailsReport.timeline"
+                      v-for="(event, index) in incidentTimeline(incidentDetailsReport)"
                       :key="event.id ?? `${incidentDetailsReport.id}-${index}`"
                       class="relative pl-6"
                     >
@@ -1004,7 +1004,7 @@
                       <span
                         aria-hidden="true"
                         class="absolute left-0 top-1 h-3 w-3 rounded-full border-2 ring-2 ring-white dark:ring-gray-900"
-                        :class="index === incidentDetailsReport.timeline.length - 1
+                        :class="index === 0
                           ? 'border-emerald-600 bg-white dark:border-emerald-400 dark:bg-gray-900'
                           : 'border-emerald-600 bg-emerald-600 dark:border-emerald-400 dark:bg-emerald-400'"
                       />
@@ -1142,7 +1142,7 @@
             </div>
             <ol v-if="report.timeline.length" class="max-h-32 space-y-0 overflow-y-auto border-t border-gray-100 pt-2 pr-1 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
               <li
-                v-for="(event, index) in report.timeline"
+                v-for="(event, index) in incidentTimeline(report)"
                 :key="event.id ?? `${report.id}-${index}`"
                 class="relative flex gap-2.5 pb-3 last:pb-0"
               >
@@ -2994,7 +2994,7 @@ const tabs = computed(() => [
   ...STATUSES.map((status) => ({ key: status, label: STATUS_LABELS[status], count: Number(counts.value?.[status] ?? 0) })),
   {
     key: 'incident_reports',
-    label: 'Incident Reports',
+    label: 'Blooter Report',
     count: reviewIncidentQueue.value.length,
   },
   {
@@ -3978,6 +3978,13 @@ function incidentEventLabel(event) {
     return `Status changed to ${event.to_status.replaceAll('_', ' ')}`;
   }
   return String(event.event_type ?? 'Incident activity').replaceAll('_', ' ');
+}
+
+function incidentTimeline(report) {
+  return [...(report.timeline ?? [])].sort((a, b) => {
+    const timeDifference = Date.parse(b.created_at) - Date.parse(a.created_at);
+    return timeDifference || Number(b.id ?? 0) - Number(a.id ?? 0);
+  });
 }
 
 function incidentRelatedRecords(event) {

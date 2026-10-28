@@ -20,6 +20,7 @@ class MaintenanceRecord extends Model
         'processing_disposal',
         'under_investigation',
         'resolved',
+        'cancelled',
     ];
 
     protected $fillable = [

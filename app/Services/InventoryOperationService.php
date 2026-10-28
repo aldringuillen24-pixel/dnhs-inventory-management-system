@@ -904,6 +904,7 @@ class InventoryOperationService
         }
 
         $inventoryItems = Inventory::query()
+            ->with('category')
             ->whereIn('item_id', $selectedInventoryIds)
             ->orderBy('item_id')
             ->lockForUpdate()
@@ -911,11 +912,6 @@ class InventoryOperationService
             ->keyBy('item_id');
 
         if ($inventoryItems->count() !== $selectedInventoryIds->count()) {
-            return 'invalid_allocation';
-        }
-
-        $category = Category::find($assignmentRequest->requested_category_id);
-        if (! $category) {
             return 'invalid_allocation';
         }
 
@@ -931,6 +927,11 @@ class InventoryOperationService
                 return 'invalid_allocation';
             }
 
+            $category = $item->category;
+            if (! $category) {
+                return 'invalid_allocation';
+            }
+
             if (
                 $item->status !== 'available'
                 || (int) $item->quantity < 1
@@ -943,9 +944,6 @@ class InventoryOperationService
             }
         }
 
-        if ($category->requires_serial_number && $selectedInventoryIds->count() !== (int) $assignmentRequest->quantity) {
-            return 'invalid_allocation';
-        }
         if ($inventoryItems->sum('quantity') < (int) $assignmentRequest->quantity) {
             return 'insufficient';
         }
@@ -958,7 +956,7 @@ class InventoryOperationService
                 break;
             }
 
-            $quantity = $category->requires_serial_number
+            $quantity = $item->category->requires_serial_number
                 ? 1
                 : min($remainingQuantity, (int) $item->quantity);
             $allocationPlan[] = [$item, $quantity];

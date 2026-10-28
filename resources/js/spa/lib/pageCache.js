@@ -51,7 +51,7 @@ export async function loadCachedPage({
 
   if (cached && !background) {
     applyData(cached);
-    onDone(true);
+    if (typeof onDone === 'function') onDone(true);
     loadCachedPage({
       page,
       params,
@@ -81,7 +81,7 @@ export async function loadCachedPage({
       onError(requestError);
     }
   } finally {
-    if (!background) {
+    if (!background && typeof onDone === 'function') {
       onDone(false);
     }
   }

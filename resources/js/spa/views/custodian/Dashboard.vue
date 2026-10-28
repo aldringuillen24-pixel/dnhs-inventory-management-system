@@ -34,13 +34,6 @@
             </span>
           </RouterLink>
 
-          <RouterLink
-            to="/reports"
-            class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:ring-offset-gray-900"
-          >
-            <LucideIcon :icon="ChartColumn" class="h-4 w-4 text-gray-500 dark:text-gray-400" />
-            Reports
-          </RouterLink>
         </nav>
       </div>
     </div>

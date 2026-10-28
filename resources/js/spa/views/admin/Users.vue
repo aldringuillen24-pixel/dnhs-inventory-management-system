@@ -23,8 +23,32 @@
         <MetricCard compact dense micro :loading="firstLoading" title="Inactive" :value="format(metrics.inactive)" subtitle="Inactive accounts" />
       </div>
 
-      <div class="mt-4 rounded-md border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-        <div class="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+      <div class="mt-4 grid gap-4 xl:grid-cols-[320px_1fr]">
+        <div class="rounded-md border border-amber-200 bg-amber-50/40 p-3 xl:sticky xl:top-4 dark:border-amber-500/30 dark:bg-amber-500/5">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-gray-800 dark:text-white/90">Pending registrations</h2>
+            <button type="button" class="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300" :disabled="pendingLoading" @click="loadPending">{{ pendingLoading ? 'Loading…' : 'Refresh' }}</button>
+          </div>
+          <div v-if="pendingLoading" class="mt-2 space-y-2">
+            <div v-for="row in 3" :key="row" class="h-12 animate-pulse rounded-md bg-white/60 dark:bg-gray-800/60" />
+          </div>
+          <div v-else-if="pendingUsers.length" class="mt-2 max-h-[34rem] space-y-2 overflow-y-auto">
+            <div v-for="u in pendingUsers" :key="u.id" class="flex items-center justify-between gap-2 rounded-md border border-gray-200 bg-white p-2 text-xs dark:border-gray-700 dark:bg-gray-800">
+              <div class="min-w-0">
+                <p class="truncate font-medium text-gray-800 dark:text-white/90">{{ displayName(u) }}</p>
+                <p class="truncate text-gray-500">@{{ u.username }} · {{ u.email }}</p>
+              </div>
+              <div class="flex shrink-0 gap-2">
+                <button type="button" class="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700" @click="approvePending(u)">Approve</button>
+                <button type="button" class="rounded-md border border-error-200 bg-white px-2.5 py-1 text-xs font-semibold text-error-600 hover:bg-error-50 dark:border-error-800 dark:bg-gray-800 dark:text-error-400" @click="rejectPending(u)">Reject</button>
+              </div>
+            </div>
+          </div>
+          <p v-else class="mt-2 text-xs text-gray-500">No pending registrations.</p>
+        </div>
+
+        <div class="rounded-md border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          <div class="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
           <input v-model="search" type="search" placeholder="Search name or username…" class="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 sm:max-w-xs" />
           <select v-model="roleFilter" class="w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 sm:max-w-xs">
             <option value="">All roles</option>
@@ -85,6 +109,7 @@
         <div class="flex items-center justify-end border-t border-gray-200 p-3 dark:border-gray-800">
           <Pagination :current-page="paginator.current_page ?? 1" :last-page="paginator.last_page ?? 1" :from="paginator.from" :to="paginator.to" :total="paginator.total ?? 0" @page="goToPage" />
         </div>
+      </div>
       </div>
     </template>
 
@@ -248,6 +273,8 @@ const page = ref(1);
 const users = ref([]);
 const roles = ref([]);
 const metrics = ref({});
+const pendingUsers = ref([]);
+const pendingLoading = ref(true);
 const paginator = ref({ data: [] });
 
 const createAccountOpen = ref(false);
@@ -285,6 +312,47 @@ function format(value) {
 function displayName(user) {
   const full = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
   return full || user.username || 'Unknown';
+}
+
+async function loadPending() {
+  pendingLoading.value = true;
+  try {
+    const { data } = await api.get('/admin/pending-users');
+    pendingUsers.value = data.users?.data ?? data.users ?? [];
+  } catch (e) {
+    pendingUsers.value = [];
+  } finally {
+    pendingLoading.value = false;
+  }
+}
+
+async function approvePending(user) {
+  working.value = true;
+  try {
+    await api.post(`/admin/users/${user.id}/approve`, {}, { skipToast: true });
+    pendingUsers.value = pendingUsers.value.filter((u) => u.id !== user.id);
+    toast.success('Approved', 'User approved successfully.');
+    load();
+  } catch (e) {
+    toast.error('Error', e?.response?.data?.message ?? 'Could not approve user.');
+  } finally {
+    working.value = false;
+  }
+}
+
+async function rejectPending(user) {
+  const reason = window.prompt('Rejection reason (optional):') ?? '';
+  working.value = true;
+  try {
+    await api.post(`/admin/users/${user.id}/reject`, { reason }, { skipToast: true });
+    pendingUsers.value = pendingUsers.value.filter((u) => u.id !== user.id);
+    toast.success('Rejected', 'User rejected.');
+    load();
+  } catch (e) {
+    toast.error('Error', e?.response?.data?.message ?? 'Could not reject user.');
+  } finally {
+    working.value = false;
+  }
 }
 
 async function load(options = {}) {
@@ -501,5 +569,8 @@ async function doDelete() {
   }
 }
 
-onMounted(() => load());
+onMounted(() => {
+  load();
+  loadPending();
+});
 </script>

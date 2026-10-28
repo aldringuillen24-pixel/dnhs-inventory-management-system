@@ -54,52 +54,60 @@
           Profile editing is managed by your system administrator.
         </div>
 
-        <form v-else class="space-y-3" @submit.prevent="$emit('save')">
-          <div class="space-y-2">
-            <div v-if="needsNameFields" class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+        <form v-else class="space-y-4" @submit.prevent="$emit('save-profile')">
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div v-if="needsNameFields" class="grid gap-0 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
               <label class="compact-label sm:mb-0" for="profile-first">First name</label>
               <input id="profile-first" :value="form.first_name" required maxlength="255" autocomplete="given-name" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('first_name', $event.target.value)" />
               <FieldError :errors="errors" field="first_name" />
             </div>
-            <div v-if="needsNameFields" class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+            <div v-if="needsNameFields" class="grid gap-0 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
               <label class="compact-label sm:mb-0" for="profile-last">Last name</label>
               <input id="profile-last" :value="form.last_name" maxlength="255" autocomplete="family-name" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('last_name', $event.target.value)" />
               <FieldError :errors="errors" field="last_name" />
             </div>
-            <div v-if="needsUsername" class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+            <div v-if="needsUsername" class="grid gap-0 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
               <label class="compact-label sm:mb-0" for="profile-username">Username</label>
               <input id="profile-username" :value="form.username" required maxlength="255" autocomplete="username" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('username', $event.target.value)" />
               <FieldError :errors="errors" field="username" />
             </div>
-            <div class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+            <div class="grid gap-0 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
               <label class="compact-label sm:mb-0" for="profile-email">Email address</label>
               <input id="profile-email" :value="form.email" type="email" required maxlength="255" autocomplete="email" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('email', $event.target.value)" />
               <FieldError :errors="errors" field="email" />
             </div>
-            <div class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+            <div class="grid gap-0 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
               <label class="compact-label sm:mb-0" for="profile-building">Building</label>
               <input id="profile-building" :value="form.building" maxlength="255" autocomplete="off" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('building', $event.target.value)" />
               <FieldError :errors="errors" field="building" />
             </div>
-            <div class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+            <div class="grid gap-0 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
               <label class="compact-label sm:mb-0" for="profile-room">Room</label>
               <input id="profile-room" :value="form.room" maxlength="255" autocomplete="off" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('room', $event.target.value)" />
               <FieldError :errors="errors" field="room" />
             </div>
           </div>
 
+          <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-white/5">
+            <button type="submit" class="compact-btn compact-btn--primary disabled:cursor-not-allowed disabled:opacity-60" :disabled="profileWorking">
+              {{ profileWorking ? 'Saving profile…' : 'Save profile' }}
+            </button>
+          </div>
+        </form>
+
+        <form v-if="editable" class="mt-4 space-y-3" @submit.prevent="$emit('save-password')">
           <div class="border-t border-gray-100 pt-4 dark:border-white/5">
             <div class="mb-3">
               <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Change password</h3>
               <p class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">Leave these fields blank to keep your current password.</p>
             </div>
             <div class="space-y-2">
-              <div class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+              <div class="grid gap-0 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
                 <label class="compact-label sm:mb-0" for="profile-password">New password</label>
                 <input id="profile-password" :value="form.password" type="password" minlength="8" autocomplete="new-password" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('password', $event.target.value)" />
                 <FieldError :errors="errors" field="password" />
               </div>
-              <div v-if="needsPasswordConfirmation" class="grid gap-1.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
+              <div v-if="needsPasswordConfirmation" class="grid gap-0 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center sm:gap-2">
                 <label class="compact-label sm:mb-0" for="profile-password-confirm">Confirm new password</label>
                 <input id="profile-password-confirm" :value="form.password_confirmation" type="password" autocomplete="new-password" class="compact-field focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" @input="updateField('password_confirmation', $event.target.value)" />
               </div>
@@ -107,12 +115,8 @@
           </div>
 
           <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-white/5">
-            <button
-              type="submit"
-              class="compact-btn compact-btn--primary disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="working"
-            >
-              {{ working ? 'Saving changes…' : 'Save changes' }}
+            <button type="submit" class="compact-btn compact-btn--primary disabled:cursor-not-allowed disabled:opacity-60" :disabled="passwordWorking">
+              {{ passwordWorking ? 'Changing password…' : 'Change password' }}
             </button>
           </div>
         </form>
@@ -135,10 +139,11 @@ const props = defineProps({
   needsPasswordConfirmation: { type: Boolean, default: true },
   form: { type: Object, required: true },
   errors: { type: Object, default: () => ({}) },
-  working: { type: Boolean, default: false },
+  profileWorking: { type: Boolean, default: false },
+  passwordWorking: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['save', 'update-field']);
+const emit = defineEmits(['save', 'save-profile', 'save-password', 'update-field']);
 
 const initials = computed(() => {
   const name = props.displayName.trim();

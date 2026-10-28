@@ -491,6 +491,21 @@ test('fulfilling a request saves its release slip as a draft before inventory is
         ->assertOk()
         ->assertJsonPath('draftRequests.0.id', $request->id);
 
+    $inventoryRow = collect($this->actingAs($this->custodian)
+        ->getJson(route('api.custodian.inventory', ['workspace' => 'available']))
+        ->assertOk()
+        ->json('inventoryItems'))
+        ->firstWhere('item_name', 'Drafted Request Chairs');
+    expect($inventoryRow['pending_hold'])->toBe(2)
+        ->and($inventoryRow['free_quantity'])->toBe(1);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.requests'))
+        ->assertOk()
+        ->assertJsonPath('myRequests.0.id', $request->id)
+        ->assertJsonPath('myRequests.0.status', 'draft')
+        ->assertJsonPath('myRequests.0.requested_item_name', 'Drafted Request Chairs');
+
     $this->actingAs($this->custodian)
         ->postJson(route('api.custodian.drafts.allocate', $response->json('draft_id')))
         ->assertOk();
@@ -498,6 +513,12 @@ test('fulfilling a request saves its release slip as a draft before inventory is
     expect($draft->fresh()->status)->toBe('approved')
         ->and((int) $item->fresh()->quantity)->toBe(1)
         ->and((int) Transaction::query()->where('item_id', $item->item_id)->value('quantity'))->toBe(2);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.requests'))
+        ->assertOk()
+        ->assertJsonPath('myRequests.0.id', $request->id)
+        ->assertJsonPath('myRequests.0.status', 'approved');
 });
 
 test('direct inventory requests can also be staged as drafts before allocation', function () {

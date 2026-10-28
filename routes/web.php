@@ -212,6 +212,7 @@ Route::middleware(['auth', 'role:End User'])->prefix('end-user')->name('endUser.
     Route::post('/inventory/{itemId}/request-return', [EndUserController::class, 'requestReturn'])->name('inventory.request-return');
     Route::post('/inventory/{itemId}/cancel-return', [EndUserController::class, 'cancelReturnRequest'])->name('inventory.cancel-return');
     Route::post('/inventory/{itemId}/report', [EndUserController::class, 'reportIssue'])->name('inventory.report');
+    Route::post('/incident-reports/{id}/cancel', [EndUserController::class, 'cancelIncidentReport'])->name('incident-reports.cancel');
 
     Route::get('/profile', fn () => redirect('/spa/profile'))->name('profile');
 
@@ -301,6 +302,7 @@ Route::get('/api/me', function (Request $request) {
 Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group(function () {
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
     Route::patch('/notifications/{notificationId}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
+    Route::patch('/profile/password', [UserController::class, 'updateOwnPassword'])->name('profile.password');
 
     Route::get('/incident-evidence/{evidence}', [EndUserController::class, 'downloadIncidentEvidence'])
         ->name('incident-evidence.download');
@@ -408,6 +410,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/inventory/{itemId}/cancel-return', [EndUserController::class, 'cancelReturnRequest'])->name('inventory.cancel-return');
         Route::post('/inventory/{itemId}/report', [EndUserController::class, 'reportIssue'])->name('inventory.report');
         Route::post('/incident-reports/{id}/information-response', [EndUserController::class, 'respondToIncidentInformation'])->name('incident-reports.respond');
+        Route::post('/incident-reports/{id}/cancel', [EndUserController::class, 'cancelIncidentReport'])->name('incident-reports.cancel');
         Route::patch('/profile', [EndUserController::class, 'updateProfile'])->name('profile.update');
     });
 
@@ -466,6 +469,9 @@ $spaShell = fn () => view('spa');
 // Guest entry point for the Vue SPA sign-in view. Registered before the
 // authenticated wildcards below so guests can reach it.
 Route::get('/spa/signin', $spaShell)->name('spa.signin');
+
+// Guest entry point for the Vue SPA account-access information view.
+Route::get('/spa/register', $spaShell)->name('spa.register');
 
 // Guest entry point for the Vue SPA password-reset view.
 Route::get('/spa/forgot-password', $spaShell)->name('spa.forgot-password');
