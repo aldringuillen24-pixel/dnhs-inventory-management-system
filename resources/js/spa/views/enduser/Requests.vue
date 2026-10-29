@@ -21,7 +21,35 @@
       <button type="button" class="compact-btn compact-btn--sm compact-btn--outline" @click="load">Retry</button>
     </div>
 
-    <div v-else class="compact-panel">
+    <div v-else class="compact-panel !p-0">
+      <div class="relative z-0 flex gap-1.5 overflow-x-auto border-b border-gray-200/80 bg-gray-50/50 p-2 dark:border-gray-800 dark:bg-gray-900/50" role="tablist" aria-label="My and incoming requests">
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'my-requests'"
+          class="relative z-10 inline-flex min-h-[2rem] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
+          :class="activeTab === 'my-requests'
+            ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+            : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
+          @click="activeTab = 'my-requests'"
+        >
+          My Requests
+          <span class="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-white/10 dark:text-gray-300">{{ activeMyRequestsCount }}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'incoming-requests'"
+          class="relative z-10 inline-flex min-h-[2rem] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs font-semibold leading-none transition-all"
+          :class="activeTab === 'incoming-requests'
+            ? 'bg-white text-emerald-900 shadow-sm ring-1 ring-emerald-500/20 dark:bg-gray-800 dark:text-emerald-300 dark:ring-emerald-500/30'
+            : 'text-gray-600 hover:bg-white/60 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'"
+          @click="activeTab = 'incoming-requests'"
+        >
+          Incoming Requests
+          <span class="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-white/10 dark:text-gray-300">{{ activeIncomingCount }}</span>
+        </button>
+      </div>
       <div class="relative z-0 flex gap-1.5 overflow-x-auto border-b border-gray-200/80 bg-gray-50/50 p-2 dark:border-gray-800 dark:bg-gray-900/50">
         <button
           type="button"
@@ -66,44 +94,61 @@
           <option v-for="option in statusOptions" :key="option" :value="option">{{ option }}</option>
         </select>
         <span class="ml-auto text-xs text-gray-500 dark:text-gray-400">
-          Showing {{ filteredMyRequests.length }} of {{ myRequests.length }}
+          Showing {{ activeTab === 'incoming-requests' ? filteredIncomingRequests.length : filteredMyRequests.length }} of {{ activeTab === 'incoming-requests' ? incomingRequests.length : myRequests.length }}
         </span>
       </div>
 
-      <div class="max-h-[28rem] overflow-x-auto overflow-y-auto">
-        <table class="w-full min-w-[56rem] text-left text-xs">
+      <Transition name="request-tab" mode="out-in">
+        <div :key="`${activeTab}-${requestView}`" class="max-h-[28rem] overflow-x-auto overflow-y-auto">
+          <table class="w-full min-w-[56rem] text-left text-xs">
           <thead class="sticky top-0 z-10 bg-white dark:bg-gray-900">
             <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-gray-800/40 dark:text-gray-400">
               <th class="px-4 py-3.5">Item Requested</th>
+              <th class="px-4 py-3.5">Request Type</th>
               <th class="px-4 py-3.5">Qty</th>
               <th class="px-4 py-3.5">Requested On</th>
               <th class="px-4 py-3.5">Status</th>
-              <th class="px-4 py-3.5">Note</th>
+              <th class="px-4 py-3.5">{{ activeTab === 'incoming-requests' ? 'From' : 'Note' }}</th>
               <th class="px-4 py-3.5 text-center">Actions</th>
             </tr>
           </thead>
           <tbody v-if="loading" aria-hidden="true">
             <tr v-for="row in 5" :key="row">
-              <td v-for="column in 6" :key="column" class="px-4 py-3.5">
+              <td v-for="column in 7" :key="column" class="px-4 py-3.5">
                 <div class="compact-skeleton h-3 w-3/4" />
               </td>
             </tr>
           </tbody>
           <tbody v-else>
-            <tr v-for="request in filteredMyRequests" :key="request.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+            <tr v-for="request in (activeTab === 'incoming-requests' ? filteredIncomingRequests : filteredMyRequests)" :key="request.id" class="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
               <td class="px-4 py-2">
-                <div class="font-semibold text-gray-900 dark:text-white">{{ request.requested_item_name ?? request.item?.item_name ?? 'Unknown item' }}</div>
-                <span v-if="request.item?.inventory_item_no" class="text-[11px] text-gray-500 dark:text-gray-400">{{ request.item.inventory_item_no }}</span>
-                <span v-else-if="request.requested_category" class="text-[11px] text-gray-500 dark:text-gray-400">{{ request.requested_category.category_name }}</span>
+                <div class="flex items-start gap-2">
+                  <LucideIcon :icon="requestItemIcon(request)" class="mt-0.5 h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                  <div class="min-w-0">
+                    <div class="font-semibold text-gray-900 dark:text-white">{{ request.requested_item_name ?? request.item?.item_name ?? 'Unknown item' }}</div>
+                    <span v-if="request.item?.inventory_item_no" class="text-[11px] text-gray-500 dark:text-gray-400">{{ request.item.inventory_item_no }}</span>
+                    <span v-else-if="request.requested_category" class="text-[11px] text-gray-500 dark:text-gray-400">{{ request.requested_category.category_name }}</span>
+                  </div>
+                </div>
+                <div v-if="activeTab === 'my-requests' && requestType(request) === 'Item Request'" class="mt-1">
+                  <span
+                    class="inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold"
+                    :class="request.priority === 'urgent'
+                      ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300'
+                      : request.priority === 'needed_soon'
+                        ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+                        : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'"
+                  >
+                    {{ request.priority === 'urgent' ? 'Urgent' : request.priority === 'needed_soon' ? 'Needed soon' : 'Normal' }}
+                  </span>
+                </div>
+              </td>
+              <td class="px-4 py-2">
                 <span
-                  class="ml-1 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold"
-                  :class="request.priority === 'urgent'
-                    ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300'
-                    : request.priority === 'needed_soon'
-                      ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
-                      : 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'"
+                  class="inline-flex items-center rounded-md px-2 py-1 text-[11px] font-semibold"
+                  :class="activeTab === 'incoming-requests' ? incomingRequestTypeClass(request) : requestTypeClass(request)"
                 >
-                  {{ request.priority === 'urgent' ? 'Urgent' : request.priority === 'needed_soon' ? 'Needed soon' : 'Normal' }}
+                  {{ activeTab === 'incoming-requests' ? incomingRequestType(request) : requestType(request) }}
                 </span>
               </td>
               <td class="px-4 py-2 font-bold text-gray-900 dark:text-white">{{ request.quantity }}</td>
@@ -117,26 +162,65 @@
                 </span>
                 <StatusBadge v-else :status="request.status" compact />
               </td>
-              <td class="px-4 py-2 text-xs text-gray-500 dark:text-gray-400">{{ request.status === 'cancelled' ? request.cancellation_reason || '—' : request.notes || '—' }}</td>
+              <td class="px-4 py-2 text-xs text-gray-500 dark:text-gray-400">
+                <template v-if="activeTab === 'incoming-requests'">
+                  {{ senderName(request) }}
+                </template>
+                <template v-else>
+                  {{ request.status === 'cancelled' ? request.cancellation_reason || '—' : request.notes || '—' }}
+                </template>
+              </td>
               <td class="px-4 py-2 text-center">
+                <template v-if="activeTab === 'my-requests'">
+                  <button
+                    v-if="['waiting for approval', 'waiting for procurement', 'waiting for transfer approval'].includes(request.status) || (request.status === 'waiting for custodian approval' && ['End User', 'Property Custodian'].includes(request.target_user?.role?.role_name))"
+                    type="button"
+                    class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-rose-950/30"
+                    :disabled="cancelling"
+                    @click="cancelTarget = request"
+                  >
+                    Cancel
+                  </button>
+                  <span v-else class="text-xs text-gray-400">—</span>
+                </template>
+                <div v-else-if="requestView === 'active' && request.status === 'waiting for approval' && !request.source_assignment_id" class="flex items-center justify-center gap-1.5">
+                  <button
+                    type="button"
+                    class="rounded-md bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                    :disabled="workingId === request.id"
+                    @click="respond(request.id, 'accept')"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-md border border-rose-200 px-2 py-1 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                    :disabled="workingId === request.id"
+                    @click="respond(request.id, 'decline')"
+                  >
+                    Decline
+                  </button>
+                </div>
                 <button
-                  v-if="['waiting for approval', 'waiting for procurement', 'waiting for transfer approval'].includes(request.status) || (request.status === 'waiting for custodian approval' && ['End User', 'Property Custodian'].includes(request.target_user?.role?.role_name))"
+                  v-else-if="requestView === 'active'"
                   type="button"
-                  class="inline-flex min-w-16 items-center justify-center whitespace-nowrap rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-rose-950/30"
-                  :disabled="cancelling"
-                  @click="cancelTarget = request"
+                  class="inline-flex min-w-24 items-center justify-center whitespace-nowrap rounded-md border border-emerald-200 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                  :disabled="workingId === request.id || !canConfirmReceipt(request) || Boolean(request.received_at)"
+                  :title="request.received_at ? 'Receipt confirmed' : canConfirmReceipt(request) ? 'Confirm receipt' : 'Available after custodian allocation or transfer approval'"
+                  @click="confirmReceipt(request)"
                 >
-                  Cancel
+                  {{ request.received_at ? 'Received' : workingId === request.id ? 'Saving…' : 'Mark Received' }}
                 </button>
                 <span v-else class="text-xs text-gray-400">—</span>
               </td>
             </tr>
-            <tr v-if="!filteredMyRequests.length">
-              <td colspan="6" class="px-4 py-8 text-center text-xs text-gray-500">{{ myRequests.length ? 'No requests match the current filters.' : (requestView === 'active' ? 'No active requests.' : 'No history yet.') }}</td>
+            <tr v-if="!(activeTab === 'incoming-requests' ? filteredIncomingRequests : filteredMyRequests).length">
+              <td colspan="7" class="px-4 py-8 text-center text-xs text-gray-500">{{ activeTab === 'incoming-requests' ? (incomingRequests.length ? 'No incoming requests match the current filters.' : (requestView === 'active' ? 'No incoming requests.' : 'No incoming request history.')) : (myRequests.length ? 'No requests match the current filters.' : (requestView === 'active' ? 'No active requests.' : 'No history yet.')) }}</td>
             </tr>
           </tbody>
-        </table>
-      </div>
+          </table>
+        </div>
+      </Transition>
     </div>
 
     <RequestItemModal :open="requestOpen" :categories="categories" @close="requestOpen = false" @saved="onRequestSaved" />
@@ -159,9 +243,24 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import {
+  Armchair,
+  BookOpen,
+  Dumbbell,
+  FileStack,
+  FlaskConical,
+  Monitor,
+  Package,
+  Printer,
+  Projector,
+  ShieldCheck,
+  Wrench,
+  Zap,
+} from 'lucide';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
 import { useToastStore } from '../../stores/toast';
+import LucideIcon from '../../components/ui/data-display/LucideIcon.vue';
 import StatusBadge from '../../components/ui/data-display/StatusBadge.vue';
 import ConfirmDialog from '../../components/ui/dialogs/ConfirmDialog.vue';
 import RequestItemModal from './RequestItemModal.vue';
@@ -192,6 +291,72 @@ const statusOptions = computed(() => [...new Set(
     .filter(Boolean),
 )].sort());
 
+const activeMyRequestsCount = computed(() =>
+  myRequests.value.filter((request) => activeStatuses.includes(request.status)).length,
+);
+const activeIncomingCount = computed(() =>
+  incomingRequests.value.filter((request) => activeStatuses.includes(request.status)).length,
+);
+
+function requestItemIcon(request) {
+  const category = String(
+    request.requested_category?.category_name
+      ?? request.requestedCategory?.category_name
+      ?? request.item?.category?.category_name
+      ?? '',
+  ).toLowerCase();
+  const itemName = String(request.requested_item_name ?? request.item?.item_name ?? '').toLowerCase();
+  if (itemName.includes('projector') || category.includes('audio-visual')) return Projector;
+  if (category.includes('classroom') || category.includes('library') || category.includes('resource')) return BookOpen;
+  if (category.includes('cleaning') || category.includes('sanitation') || category.includes('maintenance')) return Wrench;
+  if (category.includes('consumable') || category.includes('office suppl')) return FileStack;
+  if (category.includes('electrical')) return Zap;
+  if (category.includes('furniture')) return Armchair;
+  if (category.includes('ict') || category.includes('computer')) return Monitor;
+  if (category.includes('laboratory') || category.includes('science')) return FlaskConical;
+  if (category.includes('office')) return Printer;
+  if (category.includes('safety') || category.includes('security') || category.includes('emergency')) return ShieldCheck;
+  if (category.includes('sports')) return Dumbbell;
+  return Package;
+}
+
+function requestType(request) {
+  if (request.source_assignment_id) return 'Transfer';
+  if (
+    request.item_id
+    && !String(request.requested_item_name ?? '').trim()
+    && request.target_user?.role?.role_name === 'Property Custodian'
+  ) {
+    return 'Return';
+  }
+  return 'Item Request';
+}
+
+function requestTypeClass(request) {
+  const type = requestType(request);
+  if (type === 'Return') return 'bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300';
+  if (type === 'Transfer') return 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300';
+  return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300';
+}
+
+function incomingRequestType(request) {
+  return request.source_assignment_id
+    || ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'].includes(request.status)
+    ? 'Transfer'
+    : 'Custodian Assignment';
+}
+
+function incomingRequestTypeClass(request) {
+  return incomingRequestType(request) === 'Transfer'
+    ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'
+    : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300';
+}
+
+function canConfirmReceipt(request) {
+  return ['approved', 'accepted'].includes(String(request.status ?? '').toLowerCase())
+    && Boolean(request.transaction_id);
+}
+
 function requestMatches(request) {
   if (filterStatus.value && request.status !== filterStatus.value) {
     return false;
@@ -221,7 +386,11 @@ const filteredMyRequests = computed(() => myRequests.value.filter((request) => {
   if (requestView.value === 'history' && !historyStatuses.includes(request.status)) return false;
   return requestMatches(request);
 }));
-const filteredIncomingRequests = computed(() => incomingRequests.value.filter(requestMatches));
+const filteredIncomingRequests = computed(() => incomingRequests.value.filter((request) => {
+  if (requestView.value === 'active' && !activeStatuses.includes(request.status)) return false;
+  if (requestView.value === 'history' && !historyStatuses.includes(request.status)) return false;
+  return requestMatches(request);
+}));
 
 const pendingStatuses = ['waiting for approval', 'waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'];
 
@@ -258,7 +427,7 @@ async function load(options = {}) {
       pendingIncoming.value = data.pendingIncomingCount ?? 0;
 
       if (firstLoading.value && pendingIncoming.value > 0) {
-        // incoming requests tab removed
+        activeTab.value = 'incoming-requests';
       }
     },
     onStart: () => {
@@ -286,6 +455,25 @@ async function respond(id, action) {
     if (requestError?.response?.status === 422) {
       toast.error('Error', requestError?.response?.data?.message ?? 'Could not process the response.');
     }
+  } finally {
+    workingId.value = null;
+  }
+}
+
+async function confirmReceipt(request) {
+  if (!canConfirmReceipt(request) || request.received_at || workingId.value !== null) return;
+  workingId.value = request.id;
+
+  try {
+    await api.post(`/end-user/requests/${request.id}/received`);
+    toast.success('Receipt confirmed', 'The item has been marked as received.');
+    forgetPageCache();
+    await load();
+  } catch (requestError) {
+    toast.error(
+      'Could not confirm receipt',
+      requestError?.response?.data?.message ?? 'Refresh the request and try again.',
+    );
   } finally {
     workingId.value = null;
   }
@@ -325,3 +513,30 @@ async function cancelRequest() {
 
 onMounted(() => load());
 </script>
+
+<style scoped>
+.request-tab-enter-active,
+.request-tab-leave-active {
+  will-change: opacity, transform;
+  transition:
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.request-tab-enter-from {
+  opacity: 0;
+  transform: translateY(6px) scale(0.995);
+}
+
+.request-tab-leave-to {
+  opacity: 0;
+  transform: translateY(-3px) scale(0.995);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .request-tab-enter-active,
+  .request-tab-leave-active {
+    transition: none;
+  }
+}
+</style>

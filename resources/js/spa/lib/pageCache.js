@@ -6,12 +6,18 @@ import { ref } from 'vue';
 // - instant back: remembered copies render immediately, then verify quietly
 // - forget: mutations wipe everything; unmount wipes the page
 // - silent verify: background failures never surface; late responses that
-//   arrived after the user moved on are discarded
+//   arrived after the user moved on or the cache was invalidated are discarded
 // The server stays the source of truth. Nothing here persists to storage.
 const entries = ref(new Map());
+let globalGeneration = 0;
+const pageGenerations = new Map();
 
 function buildKey(page, params) {
   return `${page}:${JSON.stringify(params ?? {})}`;
+}
+
+function generationFor(page) {
+  return `${globalGeneration}:${pageGenerations.get(page) ?? 0}`;
 }
 
 export function readPageCache(page, params) {
@@ -25,9 +31,12 @@ export function writePageCache(page, params, data) {
 export function forgetPageCache(page) {
   if (!page) {
     entries.value.clear();
+    globalGeneration += 1;
+    pageGenerations.clear();
     return;
   }
 
+  pageGenerations.set(page, (pageGenerations.get(page) ?? 0) + 1);
   for (const key of [...entries.value.keys()]) {
     if (key === page || key.startsWith(`${page}:`)) {
       entries.value.delete(key);
@@ -47,6 +56,7 @@ export async function loadCachedPage({
   onError,
 }) {
   const key = buildKey(page, params);
+  const generation = generationFor(page);
   const cached = entries.value.get(key);
 
   if (cached && !background) {
@@ -72,6 +82,10 @@ export async function loadCachedPage({
 
   try {
     const data = await fetchData();
+    if (generation !== generationFor(page)) {
+      return;
+    }
+
     entries.value.set(key, data);
     if (!isCurrent || isCurrent()) {
       applyData(data);

@@ -9,6 +9,7 @@ use App\Http\Controllers\EndUserController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\LogoutController;
 use App\Http\Controllers\Auth\OnboardingController;
+use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\AdminSettingsController;
 use App\Http\Controllers\NotificationController;
@@ -29,6 +30,11 @@ Route::post('/signin', [LoginController::class, 'login'])->name('signin.post')->
 // JSON sign-in for the Vue SPA view (auth/SignIn.vue). Session + CSRF,
 // same as Blade; throttle mirrors the Blade endpoint.
 Route::post('/api/signin', [LoginController::class, 'loginJson'])->middleware('throttle:5,1');
+
+// JSON registration for the Vue SPA view (auth/Register.vue). Public,
+// self-registration always assigns the End User role. Throttled to curb spam.
+// Can be disabled globally via the PUBLIC_REGISTRATION_ENABLED env var.
+Route::post('/api/register', [RegisterController::class, 'registerJson'])->middleware('throttle:3,1');
 
 // JSON account setup for the Vue SPA onboarding view. Authenticated
 // users with a temporary password complete setup for their own role.
@@ -400,6 +406,7 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::get('/requests/my-requests', [EndUserController::class, 'myRequests'])->name('my-requests');
         Route::post('/requests', [EndUserController::class, 'storeRequest'])->name('requests.store');
         Route::post('/requests/{id}/respond', [EndUserController::class, 'respondRequest'])->name('requests.respond');
+        Route::post('/requests/{id}/received', [EndUserController::class, 'confirmRequestReceived'])->name('requests.received');
         Route::delete('/requests/{id}', [EndUserController::class, 'cancelRequest'])->name('requests.cancel');
     Route::get('/requests/export-pdf', [EndUserController::class, 'exportRequestsPdf'])->name('requests.export-pdf');
         Route::get('/assigned-items', [EndUserController::class, 'myAssignedItems'])->name('assigned-items');
@@ -449,6 +456,9 @@ Route::middleware(['auth', 'api.redirect'])->prefix('/api')->name('api.')->group
         Route::post('/users/generate', [UserController::class, 'generateUsers'])->name('users.generate');
         Route::patch('/users/{user}', [UserController::class, 'update'])->name('users.update');
         Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+        Route::get('/pending-users', [UserController::class, 'pendingUsers'])->name('admin.pending-users');
+        Route::post('/users/{user}/approve', [UserController::class, 'approve'])->name('admin.users.approve');
+        Route::post('/users/{user}/reject', [UserController::class, 'reject'])->name('admin.users.reject');
         Route::patch('/profile', [UserController::class, 'updateOwnProfile'])->name('profile.update');
         Route::get('/settings', [AdminSettingsController::class, 'index'])->name('settings');
         Route::post('/settings', [AdminSettingsController::class, 'update'])->name('settings.update');

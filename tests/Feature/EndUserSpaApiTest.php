@@ -4,6 +4,7 @@ use App\Models\AssignmentRequest;
 use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Role;
+use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -83,6 +84,53 @@ test('end user workspace reads return JSON shapes', function () {
         ->assertJsonStructure(['activityRows', 'incidentReports', 'endUsers']);
 });
 
+test('incoming requests include pending transfers sent to the end user', function () {
+    $item = makeStock($this, 'Projector', 1, 'assigned', [
+        'assigned_to_user_id' => $this->colleague->id,
+    ]);
+    $sourceAssignment = AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->colleague->id,
+        'quantity' => 1,
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+    $transfer = AssignmentRequest::create([
+        'item_id' => $item->item_id,
+        'source_assignment_id' => $sourceAssignment->id,
+        'user_id' => $this->colleague->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'waiting for custodian approval',
+        'requested_at' => now(),
+    ]);
+    $incomingItem = makeStock($this, 'Book Set', 2);
+    $incomingAssignment = AssignmentRequest::create([
+        'item_id' => $incomingItem->item_id,
+        'user_id' => $this->custodian->id,
+        'target_user_id' => $this->endUser->id,
+        'quantity' => 1,
+        'status' => 'waiting for approval',
+        'requested_at' => now()->addSecond(),
+    ]);
+
+    $this->actingAs($this->endUser)
+        ->getJson(route('api.end-user.requests'))
+        ->assertOk()
+        ->assertJsonPath('pendingIncomingCount', 2)
+        ->assertJsonCount(2, 'incomingRequests')
+        ->assertJsonFragment([
+            'id' => $transfer->id,
+            'source_assignment_id' => $sourceAssignment->id,
+            'status' => 'waiting for custodian approval',
+        ])
+        ->assertJsonFragment([
+            'id' => $incomingAssignment->id,
+            'status' => 'waiting for approval',
+        ]);
+});
+
 test('accepting an assignment through the api assigns stock', function () {
     $item = makeStock($this, 'Stapler', 5);
 
@@ -94,6 +142,10 @@ test('accepting an assignment through the api assigns stock', function () {
         'status' => 'waiting for approval',
         'requested_at' => now(),
     ]);
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.requests.received', $request->id))
+        ->assertUnprocessable();
 
     $this->actingAs($this->endUser)
         ->postJson(route('api.end-user.requests.respond', $request->id), ['action' => 'accept'])
@@ -108,6 +160,23 @@ test('accepting an assignment through the api assigns stock', function () {
         'quantity' => 2,
         'status' => 'assigned',
     ]);
+
+    $this->actingAs($this->colleague)
+        ->postJson(route('api.end-user.requests.received', $request->id))
+        ->assertNotFound();
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.requests.received', $request->id))
+        ->assertOk()
+        ->assertJsonPath('status', 'success');
+
+    $receivedAt = $request->fresh()->received_at;
+    expect($receivedAt)->not->toBeNull();
+
+    $this->actingAs($this->endUser)
+        ->postJson(route('api.end-user.requests.received', $request->id))
+        ->assertOk()
+        ->assertJsonPath('received_at', $receivedAt->toJSON());
 });
 
 test('declining an assignment through the api marks it declined', function () {
@@ -157,6 +226,11 @@ test('transferring an assignment through the api creates a transfer request', fu
         'quantity' => 1,
         'status' => 'waiting for custodian approval',
     ]);
+
+    $this->actingAs($this->endUser)->getJson(route('api.end-user.dashboard'))
+        ->assertOk()
+        ->assertJsonPath('metrics.pendingRequests', 1)
+        ->assertJsonPath('metrics.pendingReturns', 0);
 });
 
 test('return request and cancellation flow through the api', function () {
@@ -182,6 +256,11 @@ test('return request and cancellation flow through the api', function () {
         'user_id' => $this->endUser->id,
         'status' => 'waiting for custodian approval',
     ]);
+
+    $this->actingAs($this->endUser)->getJson(route('api.end-user.dashboard'))
+        ->assertOk()
+        ->assertJsonPath('metrics.pendingRequests', 1)
+        ->assertJsonPath('metrics.pendingReturns', 1);
 
     $this->actingAs($this->endUser)
         ->postJson(route('api.end-user.inventory.cancel-return', $item->item_id))

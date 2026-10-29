@@ -313,8 +313,8 @@
           </div>
         </div>
 
-        <Transition v-if="!isIncidentWorkspace" name="workspace" mode="out-in">
-          <div :key="workspace" class="flex min-h-0 min-w-0 flex-1 flex-col">
+        <Transition name="workspace" mode="out-in">
+          <div v-if="!isIncidentWorkspace" :key="`inventory-${workspace}`" class="flex min-h-0 min-w-0 flex-1 flex-col">
         <div v-if="loading" class="min-h-0 min-w-0 flex-1 shrink space-y-2.5 overflow-y-auto p-3 xl:hidden" aria-hidden="true">
           <div v-for="row in 4" :key="row" class="space-y-2.5 rounded-md border border-gray-200 p-3 dark:border-gray-800">
             <div class="h-3.5 w-2/3 animate-pulse rounded-md bg-gray-100 dark:bg-white/5" />
@@ -694,8 +694,7 @@
           </table>
         </div>
           </div>
-        </Transition>
-        <section v-else class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <section v-else :key="`incident-${workspace}`" class="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div class="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 p-3 dark:border-gray-800">
             <div>
               <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
@@ -1056,6 +1055,7 @@
             </section>
           </Teleport>
         </section>
+        </Transition>
         <InventoryItemLogDrawer
           :open="logsOpen"
           :categories="categories"

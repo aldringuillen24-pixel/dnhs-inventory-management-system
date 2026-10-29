@@ -40,6 +40,10 @@ class UserController extends Controller
 
         $query = User::with('role')->orderBy('created_at', 'desc');
 
+        // Pending registrations are managed in their own panel, so exclude
+        // them from the main users table.
+        $query->where('status', '!=', 'pending');
+
         if ($request->filled('search')) {
             $search = $request->input('search');
             $query->where(function ($query) use ($search) {
@@ -308,6 +312,74 @@ class UserController extends Controller
         $user->delete();
 
         return redirect()->route('admin.users-management')->with('success', 'Pending user account deleted successfully.');
+    }
+
+    public function pendingUsers(Request $request)
+    {
+        $users = User::with('role')
+            ->where('status', 'pending')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json(['users' => $users]);
+    }
+
+    public function approve(Request $request, User $user)
+    {
+        if ($user->status !== 'pending') {
+            return response()->json([
+                'message' => 'Only pending accounts can be approved.',
+            ], 422);
+        }
+
+        $user->status = 'active';
+        $user->save();
+
+        UserAuditLog::create([
+            'actor_user_id' => auth()->id(),
+            'actor_name' => auth()->user()?->first_name . ' ' . auth()->user()?->last_name ?: auth()->user()?->username,
+            'target_user_id' => $user->id,
+            'target_name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->username,
+            'action' => 'status_changed',
+            'details' => [
+                'old_status' => 'pending',
+                'new_status' => 'active',
+            ],
+        ]);
+
+        return response()->json([
+            'message' => 'User approved successfully.',
+        ]);
+    }
+
+    public function reject(Request $request, User $user)
+    {
+        if ($user->status !== 'pending') {
+            return response()->json([
+                'message' => 'Only pending accounts can be rejected.',
+            ], 422);
+        }
+
+        $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        UserAuditLog::create([
+            'actor_user_id' => auth()->id(),
+            'actor_name' => auth()->user()?->first_name . ' ' . auth()->user()?->last_name ?: auth()->user()?->username,
+            'target_user_id' => $user->id,
+            'target_name' => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->username,
+            'action' => 'rejected',
+            'details' => [
+                'reason' => $request->input('reason'),
+            ],
+        ]);
+
+        $user->delete();
+
+        return response()->json([
+            'message' => 'User rejected and removed.',
+        ]);
     }
 
     private function splitFullName(string $fullName): array

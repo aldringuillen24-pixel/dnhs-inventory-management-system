@@ -11,7 +11,7 @@
     fixed-body
     @close="$emit('close')"
   >
-    <form id="request-item-form" class="compact-modal-body flex-1" @submit.prevent="submit">
+    <form id="request-item-form" class="compact-modal-body min-h-0 flex-1 overflow-hidden" @submit.prevent="submit">
       <!-- STEP 1: CATEGORY -->
       <div v-if="step === 'category'" class="min-h-0 flex-1 overflow-y-auto pr-1">
         <div v-if="!categories.length" class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -27,15 +27,20 @@
               class="group flex h-full w-full flex-col justify-between rounded-xl border border-gray-200/90 bg-white p-3 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-400 hover:shadow-md dark:border-gray-700/80 dark:bg-gray-800/80 dark:hover:border-brand-500 dark:hover:bg-gray-800"
               @click="chooseCategory(category)"
             >
-              <div class="mb-2 space-y-1">
-                <span class="block text-[13px] font-semibold text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-400">
-                  {{ category.category_name }}
+              <div class="mb-2 flex items-start gap-2">
+                <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
+                  <LucideIcon :icon="categoryIcon(category.category_name)" class="h-4 w-4" />
                 </span>
-                <span class="block text-[11px] text-gray-500 dark:text-gray-400">
-                  {{ category.items.length
-                    ? `${category.items.length} item${category.items.length === 1 ? '' : 's'}`
-                    : 'Nothing catalogued' }}
-                </span>
+                <div class="min-w-0 space-y-1">
+                  <span class="block text-[13px] font-semibold text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-400">
+                    {{ category.category_name }}
+                  </span>
+                  <span class="block text-[11px] text-gray-500 dark:text-gray-400">
+                    {{ category.items.length
+                      ? `${category.items.length} item${category.items.length === 1 ? '' : 's'}`
+                      : 'Nothing catalogued' }}
+                  </span>
+                </div>
               </div>
               <span
                 class="w-full rounded-md px-2 py-0.5 text-center text-[10px] font-semibold tracking-wide"
@@ -52,9 +57,9 @@
 
       <!-- STEP 2: ITEM -->
       <template v-else>
-        <div class="space-y-4">
+        <div class="flex min-h-0 flex-1 flex-col gap-4">
           <!-- Category Context Ribbon -->
-          <div class="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50/80 p-3 dark:border-gray-800 dark:bg-gray-800/40">
+          <div class="flex shrink-0 items-center justify-between rounded-lg border border-gray-100 bg-gray-50/80 p-3 dark:border-gray-800 dark:bg-gray-800/40">
             <div class="flex items-center gap-2.5">
               <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
                 <LucideIcon :icon="Layers" class="h-4 w-4" />
@@ -77,7 +82,7 @@
           <!-- Out-of-stock notice -->
           <div
             v-if="isCategoryEmpty"
-            class="flex items-start gap-2.5 rounded-lg border border-amber-200/80 bg-amber-50/90 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+            class="flex shrink-0 items-start gap-2.5 rounded-lg border border-amber-200/80 bg-amber-50/90 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
           >
             <LucideIcon :icon="AlertTriangle" class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <div>
@@ -96,7 +101,7 @@
           </div>
 
           <!-- Form Fields Container -->
-          <div class="space-y-4 rounded-xl border border-gray-200/80 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div class="min-h-0 flex-1 space-y-4 overflow-y-auto rounded-xl border border-gray-200/80 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div v-if="!isCategoryUncatalogued && !requestUnlisted" class="flex justify-end">
               <button type="button" class="text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400" @click="requestUnlisted = true; selectedItemKey = ''; notes.value = `No ${selectedCategory?.category_name} items are currently in stock. Requesting these so they can be included in the next procurement cycle.`">
                 Need an item not listed? Request it
@@ -282,7 +287,24 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { AlertTriangle, ArrowLeft, Layers } from 'lucide';
+import {
+  AlertTriangle,
+  Armchair,
+  ArrowLeft,
+  BookOpen,
+  Dumbbell,
+  FileStack,
+  FlaskConical,
+  Layers,
+  Monitor,
+  Package,
+  Printer,
+  Projector,
+  ShieldCheck,
+  Sparkles,
+  Wrench,
+  Zap,
+} from 'lucide';
 import api from '../../lib/axios';
 import Modal from '../../components/ui/dialogs/Modal.vue';
 import FieldError from '../../components/ui/feedback/FieldError.vue';
@@ -337,6 +359,24 @@ const isCategoryUncatalogued = computed(() => (selectedCategory.value?.items?.le
 const isFreeText = computed(() => isCategoryUncatalogued.value || requestUnlisted.value);
 
 const submitLabel = computed(() => (isFreeText.value ? 'Submit Request for Procurement' : 'Submit Request'));
+
+function categoryIcon(categoryName) {
+  const name = String(categoryName ?? '').toLowerCase();
+  if (name.includes('audio-visual') || name.includes('audiovisual')) return Projector;
+  if (name.includes('classroom')) return Layers;
+  if (name.includes('cleaning') || name.includes('sanitation')) return Sparkles;
+  if (name.includes('consumable')) return FileStack;
+  if (name.includes('electrical')) return Zap;
+  if (name.includes('furniture')) return Armchair;
+  if (name.includes('ict') || name.includes('computer')) return Monitor;
+  if (name.includes('laboratory')) return FlaskConical;
+  if (name.includes('library') || name.includes('resource')) return BookOpen;
+  if (name.includes('office')) return Printer;
+  if (name.includes('safety') || name.includes('security') || name.includes('emergency')) return ShieldCheck;
+  if (name.includes('sports')) return Dumbbell;
+  if (name.includes('equipment')) return Wrench;
+  return Package;
+}
 
 // Name + category + unit, because a name alone is not an identity — the same
 // name can exist under two categories or two units.

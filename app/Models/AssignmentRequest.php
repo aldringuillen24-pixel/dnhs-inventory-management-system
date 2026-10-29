@@ -47,6 +47,7 @@ class AssignmentRequest extends Model
         'cancellation_reason',
         'requested_at',
         'responded_at',
+        'received_at',
         'expected_return_date',
         'release_slip_fields',
     ];
@@ -54,6 +55,7 @@ class AssignmentRequest extends Model
     protected $casts = [
         'requested_at' => 'datetime',
         'responded_at' => 'datetime',
+        'received_at' => 'datetime',
         'release_slip_fields' => 'array',
     ];
 

@@ -53,13 +53,15 @@
       </div>
 
       <!-- ── LEFT COLUMN: Assigned Items Table (3/4 on lg screens) ── -->
-      <div
-        v-show="activeTab === 'assigned'"
-        id="assigned-items-panel"
-        role="tabpanel"
-        aria-labelledby="assigned-items-tab"
-        class="min-w-0 w-full p-3 sm:p-4"
-      >
+      <Transition name="assigned-tab" mode="out-in">
+        <div
+          v-if="activeTab === 'assigned'"
+          key="assigned"
+          id="assigned-items-panel"
+          role="tabpanel"
+          aria-labelledby="assigned-items-tab"
+          class="min-w-0 w-full p-3 sm:p-4"
+        >
         <div v-if="!error">
       <div class="mb-2 flex flex-wrap items-center gap-1.5">
         <div class="relative w-full sm:max-w-xs">
@@ -126,7 +128,12 @@
                     {{ row.type }}
                   </span>
                 </td>
-                <td class="px-3 py-2 font-semibold text-gray-900 dark:text-white">{{ row.item_name }}</td>
+                <td class="px-3 py-2">
+                  <span class="inline-flex items-center gap-1.5 font-semibold text-gray-900 dark:text-white">
+                    <LucideIcon :icon="assignedItemIcon(row)" class="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" />
+                    {{ row.item_name }}
+                  </span>
+                </td>
                 <td class="px-3 py-2">{{ row.quantity }}</td>
                 <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">{{ formatDate(row.date) }}</td>
                 <td class="px-3 py-2"><StatusBadge :status="row.status" compact /></td>
@@ -228,6 +235,7 @@
                       <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
                     </svg>
                     <span>
+                      <LucideIcon :icon="assignedItemIcon(group.first)" class="mr-1.5 inline-block h-4 w-4 align-text-bottom text-brand-600 dark:text-brand-400" />
                       {{ group.first.item_name }}
                       <span class="ml-1.5 inline-flex rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">×{{ group.count }}</span>
                     </span>
@@ -365,18 +373,18 @@
         </table>
       </div>
     </div>
-      </div>
-
-      <div
-        v-show="activeTab === 'blotter'"
-        id="blotter-reports-panel"
-        role="tabpanel"
-        aria-labelledby="blotter-reports-tab"
-        class="w-full p-2 sm:p-3"
-      >
+        </div>
+        <div
+          v-else
+          key="blotter"
+          id="blotter-reports-panel"
+          role="tabpanel"
+          aria-labelledby="blotter-reports-tab"
+          class="w-full p-2 sm:p-3"
+        >
         <section>
           <!-- Filters -->
-          <div v-if="!loading && incidentReports.length > 0" class="flex items-center gap-2 px-3 py-2">
+          <div v-if="!loading && incidentReports.length > 0" class="flex max-w-3xl items-center gap-2 px-3 py-2">
             <div class="relative min-w-0 basis-2/5">
               <svg class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
@@ -428,11 +436,11 @@
             </div>
 
             <!-- Report Cards Stack -->
-            <ul v-else class="grid max-h-[17.5rem] max-w-3xl grid-cols-1 content-start gap-2.5 overflow-y-auto pr-1 md:grid-cols-2">
+            <ul v-else class="flex max-h-[17.5rem] flex-wrap content-start gap-2 overflow-y-auto pr-1">
               <li
                 v-for="report in filteredIncidentReports"
                 :key="report.id"
-                class="group flex min-w-0 flex-col rounded-xl border bg-white transition-all duration-200 hover:shadow-sm dark:bg-gray-800/60"
+                class="group flex w-full max-w-xs min-w-0 shrink-0 flex-col rounded-xl border bg-white transition-all duration-200 hover:shadow-sm dark:bg-gray-800/60"
                 :class="incidentCardBorderClass(report)"
               >
                 <!-- Card Header -->
@@ -540,14 +548,22 @@
             </ul>
           </div>
         </section>
-      </div>
+        </div>
+      </Transition>
     </div>
 
     <TransferModal :open="transferRow !== null" :row="transferRow" :end-users="endUsers" @close="transferRow = null" @saved="onTransferSaved" />
 
     <!-- Return confirmation: the request posts per item, so confirm which
          record it acts on instead of firing from the icon directly. -->
-    <Modal :open="returnConfirm !== null" title="Request Return" max-width="max-w-md" @close="returnConfirm = null">
+    <Modal
+      :open="returnConfirm !== null"
+      title="Request Return"
+      max-width="max-w-md"
+      :close-on-backdrop="!isReturning"
+      :close-on-escape="!isReturning"
+      @close="closeReturnConfirm"
+    >
       <div v-if="returnConfirm" class="space-y-4">
         <p class="rounded-md bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:bg-white/5 dark:text-gray-300">
           Request return of <span class="font-semibold text-gray-900 dark:text-white">{{ returnConfirm.item_name }}</span>
@@ -564,6 +580,7 @@
             type="number"
             :min="1"
             :max="returnQuantityCap()"
+            :disabled="isReturning"
             class="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-emerald-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
         </div>
@@ -573,17 +590,18 @@
           <button
             type="button"
             class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-            @click="returnConfirm = null"
+            :disabled="isReturning"
+            @click="closeReturnConfirm"
           >
             Cancel
           </button>
           <button
             type="button"
             class="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
-            :disabled="workingId === rowKey(returnConfirm)"
+            :disabled="isReturning"
             @click="confirmReturn"
           >
-            Confirm Return
+            {{ isReturning ? 'Returning' : 'Confirm Return' }}
           </button>
         </div>
       </template>
@@ -759,7 +777,7 @@
         </div>
 
         <!-- Stepper -->
-        <ol class="relative space-y-0 border-l-2 border-gray-100 pl-5 dark:border-gray-700">
+        <ol class="relative space-y-0 border-l-2 border-emerald-300 pl-5 dark:border-emerald-700">
           <li
             v-for="event in timelineEvents"
             :key="event.id ?? `${event.created_at}-${event.event_type}`"
@@ -774,7 +792,10 @@
             </span>
 
             <!-- Event card -->
-            <div class="rounded-lg border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800/60">
+            <div
+              class="rounded-lg border-2 bg-white px-4 py-3 shadow-sm dark:bg-gray-800/60"
+              :class="incidentEventBorderClass(event)"
+            >
               <div class="flex flex-wrap items-start justify-between gap-1">
                 <span class="text-xs font-semibold text-gray-800 dark:text-gray-100">{{ incidentEventLabel(event) }}</span>
                 <span class="whitespace-nowrap text-[11px] text-gray-400 dark:text-gray-500">{{ formatIncidentDate(event.created_at) }}</span>
@@ -804,23 +825,33 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import {
+  Armchair,
   ArrowLeftRight,
+  BookOpen,
   CheckCircle,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   Clock,
   FileText,
+  FileStack,
+  FlaskConical,
   Loader2,
   MessageSquare,
+  Monitor,
+  Package,
+  Printer,
+  Projector,
   RefreshCw,
   Search,
+  ShieldCheck,
   Send,
   TriangleAlert,
   Undo2,
   Wrench,
   XCircle,
   Zap,
+  Dumbbell,
 } from 'lucide';
 import api from '../../lib/axios';
 import { forgetPageCache, loadCachedPage } from '../../lib/pageCache';
@@ -986,6 +1017,29 @@ function incidentEventDotClass(event) {
   return 'bg-gray-400';
 }
 
+function incidentEventBorderClass(event) {
+  const et = String(event.event_type ?? '').toLowerCase();
+  if (et === 'status_changed') {
+    const status = String(event.to_status ?? '').toLowerCase();
+    if (status === 'declined' || status === 'cancelled') return 'border-rose-400 dark:border-rose-500';
+    if (status === 'resolved') return 'border-emerald-400 dark:border-emerald-500';
+    if (status === 'awaiting_reporter' || status === 'awaiting reporter') return 'border-purple-400 dark:border-purple-500';
+    if (status === 'under_investigation' || status === 'under investigation') return 'border-indigo-400 dark:border-indigo-500';
+    if (status === 'processing_repair' || status === 'processing repair') return 'border-amber-400 dark:border-amber-500';
+    if (status === 'under_review' || status === 'under review') return 'border-blue-400 dark:border-blue-500';
+  }
+
+  if (et === 'report_submitted') return 'border-gray-300 dark:border-gray-600';
+  if (et === 'report_cancelled') return 'border-rose-400 dark:border-rose-500';
+  if (et === 'reporter_response_received') return 'border-indigo-400 dark:border-indigo-500';
+  if (et === 'physical_inspection_recorded') return 'border-purple-400 dark:border-purple-500';
+  if (et === 'incident_handover_confirmed') return 'border-emerald-400 dark:border-emerald-500';
+  if (et === 'incident_repair_started') return 'border-amber-400 dark:border-amber-500';
+  if (et === 'incident_repairability_reassessed') return 'border-orange-400 dark:border-orange-500';
+  if (et === 'investigation_action_recorded') return 'border-indigo-400 dark:border-indigo-500';
+  return 'border-gray-300 dark:border-gray-600';
+}
+
 const statusOptions = computed(() => [...new Set(
   rows.value.map((row) => row.status).filter(Boolean),
 )].sort());
@@ -1015,6 +1069,9 @@ const exportAssignedHref = computed(() => {
 });
 const returnConfirm = ref(null);
 const returnQuantity = ref(1);
+const isReturning = computed(() => Boolean(
+  returnConfirm.value && workingId.value === rowKey(returnConfirm.value),
+));
 const reportTarget = ref(null);
 const reportType = ref('damaged');
 const reportQuantity = ref(1);
@@ -1026,6 +1083,23 @@ const TRANSFERABLE = ['approved', 'accepted'];
 
 function statusOf(row) {
   return String(row.status ?? '').toLowerCase();
+}
+
+function assignedItemIcon(row) {
+  const category = String(row.category_name ?? row.request?.item?.category?.category_name ?? '').toLowerCase();
+  const itemName = String(row.item_name ?? '').toLowerCase();
+  if (category.includes('audio-visual') || category.includes('audiovisual') || itemName.includes('projector')) return Projector;
+  if (category.includes('classroom') || category.includes('library') || category.includes('resource')) return BookOpen;
+  if (category.includes('cleaning') || category.includes('sanitation') || category.includes('maintenance')) return Wrench;
+  if (category.includes('consumable')) return FileStack;
+  if (category.includes('electrical')) return Zap;
+  if (category.includes('furniture')) return Armchair;
+  if (category.includes('ict') || category.includes('computer')) return Monitor;
+  if (category.includes('laboratory') || category.includes('science')) return FlaskConical;
+  if (category.includes('office')) return Printer;
+  if (category.includes('safety') || category.includes('security')) return ShieldCheck;
+  if (category.includes('sports')) return Dumbbell;
+  return Package;
 }
 
 function rowKey(row) {
@@ -1308,11 +1382,16 @@ function firstReturnable(group) {
   return group.entries.find((entry) => canRequestReturn(entry)) ?? null;
 }
 
-function confirmReturn() {
+async function confirmReturn() {
   const row = returnConfirm.value;
-  returnConfirm.value = null;
-  if (row) {
-    requestReturn(row);
+  if (row && !isReturning.value) {
+    await requestReturn(row);
+  }
+}
+
+function closeReturnConfirm() {
+  if (!isReturning.value) {
+    returnConfirm.value = null;
   }
 }
 
@@ -1364,6 +1443,9 @@ async function requestReturn(row) {
 
   try {
     await api.post(`/end-user/inventory/${itemId}/request-return`, { quantity });
+    if (returnConfirm.value && rowKey(returnConfirm.value) === rowKey(row)) {
+      returnConfirm.value = null;
+    }
     forgetPageCache();
     await load();
   } catch (requestError) {
@@ -1383,3 +1465,30 @@ function onTransferSaved() {
 
 onMounted(() => load());
 </script>
+
+<style scoped>
+.assigned-tab-enter-active,
+.assigned-tab-leave-active {
+  will-change: opacity, transform;
+  transition:
+    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.assigned-tab-enter-from {
+  opacity: 0;
+  transform: translateY(6px) scale(0.995);
+}
+
+.assigned-tab-leave-to {
+  opacity: 0;
+  transform: translateY(-3px) scale(0.995);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assigned-tab-enter-active,
+  .assigned-tab-leave-active {
+    transition: none;
+  }
+}
+</style>

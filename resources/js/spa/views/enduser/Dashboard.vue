@@ -466,8 +466,12 @@ async function load(options = {}) {
     },
     applyData: (data) => {
       metrics.value = data.metrics ?? {};
-      categoryData.value = data.categoryData ?? [];
-      statusData.value = data.statusData ?? [];
+      categoryData.value = (data.categoryData ?? []).filter(
+        (row) => String(row.label ?? '').trim().toLowerCase() !== 'uncategorized',
+      );
+      statusData.value = (data.statusData ?? []).filter(
+        (row) => String(row.label ?? '').trim().toLowerCase() !== 'unknown',
+      );
       pendingRequestData.value = data.pendingRequestData ?? [];
       conditionData.value = data.conditionData ?? [];
       activity.value = data.recentActivity ?? [];

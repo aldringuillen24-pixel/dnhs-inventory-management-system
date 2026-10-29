@@ -158,7 +158,10 @@ test('custodian drafts the transfer release slip before confirming allocation', 
     $this->actingAs($recipient)
         ->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertJsonCount(0, 'incomingRequests');
+        ->assertJsonCount(1, 'incomingRequests')
+        ->assertJsonPath('incomingRequests.0.id', $transfer->id)
+        ->assertJsonPath('incomingRequests.0.source_assignment_id', $original->id)
+        ->assertJsonPath('incomingRequests.0.status', 'waiting for custodian approval');
     $this->assertDatabaseHas('inventory', [
         'item_id' => $item->item_id,
         'assigned_to_user_id' => $this->endUser->id,
@@ -502,9 +505,10 @@ test('fulfilling a request saves its release slip as a draft before inventory is
     $this->actingAs($this->endUser)
         ->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertJsonPath('myRequests.0.id', $request->id)
-        ->assertJsonPath('myRequests.0.status', 'draft')
-        ->assertJsonPath('myRequests.0.requested_item_name', 'Drafted Request Chairs');
+        ->assertJsonPath('incomingRequests.0.id', $request->id)
+        ->assertJsonPath('incomingRequests.0.status', 'draft')
+        ->assertJsonPath('incomingRequests.0.requested_item_name', 'Drafted Request Chairs')
+        ->assertJsonCount(0, 'myRequests');
 
     $this->actingAs($this->custodian)
         ->postJson(route('api.custodian.drafts.allocate', $response->json('draft_id')))
@@ -517,8 +521,8 @@ test('fulfilling a request saves its release slip as a draft before inventory is
     $this->actingAs($this->endUser)
         ->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertJsonPath('myRequests.0.id', $request->id)
-        ->assertJsonPath('myRequests.0.status', 'approved');
+        ->assertJsonPath('incomingRequests.0.id', $request->id)
+        ->assertJsonPath('incomingRequests.0.status', 'approved');
 });
 
 test('direct inventory requests can also be staged as drafts before allocation', function () {
@@ -1317,7 +1321,8 @@ test('legacy transfer requests move into the custodian workflow instead of recip
     // Recipients no longer have an in-app accept/decline step.
     $this->actingAs($recipient)->getJson(route('api.end-user.requests'))
         ->assertOk()
-        ->assertJsonCount(0, 'incomingRequests');
+        ->assertJsonCount(1, 'incomingRequests')
+        ->assertJsonPath('incomingRequests.0.status', 'waiting for transfer approval');
 });
 
 test('per-queue counts match the tabs that render them', function () {

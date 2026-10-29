@@ -577,7 +577,7 @@
                   <tr v-for="returnRequest in filteredReturns" :key="returnRequest.id" class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                     <!-- End user -->
                     <td class="px-4 py-3.5">
-                      <div class="font-semibold text-gray-900 dark:text-white">{{ returnRequest.user?.full_name ?? 'Unknown User' }}</div>
+                      <div class="font-semibold text-gray-900 dark:text-white">{{ personName(returnRequest.user) }}</div>
                       <span class="text-xs text-gray-400">@{{ returnRequest.user?.username ?? '' }}</span>
                     </td>
 

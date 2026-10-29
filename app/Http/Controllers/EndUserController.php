@@ -264,7 +264,13 @@ class EndUserController extends Controller
             ->values();
 
         $pendingIncomingCount = $incomingRequests
-            ->whereIn('status', ['waiting for approval', 'waiting for transfer approval'])
+            ->whereIn('status', [
+                'waiting for approval',
+                'waiting for transfer approval',
+                'waiting for custodian approval',
+                'transfer draft',
+                'draft',
+            ])
             ->count();
         $myPendingCount = $myRequests
             ->whereIn('status', ['waiting for approval', self::STATUS_WAITING_FOR_PROCUREMENT])
@@ -292,15 +298,7 @@ class EndUserController extends Controller
                 'fulfillmentRequests.item:item_id,item_name,inventory_item_no',
                 'fulfillmentRequests.transaction',
             ])
-            ->where(function ($query) use ($userId): void {
-                $query->where('user_id', $userId)
-                    ->orWhere(function ($query) use ($userId): void {
-                        $query->where('target_user_id', $userId)
-                            ->whereNull('parent_request_id')
-                            ->whereNotNull('requested_item_name')
-                            ->whereIn('status', ['draft', 'approved']);
-                    });
-            })
+            ->where('user_id', $userId)
             ->orderBy('requested_at', 'desc');
     }
 
@@ -314,10 +312,6 @@ class EndUserController extends Controller
             ])
             ->where('target_user_id', $userId)
             ->whereNull('parent_request_id')
-            ->whereNotIn('status', ['waiting for transfer approval', 'waiting for custodian approval', 'transfer draft'])
-            // Draft allocations are custodian-held prints, not requests the
-            // recipient can act on. They live in the custodian Drafts tab.
-            ->where('status', '!=', 'draft')
             ->orderBy('requested_at', 'desc');
     }
 
@@ -622,6 +616,7 @@ class EndUserController extends Controller
                     'type'      => 'Assigned',
                     'item_id'   => $inventory->item_id,
                     'item_name' => $inventory->item_name,
+                    'category_name' => $inventory->category?->category_name,
                     'inventory_item_no' => $inventory->inventory_item_no,
                     'unit'      => $inventory->unit,
                     'is_consumable' => $inventory->category?->isConsumable() ?? false,
@@ -677,6 +672,7 @@ class EndUserController extends Controller
                     'type'      => 'Assigned',
                     'item_id'   => $request->item_id,
                     'item_name' => optional($request->item)->item_name ?? 'Unknown item',
+                    'category_name' => $request->item?->category?->category_name,
                     'inventory_item_no' => optional($request->item)->inventory_item_no,
                     'unit'      => optional($request->item)->unit,
                     'is_consumable' => $request->item?->category?->isConsumable() ?? false,
@@ -722,6 +718,7 @@ class EndUserController extends Controller
                     'type'      => 'Requested',
                     'item_id'   => $request->item_id,
                     'item_name' => $request->requested_item_name ?? optional($request->item)->item_name ?? 'Unknown item',
+                    'category_name' => $request->item?->category?->category_name,
                     'is_consumable' => $request->item?->category?->isConsumable() ?? false,
                     'maintenance_eligible' => (bool) $request->item?->category?->is_maintenance_eligible,
                     'quantity'  => $request->quantity,
@@ -949,6 +946,44 @@ class EndUserController extends Controller
         }
 
         return redirect()->route('endUser.requests')->with('success', 'Request accepted and item assigned.');
+    }
+
+    public function confirmRequestReceived(Request $request, $id)
+    {
+        $assignment = AssignmentRequest::query()
+            ->whereKey($id)
+            ->where('target_user_id', $request->user()->id)
+            ->firstOrFail();
+
+        if ($assignment->received_at) {
+            return response()->json([
+                'status' => 'success',
+                'received_at' => $assignment->received_at,
+                'message' => 'Receipt was already confirmed.',
+            ]);
+        }
+
+        $hasAllocatedTransaction = $assignment->transaction_id
+            && Transaction::query()
+                ->whereKey($assignment->transaction_id)
+                ->where('item_id', $assignment->item_id)
+                ->where('user_id', $assignment->target_user_id)
+                ->where('status', 'assigned')
+                ->exists();
+
+        if (!in_array($assignment->status, ['approved', 'accepted'], true) || !$hasAllocatedTransaction) {
+            return response()->json([
+                'message' => 'Receipt can only be confirmed after the custodian completes allocation.',
+            ], 422);
+        }
+
+        $assignment->forceFill(['received_at' => now()])->save();
+
+        return response()->json([
+            'status' => 'success',
+            'received_at' => $assignment->received_at,
+            'message' => 'Receipt confirmed.',
+        ]);
     }
 
     public function requestReturn(Request $request, $itemId)
