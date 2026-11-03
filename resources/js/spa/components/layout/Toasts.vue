@@ -1,5 +1,5 @@
 <template>
-  <div class="pointer-events-none fixed right-4 top-4 z-999999 flex w-80 flex-col gap-2">
+  <div class="pointer-events-none fixed left-1/2 top-4 z-999999 flex w-80 -translate-x-1/2 flex-col gap-2">
     <div
       v-for="toast in toasts.toasts"
       :key="toast.id"

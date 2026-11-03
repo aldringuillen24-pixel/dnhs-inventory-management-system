@@ -441,7 +441,8 @@ const exportPdfModalHref = computed(() => {
   const params = new URLSearchParams({
     workspace: exportPdfWorkspace.value,
     category_id: exportPdfCategory.value,
-    received_by_role: 'School Head',
+    received_by_name: '',
+    received_by_role: '',
   });
   exportPdfSelectedIcs.value.forEach((icsNumber) => params.append('ics_numbers[]', icsNumber));
   return `/school-head/inventory/export-pdf?${params.toString()}`;

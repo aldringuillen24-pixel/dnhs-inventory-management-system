@@ -390,9 +390,9 @@
                           :disabled="working || confirmAction !== null || prompt !== null"
                           @click="draft.draft_kind === 'transfer'
                             ? openPrompt('decline-transfer', draft.id)
-                            : confirmAction = { kind: 'cancel-draft', id: draft.id, label: `Delete draft and release ${draft.quantity} held unit(s)?` }"
+                            : confirmAction = { kind: 'cancel-draft', id: draft.id, label: `Decline draft and release ${draft.quantity} held unit(s)?` }"
                         >
-                          {{ draft.draft_kind === 'transfer' ? 'Decline' : 'Delete' }}
+                          Decline
                         </button>
                       </div>
                     </td>
@@ -1152,9 +1152,9 @@
 
     <ConfirmDialog
       :open="confirmAction !== null"
-      :title="confirmAction?.kind === 'cancel-draft' ? 'Delete Draft' : confirmAction?.kind === 'allocate-transfer' ? 'Confirm Transfer Allocation' : 'Confirm Approval'"
+      :title="confirmAction?.kind === 'cancel-draft' ? 'Decline Draft' : confirmAction?.kind === 'allocate-transfer' ? 'Confirm Transfer Allocation' : 'Confirm Approval'"
       :message="confirmAction?.label ?? ''"
-      :confirm-label="confirmAction?.kind === 'cancel-draft' ? 'Yes' : confirmAction?.kind === 'allocate-transfer' ? 'Confirm Allocation' : 'Confirm Approval'"
+      :confirm-label="confirmAction?.kind === 'cancel-draft' ? 'Decline Draft' : confirmAction?.kind === 'allocate-transfer' ? 'Confirm Allocation' : 'Confirm Approval'"
       :busy="working"
       @cancel="confirmAction = null"
       @confirm="submitConfirm"
@@ -1494,7 +1494,7 @@ const promptConfig = computed(() => {
     case 'manual-return':
       return { title: 'Record Manual Return', subtitle: 'Return the manually issued item back to stockroom inventory.', label: 'Notes (optional)', required: false, confirmLabel: 'Confirm Return', danger: false };
     case 'cancel-draft':
-      return { title: 'Delete Draft', subtitle: 'Release the held units back to free stock.', label: 'Reason (Required)', required: true, confirmLabel: 'Delete Draft', busyLabel: 'Deleting…', danger: true };
+      return { title: 'Decline Draft', subtitle: 'Release the held units back to free stock.', label: 'Reason (Required)', required: true, confirmLabel: 'Confirm Decline', busyLabel: 'Declining…', danger: true };
     case 'return-iar':
       return { title: 'Return IAR for Correction', subtitle: 'The Inspector will see this reason and can correct and resubmit the report.', label: 'Correction reason (Required)', required: true, confirmLabel: 'Return to Inspector', danger: true };
     default:

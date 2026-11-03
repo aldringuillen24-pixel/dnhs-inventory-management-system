@@ -382,17 +382,22 @@ class StoredDemandForecastService
             ->values();
 
         foreach ($orderedForecastItems as $item) {
+            $hasExplicitMatches = array_key_exists('matched_inventory_ids', $item);
             $matchedIds = $item['matched_inventory_ids'] ?? [(int) $item['inventory_id']];
+            $matchesForecast = fn (Inventory $record): bool => (int) $record->category_id === (int) $item['category_id']
+                && RequestableItemMatcher::nameMatches($item['item_name'], (string) $record->item_name)
+                && RequestableItemMatcher::unitMatches($item['unit'], $record->unit);
             $matchingInventory = $inventory->only($matchedIds)
-                ->filter(fn (Inventory $record): bool => (int) $record->category_id === (int) $item['category_id']
-                    && RequestableItemMatcher::nameMatches($item['item_name'], (string) $record->item_name)
-                    && RequestableItemMatcher::unitMatches($item['unit'], $record->unit)
-                )
+                ->filter($matchesForecast)
                 ->values();
+
+            if ($matchingInventory->isEmpty() && $hasExplicitMatches && $matchedIds === []) {
+                $matchingInventory = $inventory->filter($matchesForecast)->values();
+            }
 
             if ($matchingInventory->isEmpty()) {
                 $orphaned[] = (int) $item['inventory_id'];
-                if (array_key_exists('matched_inventory_ids', $item) && $matchedIds === []) {
+                if ($hasExplicitMatches && $matchedIds === []) {
                     $rows->push($this->demandOnlyForecastRow($item));
                 }
 

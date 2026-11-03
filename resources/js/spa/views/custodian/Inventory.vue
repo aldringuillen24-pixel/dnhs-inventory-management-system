@@ -103,7 +103,7 @@
 
     <template v-else>
       <!-- Main Inventory Panel -->
-      <div class="custodian-panel flex min-h-[32rem] flex-col overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div class="custodian-panel relative flex min-h-[32rem] flex-col overflow-hidden rounded-md border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <!-- Interactive Workspace Tabs -->
         <div class="relative shrink-0 border-b border-gray-200/80 bg-gray-50/50 p-2.5 dark:border-gray-800 dark:bg-gray-900/50 sm:hidden">
           <button

@@ -598,6 +598,7 @@ class TrainDemandForecast extends Command
                         ->all();
                 } else {
                     $item['inventory_id'] = $nextSyntheticId++;
+                    $item['matched_inventory_ids'] = [];
                     $category = $categoryIdsByName->get(mb_strtolower(trim($item['category'])));
                     if ($category) {
                         $item['category_id'] = (int) $category->category_id;

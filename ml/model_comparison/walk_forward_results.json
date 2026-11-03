@@ -1,0 +1,159 @@
+{
+  "experiment": "expanding_window_walk_forward",
+  "minimum_training_months": 3,
+  "cutoff_count": 1,
+  "multiple_cutoffs_available": false,
+  "item_month_observation_count": 11,
+  "metrics_scope": "Per unit; errors across unlike units are not combined.",
+  "metrics_by_unit": {
+    "bottles": {
+      "linear": {
+        "mae": 5.0,
+        "rmse": 5.0
+      },
+      "polynomial_degree_2": {
+        "mae": 20.000000000000014,
+        "rmse": 20.000000000000014
+      }
+    },
+    "boxes": {
+      "linear": {
+        "mae": 11.0,
+        "rmse": 12.37380746218039
+      },
+      "polynomial_degree_2": {
+        "mae": 38.50000000000002,
+        "rmse": 40.1808412057289
+      }
+    },
+    "liters": {
+      "linear": {
+        "mae": 8.666666666666664,
+        "rmse": 8.666666666666664
+      },
+      "polynomial_degree_2": {
+        "mae": 37.00000000000001,
+        "rmse": 37.00000000000001
+      }
+    },
+    "packs": {
+      "linear": {
+        "mae": 9.333333333333332,
+        "rmse": 9.333333333333332
+      },
+      "polynomial_degree_2": {
+        "mae": 46.00000000000003,
+        "rmse": 46.00000000000003
+      }
+    },
+    "pieces": {
+      "linear": {
+        "mae": 18.11111111111111,
+        "rmse": 22.07478870332163
+      },
+      "polynomial_degree_2": {
+        "mae": 87.00000000000001,
+        "rmse": 102.81536850101742
+      }
+    },
+    "reams": {
+      "linear": {
+        "mae": 29.5,
+        "rmse": 30.008332176247315
+      },
+      "polynomial_degree_2": {
+        "mae": 134.5,
+        "rmse": 136.8959458859173
+      }
+    },
+    "rolls": {
+      "linear": {
+        "mae": 5.666666666666666,
+        "rmse": 5.666666666666666
+      },
+      "polynomial_degree_2": {
+        "mae": 24.000000000000014,
+        "rmse": 24.000000000000014
+      }
+    }
+  },
+  "cutoffs": [
+    {
+      "test_month": "2026-09",
+      "item_count": 11,
+      "metrics_by_unit": {
+        "bottles": {
+          "linear": {
+            "mae": 5.0,
+            "rmse": 5.0
+          },
+          "polynomial_degree_2": {
+            "mae": 20.000000000000014,
+            "rmse": 20.000000000000014
+          }
+        },
+        "boxes": {
+          "linear": {
+            "mae": 11.0,
+            "rmse": 12.37380746218039
+          },
+          "polynomial_degree_2": {
+            "mae": 38.50000000000002,
+            "rmse": 40.1808412057289
+          }
+        },
+        "liters": {
+          "linear": {
+            "mae": 8.666666666666664,
+            "rmse": 8.666666666666664
+          },
+          "polynomial_degree_2": {
+            "mae": 37.00000000000001,
+            "rmse": 37.00000000000001
+          }
+        },
+        "packs": {
+          "linear": {
+            "mae": 9.333333333333332,
+            "rmse": 9.333333333333332
+          },
+          "polynomial_degree_2": {
+            "mae": 46.00000000000003,
+            "rmse": 46.00000000000003
+          }
+        },
+        "pieces": {
+          "linear": {
+            "mae": 18.11111111111111,
+            "rmse": 22.07478870332163
+          },
+          "polynomial_degree_2": {
+            "mae": 87.00000000000001,
+            "rmse": 102.81536850101742
+          }
+        },
+        "reams": {
+          "linear": {
+            "mae": 29.5,
+            "rmse": 30.008332176247315
+          },
+          "polynomial_degree_2": {
+            "mae": 134.5,
+            "rmse": 136.8959458859173
+          }
+        },
+        "rolls": {
+          "linear": {
+            "mae": 5.666666666666666,
+            "rmse": 5.666666666666666
+          },
+          "polynomial_degree_2": {
+            "mae": 24.000000000000014,
+            "rmse": 24.000000000000014
+          }
+        }
+      }
+    }
+  ],
+  "limitation": "The supplied history supports only one chronological test cutoff. Collect more verified months per item to assess stability across multiple cutoffs."
+}

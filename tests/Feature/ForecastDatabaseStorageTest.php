@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AssignmentRequest;
 use App\Models\Category;
 use App\Models\ForecastPayload;
 use App\Models\Inventory;
@@ -135,7 +136,6 @@ test('a trained forecast stored in the database is served with no file on disk',
 test('an explicitly unmatched forecast remains visible as demand-only', function () {
     Storage::fake('forecast');
 
-    ($this->makeItem)(9001);
     $document = json_decode(
         phase8Document(now()->toIso8601String(), 9001, (int) $this->category->category_id),
         true,
@@ -156,6 +156,59 @@ test('an explicitly unmatched forecast remains visible as demand-only', function
         ->and($result['rows'][0]['inventory_match'])->toBe('unmatched')
         ->and($result['rows'][0]['available_stock'])->toBeNull()
         ->and($result['rows'][0]['suggested_procurement'])->toBe(40);
+});
+
+test('an unmatched forecast rematches live inventory and unmet demand when inventory is added', function () {
+    Storage::fake('forecast');
+    $document = json_decode(
+        phase8Document(now()->toIso8601String(), 9001, (int) $this->category->category_id),
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+    $document['forecasts'][0]['matched_inventory_ids'] = [];
+    app(StoredDemandForecastService::class)->persistTraining(
+        ForecastPayload::SOURCE_LIVE,
+        'success',
+        json_encode($document, JSON_THROW_ON_ERROR),
+    );
+
+    $initial = app(StoredDemandForecastService::class)->read($this->custodian);
+    expect($initial['rows'][0]['inventory_match'])->toBe('unmatched')
+        ->and($initial['rows'][0]['available_stock'])->toBeNull();
+
+    $inventory = ($this->makeItem)(9002);
+    $endUser = User::factory()->create([
+        'role_id' => Role::firstOrCreate(['role_name' => 'End User'])->role_id,
+    ]);
+    AssignmentRequest::create([
+        'item_id' => $inventory->item_id,
+        'user_id' => $endUser->id,
+        'target_user_id' => $this->custodian->id,
+        'quantity' => 3,
+        'status' => 'waiting for approval',
+        'requested_at' => now(),
+    ]);
+    AssignmentRequest::create([
+        'requested_item_name' => 'Phase8 Bond Paper',
+        'requested_category_id' => $this->category->category_id,
+        'requested_unit' => 'ream',
+        'user_id' => $endUser->id,
+        'target_user_id' => $this->custodian->id,
+        'quantity' => 7,
+        'status' => AssignmentRequest::STATUS_WAITING_FOR_PROCUREMENT,
+        'requested_at' => now(),
+    ]);
+
+    $updated = app(StoredDemandForecastService::class)->read($this->custodian);
+    $row = $updated['rows'][0];
+
+    expect($row['inventory_match'])->toBe('matched')
+        ->and($row['inventory_id'])->toBe(9002)
+        ->and($row['available_stock'])->toBe(2)
+        ->and($row['pending_demand'])->toBe(3)
+        ->and($row['unmet_demand'])->toBe(7)
+        ->and($row['suggested_procurement'])->toBe(42);
 });
 
 test('a local forecast file is ignored when the database has no forecast', function () {

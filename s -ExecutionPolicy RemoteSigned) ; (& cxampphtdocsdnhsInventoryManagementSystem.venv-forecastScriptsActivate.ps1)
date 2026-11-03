@@ -1,0 +1,138 @@
+[33mea0ddc2[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m feat: enable public registration and count active-only requests on end-user tabs
+[33mbbe5ab1[m feat: improve request, profile, and blotter workflows
+[33m1c526ae[m fix: inventory page height and ITB print layout
+[33m89cd0e6[m feat: Add RCPI-PPE reporting and improve inventory workflows
+[33m4599bb8[m feat: extract ITB print modal and refine RFQ preview
+[33m0448dfb[m feat: add inventory policy reminders and improve procurement previews
+[33ma5526ff[m feat: add AI API setup guide modal
+[33m3f873d6[m fix: show item logs in incident workspaces
+[33m25ccc37[m feat: add AI tools for incident reports and investigations
+[33mbab4aa6[m feat: route all assigned items to assignment list
+[33m58f5d68[m Fix demand forecast item matching metadata
+[33m72ae16b[m Show unmatched forecast items as demand-only
+[33m4503e7e[m Add historical usage to scheduled demand forecast
+[33m8c6aa01[m Run demand forecast training in GitHub Actions
+[33m0434263[m fix: correct Render cron service config
+[33mce89ef7[m feat: add transfer release slips and expand inventory workflows
+[33m402d548[m feat: add auditable incident reporting, resolution, and notifications
+[33m418ad65[m feat: integrate approved IARs with custodian stock-in
+[33mcf3a11e[m feat(inspector): add compact IAR draft cards with preview and actions
+[33me4b0e45[m feat(ics):Add editable inventory report preview and fix PDF pagination
+[33m9de4515[m feat: add ICS-filtered inventory PDF slips
+[33mf60c9c8[m feat(iirup): add editable Appendix 74 preview and refine modal controls
+[33m66be66f[m feat(rfq): make terms editable and refine preview layout
+[33m2de2251[m feat: add RFQ pdf report
+[33m09d8875[m feat: add IIRUP report
+[33m816ec8e[m feat: add global qrcode printing
+[33m4c9fe47[m Wire Laravel SMTP mailer via env and update custodian inventory flow
+[33mc84a4fd[m Admin AI Config: provider API keys with per-key status cards, probe stats, env card, setup guide; auth view polish
+[33m5630bd2[m Item logs 1-3: log every item CRUD with in-panel overlay drawer
+[33mc67d59c[m Category combobox with in-list manage categories in stock-in
+[33mb80ffc7[m Stock-in modal layout: inline ICS toolbar, fixed 4-row list, reordered columns
+[33m5287f57[m Improve historical AI comparisons and custodian flows
+[33m0938134[m Update live demand forecasts and inventory quantities
+[33mff7b05d[m Fix Render cron start command
+[33mead0f53[m Deploy demand forecasting API service
+[33md593384[m Add forecast cron job
+[33m4cda52d[m small button changes
+[33m47ad349[m Restore shared slip document component
+[33mabdfe0c[m Add custodian assignment draft workflow
+[33m1147b4a[m Add property release slip flow for request approvals
+[33mbd1e117[m AI assistant conversation flow, PDF exports, and SPA updates
+[33m5f352f0[m Add bulk CSV stock-in import with per-row validation
+[33m1c70025[m Centered single-card sign-in without brand panel
+[33m9c9b746[m Transfer accept revalidation; sender cancel endpoint wiring in requests UI
+[33m1c65f03[m End-user damage/loss issue reports with custodian triage
+[33m0a73a0a[m Set default expected_return_date on registered approvals; fix dueSoon to query deadline column
+[33maba51d2[m End-user partial return requests with quantity cap
+[33m95693ec[m End-user request cancellation; transactions search panels; inventory display cleanups
+[33m9d50899[m Disposed tab reason column; inventory display cleanups
+[33m95f3806[m Assignee column and search; repair quantity display cleanups
+[33m4bef301[m Inspector repair recommendations with custodian approval; repair quantity display fixes
+[33m6fdc844[m Inspector queue: direct mark-inspected per row, drop duplicate scanner button
+[33m4ebe27f[m Rename under maintenance status to under repair
+[33mcfe730f[m Retire 10 categories, keep 14 with Consumables fallback
+[33ma70d7d8[m Add dedicated bond paper icon to inventory page
+[33m6677c1b[m Change 1: partial issues read as Assigned in all tabs
+[33m337f68f[m Cover consumable placement in assigned workspace
+[33mc9765bf[m History tab: drop actions column, add date range filter
+[33m153f1a0[m Show only accepted assignments and scope row expanders
+[33m0cb61b3[m Fix crushed accept button sizing in end-user requests
+[33m317b350[m Read snake_case relation keys for recipient and holder names
+[33m1ebced7[m Restyle inventory quantity as Available over Pending
+[33m84aacde[m Show available and pending holds in inventory listing
+[33m873fb80[m Show pending holds and validate against free stock
+[33m0626d4c[m Clear assign form only after save, keep draft on cancel
+[33maa6c966[m Keep stock-in draft on cancel, clear only after save
+[33mf8891f4[m Reset stock-in form on open and after save
+[33mea91ee5[m Block future date_acquired in stock-in and edit
+[33md2f6ef3[m Add AI chat memory, forecast recommendations, and audit ledger
+[33ma6f3d8f[m Pin web to Singapore region
+[33m5db04dc[m Reuse existing free DB
+[33mb9895ea[m Remove cron for free Render
+[33m6546643[m Use Render free plans
+[33m939a960[m Fix Render fromService syntax
+[33m4aa9750[m Fix Render cron placement for forecast training
+[33m6f6fbd9[m fix: make the sample forecast ledger real and hide it everywhere else
+[33meb18df0[m fix: drop orphaned forecast rows instead of discarding the whole forecast
+[33m3f134eb[m fix: give factual turns their own generation prompt
+[33mb671adf[m fix: send generationConfig as a JSON object when no options are passed
+[33m1fc34e3[m test: make live-provider tests opt-in so the suite cannot burn quota
+[33m5b7926b[m feat: widen LLM narration to factual turns with two-mode grounding
+[33md698e06[m feat: decompose compound questions with per-sub-request authorization
+[33meb88148[m refactor: add a capped turn log to the conversation context
+[33mee2e889[m refactor: extract forecast chat into ForecastChatHandoff
+[33md787e15[m refactor: split inventory answer service into a gated tool router
+[33m79f9796[m refactor: move AI assistant session state into ConversationContextManager
+[33m8679c45[m style: state the purchase formula once and compact ranked list entries
+[33ma7e5492[m feat: broaden decision support phrasing and stop leaking field names
+[33m06e66f5[m Revert "fix: match forecast loading skeleton to the two-column card geometry"
+[33m6668293[m fix: match forecast loading skeleton to the two-column card geometry
+[33ma17d8bf[m fix: ask for a subject on bare why questions and compact chat replies
+[33m55aba28[m fix: order forecast chat table by priority instead of inventory id
+[33m0b66adc[m fix: route procurement to decision support and cap long chat tables
+[33md50ef2b[m refactor: drop back-to-reports button from forecast header
+[33mcaea0ae[m refactor: move demand forecast out of reports into its own nav entry
+[33m274afef[m feat: answer what-next questions with forecast-grounded steps
+[33m34312bf[m fix: keep the sidebar section highlighted on nested routes
+[33m5e7f754[m feat: support forecast follow-up questions scoped to the previous answer
+[33m26212ff[m feat: store trained forecast in the database so Render cron can serve it
+[33ma587106[m fix: register decision-support and procurement PDF routes with their Blade view
+[33m01b019d[m fix: report why a provider answer was not used and stop rejecting list counts
+[33mc758dcd[m fix: classify chat input and state the assistant's forecast scope
+[33m3ea2c18[m refactor: trim forecast table to decision columns only
+[33m6becc02[m refactor: trim forecast table to decision-focused columns
+[33mcb5a85a[m style: add empty-state icon to filtered forecast results
+[33m2c2d606[m chore: harden gitignore against secret and artifact leaks
+[33ma9f74c7[m feat: add clickable lifespan indicator with detail modal
+[33ma9d54eb[m style: clean up inventory row identifiers
+[33m1291b21[m Fix inventory grouping and password reset errors
+[33mde34427[m fix: use portable HAVING aggregate for Postgres low-stock count
+[33m8f3dd73[m fix: log to stderr so Render can surface application errors
+[33ma1a1146[m feat: env-driven idempotent admin bootstrap for Render
+[33mf70e7e8[m chore: surface boot failures in Render logs
+[33m73527a3[m fix: stop rebuilding PHP extensions already bundled in the base image
+[33m8219b43[m fix: build tokenizer extension serially to avoid Zend parser race
+[33m043b046[m chore: add Render Docker deployment
+[33m902dc7f[m removal of localfiles
+[33m75d794f[m AI and ML integration
+[33m0122f23[m Update inventory workflows, reporting, settings, and QR support
+[33m1873b13[m perf: load only latest inventory activity
+[33m405631f[m fix: disable maintenance action for furniture categories
+[33m93e2b72[m feat: add OTP password reset flow
+[33mc88132c[m Transfer and return feature
+[33m9eaecc7[m Partial AI features
+[33m901eed1[m Create transfer feature
+[33m92e7d34[m update profile
+[33m932ed0a[m Final transfer feature
+[33m049e37b[m[33m ([m[1;32mtransfer-feature[m[33m)[m Transfer feature
+[33mbc22f75[m Partial trasfer feature
+[33m6b91d1d[m Partial AI Inventory Assistant UI
+[33mebef084[m Partially add inventory item feature
+[33m90e4f87[m Create property custodian dashboard, iventory, and transaction pages
+[33ma15b76a[m Create admin profile page
+[33m84f4bf8[m Create bulk user and account slip generation
+[33mb86794b[m Create user account feature
+[33m69a71e6[m Create role-based sidebar
+[33mb39b7a3[m Create login feature for Admin
+[33m1330bf1[m Fix dashboard UI

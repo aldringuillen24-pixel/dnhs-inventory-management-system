@@ -1,0 +1,73 @@
+{
+  "experiment": "linear_vs_polynomial_degree_2",
+  "target": "monthly quantity issued",
+  "feature": "calendar-month offset from history_start_month",
+  "training_items": [
+    {
+      "inventory_id": 9001,
+      "category_id": 900,
+      "item_name": "Bond Paper (A4)",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9002,
+      "category_id": 900,
+      "item_name": "Bond Paper (Legal)",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9003,
+      "category_id": 900,
+      "item_name": "Chalk",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9004,
+      "category_id": 900,
+      "item_name": "Whiteboard Marker",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9005,
+      "category_id": 900,
+      "item_name": "Permanent Marker",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9006,
+      "category_id": 900,
+      "item_name": "Printer Ink",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9007,
+      "category_id": 900,
+      "item_name": "Staple Wire",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9008,
+      "category_id": 900,
+      "item_name": "Ballpoint Pen",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9009,
+      "category_id": 900,
+      "item_name": "Masking Tape",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9010,
+      "category_id": 900,
+      "item_name": "Index Cards",
+      "training_months": 3
+    },
+    {
+      "inventory_id": 9011,
+      "category_id": 900,
+      "item_name": "Liquid Hand Soap",
+      "training_months": 3
+    }
+  ]
+}

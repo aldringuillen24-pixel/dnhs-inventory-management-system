@@ -65,6 +65,34 @@ test('local-model training marks unmatched forecast items for demand-only displa
         ->and($result['insufficient_history'][0]['matched_inventory_ids'])->toBe([12]);
 });
 
+test('test dataset mapping preserves unmatched items for demand-only display', function () {
+    $command = app(TrainDemandForecast::class);
+    $method = new ReflectionMethod(TrainDemandForecast::class, 'mapTestForecastInventory');
+    $forecast = [
+        'schema_version' => 2,
+        'source_type' => ForecastPayload::SOURCE_LIVE,
+        'model_version' => 'demand-linear-regression-v2',
+        'generated_at' => now()->toIso8601String(),
+        'forecasts' => [[
+            'item_name' => 'Unmatched Paper',
+            'category' => 'Supplies',
+            'unit' => 'ream',
+            'category_id' => 1,
+        ]],
+        'insufficient_history' => [[
+            'item_name' => 'Unmatched Chalk',
+            'category' => 'Supplies',
+            'unit' => 'box',
+            'category_id' => 1,
+        ]],
+    ];
+
+    $result = $method->invoke($command, $forecast);
+
+    expect($result['forecasts'][0]['matched_inventory_ids'])->toBe([])
+        ->and($result['insufficient_history'][0]['matched_inventory_ids'])->toBe([]);
+});
+
 test('local-model training maps historical items and combines their usage with database exports', function () {
     Storage::fake('forecast');
 

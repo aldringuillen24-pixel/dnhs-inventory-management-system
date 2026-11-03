@@ -1,0 +1,262 @@
+{
+  "experiment": "linear_vs_polynomial_degree_2",
+  "training_period": "2026-06 to 2026-08",
+  "test_period": [
+    "2026-09"
+  ],
+  "test_item_count": 11,
+  "test_observation_count": 11,
+  "prediction_floor": 0,
+  "metrics_scope": "MAE/RMSE are reported per item and grouped by unit; metrics across different units are not combined.",
+  "metrics_by_unit": {
+    "bottles": {
+      "linear": {
+        "mae": 5.0,
+        "rmse": 5.0
+      },
+      "polynomial_degree_2": {
+        "mae": 20.000000000000014,
+        "rmse": 20.000000000000014
+      }
+    },
+    "boxes": {
+      "linear": {
+        "mae": 11.0,
+        "rmse": 12.37380746218039
+      },
+      "polynomial_degree_2": {
+        "mae": 38.50000000000002,
+        "rmse": 40.1808412057289
+      }
+    },
+    "liters": {
+      "linear": {
+        "mae": 8.666666666666664,
+        "rmse": 8.666666666666664
+      },
+      "polynomial_degree_2": {
+        "mae": 37.00000000000001,
+        "rmse": 37.00000000000001
+      }
+    },
+    "packs": {
+      "linear": {
+        "mae": 9.333333333333332,
+        "rmse": 9.333333333333332
+      },
+      "polynomial_degree_2": {
+        "mae": 46.00000000000003,
+        "rmse": 46.00000000000003
+      }
+    },
+    "pieces": {
+      "linear": {
+        "mae": 18.11111111111111,
+        "rmse": 22.07478870332163
+      },
+      "polynomial_degree_2": {
+        "mae": 87.00000000000001,
+        "rmse": 102.81536850101742
+      }
+    },
+    "reams": {
+      "linear": {
+        "mae": 29.5,
+        "rmse": 30.008332176247315
+      },
+      "polynomial_degree_2": {
+        "mae": 134.5,
+        "rmse": 136.8959458859173
+      }
+    },
+    "rolls": {
+      "linear": {
+        "mae": 5.666666666666666,
+        "rmse": 5.666666666666666
+      },
+      "polynomial_degree_2": {
+        "mae": 24.000000000000014,
+        "rmse": 24.000000000000014
+      }
+    }
+  },
+  "per_item_metrics": [
+    {
+      "inventory_id": 9001,
+      "category_id": 900,
+      "item_name": "Bond Paper (A4)",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 35.0,
+          "rmse": 35.0
+        },
+        "polynomial_degree_2": {
+          "mae": 160.0,
+          "rmse": 160.0
+        }
+      }
+    },
+    {
+      "inventory_id": 9002,
+      "category_id": 900,
+      "item_name": "Bond Paper (Legal)",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 24.0,
+          "rmse": 24.0
+        },
+        "polynomial_degree_2": {
+          "mae": 109.0,
+          "rmse": 109.0
+        }
+      }
+    },
+    {
+      "inventory_id": 9003,
+      "category_id": 900,
+      "item_name": "Chalk",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 16.666666666666664,
+          "rmse": 16.666666666666664
+        },
+        "polynomial_degree_2": {
+          "mae": 50.00000000000003,
+          "rmse": 50.00000000000003
+        }
+      }
+    },
+    {
+      "inventory_id": 9004,
+      "category_id": 900,
+      "item_name": "Whiteboard Marker",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 14.666666666666664,
+          "rmse": 14.666666666666664
+        },
+        "polynomial_degree_2": {
+          "mae": 73.00000000000003,
+          "rmse": 73.00000000000003
+        }
+      }
+    },
+    {
+      "inventory_id": 9005,
+      "category_id": 900,
+      "item_name": "Permanent Marker",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 4.666666666666668,
+          "rmse": 4.666666666666668
+        },
+        "polynomial_degree_2": {
+          "mae": 28.000000000000014,
+          "rmse": 28.000000000000014
+        }
+      }
+    },
+    {
+      "inventory_id": 9006,
+      "category_id": 900,
+      "item_name": "Printer Ink",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 5.0,
+          "rmse": 5.0
+        },
+        "polynomial_degree_2": {
+          "mae": 20.000000000000014,
+          "rmse": 20.000000000000014
+        }
+      }
+    },
+    {
+      "inventory_id": 9007,
+      "category_id": 900,
+      "item_name": "Staple Wire",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 5.333333333333336,
+          "rmse": 5.333333333333336
+        },
+        "polynomial_degree_2": {
+          "mae": 27.000000000000014,
+          "rmse": 27.000000000000014
+        }
+      }
+    },
+    {
+      "inventory_id": 9008,
+      "category_id": 900,
+      "item_name": "Ballpoint Pen",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 35.0,
+          "rmse": 35.0
+        },
+        "polynomial_degree_2": {
+          "mae": 160.00000000000003,
+          "rmse": 160.00000000000003
+        }
+      }
+    },
+    {
+      "inventory_id": 9009,
+      "category_id": 900,
+      "item_name": "Masking Tape",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 5.666666666666666,
+          "rmse": 5.666666666666666
+        },
+        "polynomial_degree_2": {
+          "mae": 24.000000000000014,
+          "rmse": 24.000000000000014
+        }
+      }
+    },
+    {
+      "inventory_id": 9010,
+      "category_id": 900,
+      "item_name": "Index Cards",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 9.333333333333332,
+          "rmse": 9.333333333333332
+        },
+        "polynomial_degree_2": {
+          "mae": 46.00000000000003,
+          "rmse": 46.00000000000003
+        }
+      }
+    },
+    {
+      "inventory_id": 9011,
+      "category_id": 900,
+      "item_name": "Liquid Hand Soap",
+      "test_months": 1,
+      "metrics": {
+        "linear": {
+          "mae": 8.666666666666664,
+          "rmse": 8.666666666666664
+        },
+        "polynomial_degree_2": {
+          "mae": 37.00000000000001,
+          "rmse": 37.00000000000001
+        }
+      }
+    }
+  ],
+  "limitation": "Only one held-out month per item; treat results as exploratory."
+}
